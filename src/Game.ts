@@ -14,6 +14,7 @@ import { Physics } from './physics/Physics';
 import { Rover } from './rover/Rover';
 import { Rocks } from './terrain/Rocks';
 import type { TerrainData } from './terrain/TerrainData';
+import { FarTerrain } from './terrain/FarTerrain';
 import { TerrainRenderer } from './terrain/TerrainRenderer';
 
 /** Sun irradiance in scene units; everything else is relative to it. */
@@ -44,6 +45,7 @@ export class Game {
   constellationsOn = false;
   private composer: EffectComposer | null = null;
   private topHeight = 70;
+  private far: FarTerrain | null = null;
   /** Baked sun-shadow mask on the CPU (500²), to place impact flashes in the dark. */
   private shadowMask: Uint8Array | null = null;
   private flashTimer = 8;
@@ -66,7 +68,7 @@ export class Game {
     baked: THREE.Texture,
     quality: QualitySettings,
     auto: boolean,
-    extras: { stars?: Float32Array; orthoHi?: THREE.Texture; constellations?: Float32Array } = {},
+    extras: { stars?: Float32Array; orthoHi?: THREE.Texture; constellations?: Float32Array; farShadow?: THREE.Texture } = {},
   ) {
     this.q = quality;
     this.autoQuality = auto;
@@ -81,7 +83,7 @@ export class Game {
     container.appendChild(this.renderer.domElement);
 
     this.scene.background = new THREE.Color(0x000000);
-    this.camera = new THREE.PerspectiveCamera(isMobile ? 75 : 68, container.clientWidth / container.clientHeight, 0.08, 20000);
+    this.camera = new THREE.PerspectiveCamera(isMobile ? 75 : 68, container.clientWidth / container.clientHeight, 0.08, 60000);
 
     // --- Lighting: one hard sun, no sky light. Shadows are filled only by light
     // bounced off sunlit regolith (albedo ~0.12) — modelled as a hemisphere light
@@ -99,15 +101,20 @@ export class Game {
     // an upward-facing surface in shadow sees lit terrain only near its horizon
     // (~2 % of direct flat-ground irradiance), walls and undersides see much more.
     const lin = (v: number, warm = 1) => new THREE.Color().setRGB(v * warm, v, v * (2 - warm));
-    this.scene.add(new THREE.HemisphereLight(lin(0.035, 1.02), lin(0.15, 1.04), 1));
+    this.scene.add(new THREE.HemisphereLight(lin(0.05, 1.02), lin(0.16, 1.04), 1));
     this.scene.environment = this.buildEnvironment();
     const earthshine = new THREE.DirectionalLight(0xbcd4ff, SUN_INTENSITY * 0.0015);
     earthshine.position.copy(this.sky.earthDir);
     this.scene.add(earthshine);
 
     this.shadowMask = this.readMask(baked);
-    this.terrainR = new TerrainRenderer(terrain, ortho, baked, quality, extras.orthoHi);
+    this.terrainR = new TerrainRenderer(terrain, ortho, baked, quality, extras.orthoHi, extras.farShadow);
     this.scene.add(this.terrainR.group);
+    if (terrain.far) {
+      this.far = new FarTerrain(terrain, extras.farShadow, isMobile);
+      this.far.setNearRadius(quality.drawDistance - 250);
+      this.scene.add(this.far.mesh);
+    }
     this.rocks = new Rocks(terrain, physics, quality);
     this.scene.add(this.rocks.group);
 
@@ -347,6 +354,7 @@ export class Game {
     this.configureShadow();
     this.setupComposer();
     this.terrainR.setQuality(this.q);
+    this.far?.setNearRadius(this.q.drawDistance - 250);
     this.rocks.setQuality(this.q);
     this.rocks.update(this.rover.object.position);
     this.resize();
@@ -570,7 +578,8 @@ export class Game {
       const a = base + (Math.random() - 0.5) * 1.2;
       const d = 150 + Math.random() * 1500;
       const x = this.camera.position.x + Math.sin(a) * d, z = this.camera.position.z + Math.cos(a) * d;
-      const mx = t.mirrorX(x), mz = t.mirrorZ(z);
+      if (!t.inside(x, z)) continue;
+      const mx = x, mz = z;
       const ix = Math.min(499, Math.max(0, Math.floor(((mx + t.halfX) / t.meta.sizeX) * 500)));
       const iz = Math.min(499, Math.max(0, Math.floor(((mz + t.halfZ) / t.meta.sizeZ) * 500)));
       if (this.shadowMask[iz * 500 + ix] > 60) continue; // only in darkness

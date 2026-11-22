@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
-import { makeLunar, NOISE_GLSL } from '../render/lunar';
 import { mulberry32 } from '../terrain/TerrainData';
 
 /** Unit vector for azimuth (deg, from north, clockwise) and elevation (deg). North = -z, east = +x. */
@@ -72,7 +71,6 @@ export class Sky {
   readonly sunDir: THREE.Vector3;
   readonly earthDir: THREE.Vector3;
   private stars: THREE.Points;
-  private mountains: THREE.Mesh;
   private flare: Lensflare;
 
   private milkyWay: THREE.Mesh | null = null;
@@ -167,75 +165,6 @@ export class Sky {
     }
     this.flashTex = radialTexture([[0, 'rgba(255,255,255,1)'], [0.15, 'rgba(255,240,210,0.8)'], [0.4, 'rgba(255,200,150,0.15)'], [1, 'rgba(0,0,0,0)']], 64);
 
-    this.mountains = this.buildMountains();
-    this.group.add(this.mountains);
-  }
-
-  /** Far skyline: Mons Hadley (NE), Hadley Delta (S), Apennine front, as angular elevation profiles. */
-  private buildMountains(): THREE.Mesh {
-    const R = 15000, seg = 720, rows = 16;
-    const peaks: [number, number, number][] = [
-      [40, 28, 6.5], // Mons Hadley
-      [75, 18, 3.5],
-      [185, 32, 8.5], // Hadley Delta
-      [150, 22, 4.0],
-      [230, 25, 3.0],
-      [300, 40, 1.6], // Swann range / mare rim
-    ];
-    const rnd = mulberry32(9);
-    const ripple = Array.from({ length: 24 }, () => [rnd() * 6.28, rnd()]);
-    const elevAt = (az: number) => {
-      let e = 0.5;
-      for (const [pa, w, h] of peaks) {
-        let d = Math.abs(az - pa);
-        if (d > 180) d = 360 - d;
-        e += h * Math.exp(-(d * d) / (2 * (w * 0.5) ** 2));
-      }
-      for (let k = 0; k < ripple.length; k++) e += Math.sin(THREE.MathUtils.degToRad(az) * (k + 2) + ripple[k][0]) * ripple[k][1] * 0.35 / (1 + k * 0.3);
-      return Math.max(0.2, e);
-    };
-    const pos: number[] = [];
-    const idx: number[] = [];
-    for (let i = 0; i <= seg; i++) {
-      const az = (i / seg) * 360;
-      const top = elevAt(az);
-      const d = azElToDir(az, 0);
-      for (let j = 0; j <= rows; j++) {
-        const t = j / rows; // 0 = base, 1 = crest
-        const a = THREE.MathUtils.degToRad(az);
-        const bump = j > 0 && j < rows ? (Math.sin(a * 37 + j * 1.7) * 0.5 + Math.sin(a * 91 + j * 2.9) * 0.3) * 0.12 * top * t * (1 - t) : 0;
-        const el = THREE.MathUtils.lerp(-6, top, Math.pow(t, 0.7)) + bump;
-        const r = R * (1 - 0.25 * t); // crest slightly closer -> lit slopes
-        pos.push(d.x * r, Math.tan(THREE.MathUtils.degToRad(el)) * R, d.z * r);
-      }
-    }
-    for (let i = 0; i < seg; i++)
-      for (let j = 0; j < rows; j++) {
-        const a = i * (rows + 1) + j, b = a + rows + 1;
-        idx.push(a, a + 1, b, b, a + 1, b + 1);
-      }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    g.setIndex(idx);
-    g.computeVertexNormals();
-    const mat = makeLunar(new THREE.MeshLambertMaterial({ color: 0x55524d, side: THREE.DoubleSide }), 'mountain', (shader) => {
-      // Distant massifs: ridges and crater pocks as normal perturbation + albedo mottling.
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vLocal;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvLocal = position;');
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', `#include <common>\nvarying vec3 vLocal;\n${NOISE_GLSL}`)
-        .replace('#include <map_fragment>', `vec2 mp = vec2(atan(vLocal.z, vLocal.x) * 2400.0, vLocal.y);
-vec3 n1 = lnoised(mp * 0.004), n2 = lnoised(mp * 0.017 + 7.0), n3 = lnoised(mp * 0.06 + 3.0);
-vec2 mg = n1.yz * 1.2 + n2.yz * 0.6 + n3.yz * 0.3;
-diffuseColor.rgb *= 0.8 + 0.35 * n2.x + 0.15 * n3.x;`)
-        .replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
-normal = normalize(normal + vec3(mg.x, mg.y, 0.0) * 0.5);`);
-    });
-    const m = new THREE.Mesh(g, mat);
-    m.renderOrder = -8;
-    m.frustumCulled = false;
-    return m;
   }
 
   /** 1 = dark-adapted eye (all catalogue stars), lower = only the brightest remain. */
@@ -287,7 +216,7 @@ normal = normalize(normal + vec3(mg.x, mg.y, 0.0) * 0.5);`);
     // Lensflare projects points behind the camera to the front; hide it then.
     const dir = camera.getWorldDirection(new THREE.Vector3());
     this.flare.visible = dir.dot(this.sunDir) > 0.05;
-    this.mountains.position.y = groundY - camera.position.y;
+    void groundY;
   }
 }
 

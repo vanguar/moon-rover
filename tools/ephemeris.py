@@ -100,9 +100,12 @@ class LunarSky:
 
 
 APOLLO15_LANDING = datetime(1971, 7, 30, 22, 16, 29, tzinfo=timezone.utc)
+# Start of EVA-1 (Scott & Irwin drive the LRV for the first time): sun ~19° above the east.
+APOLLO15_EVA1 = datetime(1971, 7, 31, 13, 13, 0, tzinfo=timezone.utc)
+GAME_EPOCH = APOLLO15_EVA1
 
 
 if __name__ == "__main__":
-    sky = LunarSky(APOLLO15_LANDING, 26.13224, 3.63400)
+    sky = LunarSky(GAME_EPOCH, 26.13224, 3.63400)
     print("sun   az/el", sky.az_el(sky.sun()))
     print("earth az/el", sky.az_el(sky.earth()))

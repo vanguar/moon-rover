@@ -66,6 +66,23 @@ vec3 lnoised( vec2 x ) {
 }
 `;
 
+/**
+ * Lunar curvature: the surface drops by d²/2R below the camera's tangent plane
+ * (4.6 m at 4 km, 115 m at 20 km), which sets the close lunar horizon and sinks
+ * distant massifs realistically. Physics works in the local flat frame.
+ */
+export const CURVATURE_PROJECT_VERTEX = /* glsl */ `
+vec4 mvPosition = vec4( transformed, 1.0 );
+#ifdef USE_INSTANCING
+	mvPosition = instanceMatrix * mvPosition;
+#endif
+vec4 wpCurv = modelMatrix * mvPosition;
+vec2 dCurv = wpCurv.xz - cameraPosition.xz;
+wpCurv.y -= dot( dCurv, dCurv ) * ( 0.5 / 1737400.0 );
+mvPosition = viewMatrix * wpCurv;
+gl_Position = projectionMatrix * mvPosition;
+`;
+
 export const oppositionUniforms = {
   uOppB0: { value: 0.9 },
   uOppH: { value: 0.06 },
@@ -82,6 +99,7 @@ export function makeLunar(
     shader.uniforms.uOppB0 = oppositionUniforms.uOppB0;
     shader.uniforms.uOppH = oppositionUniforms.uOppH;
     shader.fragmentShader = shader.fragmentShader.replace('#include <lights_lambert_pars_fragment>', LUNAR_BRDF_GLSL);
+    shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>', CURVATURE_PROJECT_VERTEX);
     extra?.(shader);
   };
   return mat;

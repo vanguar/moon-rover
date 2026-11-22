@@ -5,7 +5,8 @@
  *
  * World frame: +x east, -z north, +y up, origin at the centre of the DTM window.
  * Heights are stored relative to the DTM minimum (meta.minHeight).
- * Outside the 4 x 4 km window the data is mirrored, so the world never ends.
+ * Outside the 4 x 4 km window the terrain continues with SLDEM2015 (LOLA +
+ * Kaguya, resampled to 112 m), blended into the DTM over the window's edge.
  */
 export interface TerrainMeta {
   source: string;
@@ -24,6 +25,14 @@ export interface TerrainMeta {
   orthoHi?: { x: number; z: number; size: number };
   epoch?: string;
   galaxy?: { pole: number[]; center: number[] };
+  far?: { n: number; spacing: number; size: number; min: number; max: number; offset: number; source: string };
+}
+
+export interface FarGrid {
+  n: number;
+  spacing: number;
+  half: number;
+  heights: Float32Array;
 }
 
 export function mulberry32(seed: number): () => number {
@@ -58,13 +67,15 @@ export class TerrainData {
   readonly halfZ: number;
   /** Crater params packed as [x, z, R, depth, rim] per crater. */
   readonly craters: Float32Array;
+  readonly far: FarGrid | null;
   private cellStart: Int32Array;
   private cellItems: Int32Array;
   private cellsX: number;
 
-  constructor(meta: TerrainMeta, heights: Float32Array) {
+  constructor(meta: TerrainMeta, heights: Float32Array, far: FarGrid | null = null) {
     this.meta = meta;
     this.heights = heights;
+    this.far = far;
     this.w = meta.width;
     this.h = meta.height;
     this.halfX = meta.sizeX / 2;
@@ -179,22 +190,53 @@ export class TerrainData {
       if (d2 >= 4 * R * R) continue;
       const q = Math.sqrt(d2) / R;
       const depth = cr[o + 3], rim = cr[o + 4];
+      // Smooth (C1) profile: bowl -depth·(1-q²)² inside, Gaussian rim crest at q = 1,
+      // so walls are rounded like degraded small craters, not sharp-edged pits.
       if (q < 1) {
-        // Parabolic bowl, slightly flattened floor.
-        const b = q * q;
-        off += rim + depth * (b * (1.15 - 0.15 * b) - 1);
-      } else {
-        const t = 2 - q; // 1 at the rim crest -> 0 at 2R
-        off += rim * t * t * t;
+        const b = 1 - q * q;
+        off -= depth * b * b;
       }
+      const e = (q - 1) / 0.38;
+      off += rim * Math.exp(-e * e);
     }
     return off;
   }
 
   /** Final ground height at any world position. */
+  /** SLDEM far-terrain height (bilinear), clamped at the grid edge. */
+  farHeight(x: number, z: number): number {
+    const f = this.far;
+    if (!f) return this.dtmHeight(this.mirrorX(x), this.mirrorZ(z));
+    let gx = (x + f.half) / f.spacing, gz = (z + f.half) / f.spacing;
+    const m = f.n - 1;
+    gx = gx < 0 ? 0 : gx > m ? m : gx;
+    gz = gz < 0 ? 0 : gz > m ? m : gz;
+    const ix = Math.min(m - 1, Math.floor(gx)), iz = Math.min(m - 1, Math.floor(gz));
+    const tx = gx - ix, tz = gz - iz;
+    const H = f.heights;
+    const a = H[iz * f.n + ix], b = H[iz * f.n + ix + 1], c = H[(iz + 1) * f.n + ix], d = H[(iz + 1) * f.n + ix + 1];
+    return a + (b - a) * tx + (c - a) * tz + (a - b - c + d) * tx * tz;
+  }
+
+  /** 0 outside the DTM window, 1 well inside (150 m blend at the edge). */
+  dtmWeight(x: number, z: number): number {
+    const e = Math.min(this.halfX - Math.abs(x), this.halfZ - Math.abs(z));
+    if (e <= 0) return 0;
+    if (e >= 150) return 1;
+    const t = e / 150;
+    return t * t * (3 - 2 * t);
+  }
+
+  /** Final ground height at any world position. */
   height(x: number, z: number): number {
-    const mx = this.mirrorX(x), mz = this.mirrorZ(z);
-    return this.dtmHeight(mx, mz) + this.craterOffset(mx, mz);
+    if (!this.far) {
+      const mx = this.mirrorX(x), mz = this.mirrorZ(z);
+      return this.dtmHeight(mx, mz) + this.craterOffset(mx, mz);
+    }
+    const w = this.dtmWeight(x, z);
+    if (w <= 0) return this.farHeight(x, z);
+    const near = this.dtmHeight(x, z) + this.craterOffset(x, z);
+    return w >= 1 ? near : near * w + this.farHeight(x, z) * (1 - w);
   }
 
   /** Unit normal via central differences; writes into out [nx, ny, nz]. */
@@ -229,5 +271,20 @@ export async function loadTerrainData(base: string, onProgress?: (f: number) => 
   const scale = (meta.maxHeight - meta.minHeight) / 65535;
   const heights = new Float32Array(png.data.length);
   for (let i = 0; i < heights.length; i++) heights[i] = png.data[i] * scale;
-  return new TerrainData(meta, heights);
+  let far: FarGrid | null = null;
+  if (meta.far) {
+    try {
+      const fr = await fetch(`${base}data/far_height.png`);
+      if (fr.ok) {
+        const fp = await decodePng16(await fr.arrayBuffer());
+        const fs = (meta.far.max - meta.far.min) / 65535;
+        const fh = new Float32Array(fp.data.length);
+        for (let i = 0; i < fh.length; i++) fh[i] = meta.far.min + fp.data[i] * fs;
+        far = { n: fp.width, spacing: meta.far.spacing, half: ((fp.width - 1) * meta.far.spacing) / 2, heights: fh };
+      }
+    } catch {
+      far = null;
+    }
+  }
+  return new TerrainData(meta, heights, far);
 }

@@ -12,7 +12,7 @@ Outputs (public/data/):
   stars.bin       Yale Bright Star Catalog in the local sky: float32 [x, y, z, Vmag, T_K] per star
   terrain.json    metadata (size in metres, min/max height, sun/earth direction, geo info)
 
-Sky: the moment of the Apollo 15 landing (1971-07-30 22:16 UTC). Sun, Earth and
+Sky: the start of Apollo 15 EVA-1 (1971-07-31 13:13 UTC). Sun, Earth and
 star directions come from tools/ephemeris.py, so lighting, shadows and the star
 field are mutually consistent and match what the crew saw.
 
@@ -30,7 +30,7 @@ from rasterio.fill import fillnodata
 from rasterio.windows import Window
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ephemeris import APOLLO15_LANDING, LunarSky  # noqa: E402
+from ephemeris import GAME_EPOCH, LunarSky  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RAW = os.path.join(ROOT, "raw_data")
@@ -163,7 +163,7 @@ def main():
     hi = read_ortho_hi(transform)
     Image.fromarray(hi).save(os.path.join(OUT, "ortho_hi.jpg"), quality=80, optimize=True, progressive=True)
 
-    sky = LunarSky(APOLLO15_LANDING, LANDING_LAT, LANDING_LON)
+    sky = LunarSky(GAME_EPOCH, LANDING_LAT, LANDING_LON)
     sun_az, sun_el = sky.az_el(sky.sun())
     earth_az, earth_el = sky.az_el(sky.earth())
     print(f"Sun az {sun_az:.1f} el {sun_el:.1f}; Earth az {earth_az:.1f} el {earth_el:.1f}")
@@ -193,7 +193,7 @@ def main():
         # Game coords: +x east, -z north, origin at the window centre.
         "landing": {"x": lx - cx, "z": -(ly - cy)},
         "orthoHi": {"x": HI_CENTER[0], "z": HI_CENTER[1], "size": HI_SIZE},
-        "epoch": APOLLO15_LANDING.isoformat(),
+        "epoch": GAME_EPOCH.isoformat(),
         "sun": {"azimuth": sun_az, "elevation": sun_el},
         "earth": {"azimuth": earth_az, "elevation": earth_el},
     }

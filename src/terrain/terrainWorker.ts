@@ -29,7 +29,7 @@ export interface BuildResult {
 self.onmessage = (e: MessageEvent) => {
   const msg = e.data;
   if (msg.type === 'init') {
-    terrain = new TerrainData(msg.meta as TerrainMeta, msg.heights as Float32Array);
+    terrain = new TerrainData(msg.meta as TerrainMeta, msg.heights as Float32Array, msg.far ?? null);
     return;
   }
   if (msg.type === 'build' && terrain) {

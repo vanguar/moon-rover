@@ -34,7 +34,7 @@ export class TerrainRenderer {
   private nextId = 1;
   private q: QualitySettings;
 
-  constructor(terrain: TerrainData, ortho: THREE.Texture, baked: THREE.Texture, quality: QualitySettings, orthoHi?: THREE.Texture) {
+  constructor(terrain: TerrainData, ortho: THREE.Texture, baked: THREE.Texture, quality: QualitySettings, orthoHi?: THREE.Texture, farShadow?: THREE.Texture) {
     this.q = quality;
     const meta = terrain.meta;
     for (const t of [ortho, baked]) {
@@ -73,6 +73,9 @@ export class TerrainRenderer {
         uHi: { value: hiRect },
         uDtmN: { value: dtmNormals },
         uNearN: { value: quality.lodDistances[1] },
+        uFarShadow: { value: farShadow ?? baked },
+        uFarHalf: { value: terrain.far ? terrain.far.half : 1e6 },
+        uHasFar: { value: farShadow && terrain.far ? 1 : 0 },
         uRover: u.uRover,
         uRtRange: u.uRtRange,
       });
@@ -97,6 +100,9 @@ uniform sampler2D uOrthoHi;
 uniform vec4 uHi;
 uniform sampler2D uDtmN;
 uniform float uNearN;
+uniform sampler2D uFarShadow;
+uniform float uFarHalf;
+uniform float uHasFar;
 ${NOISE_GLSL}
 // Sub-metre craters (below DTM and mesh resolution): one random crater per cell,
 // parabolic bowl + raised rim; returns (height, d/dx, d/dz).
@@ -116,9 +122,12 @@ vec3 craterField(vec2 p, float cell, float seed) {
       float fresh = lhash12(id + seed + 3.3);
       float depth = 2.0 * R * (0.025 + 0.09 * fresh * fresh);
       float rim = depth * (0.12 + 0.25 * fresh);
-      float h, dh;
-      if (q < 1.0) { float b = q * q; h = rim + depth * (b * (1.15 - 0.15 * b) - 1.0); dh = depth * (2.3 * q - 0.6 * q * q * q); }
-      else { float t = 2.0 - q; h = rim * t * t * t; dh = -3.0 * rim * t * t; }
+      float h = 0.0, dh = 0.0;
+      if (q < 1.0) { float b = 1.0 - q * q; h -= depth * b * b; dh += 4.0 * depth * q * b; }
+      float e = (q - 1.0) / 0.38;
+      float g = exp(-e * e);
+      h += rim * g;
+      dh += rim * g * (-2.0 * e / 0.38);
       acc += vec3(h, (r > 1e-4 ? d / r : vec2(0.0)) * dh / R);
     }
   }
@@ -128,8 +137,12 @@ vec3 craterField(vec2 p, float cell, float seed) {
         .replace(
           '#include <map_fragment>',
           `vec2 mapUv = (vWorldP.xz + 0.5 * uMapSize) / uMapSize;
+// Inside the DTM window: 1; outside (SLDEM terrain): 0, with a 150 m blend.
+vec2 edgeD = 0.5 * uMapSize - abs(vWorldP.xz);
+float wIn = uHasFar > 0.5 ? smoothstep(0.0, 150.0, min(edgeD.x, edgeD.y)) : 1.0;
 // Orthophoto is a high-sun image: its brightness is mostly albedo.
-float ortho = texture2D(uOrtho, mapUv).r;
+// Outside the window use its mean (top mip) as a neutral mare albedo.
+float ortho = mix(textureLod(uOrtho, vec2(0.5), 12.0).r, texture2D(uOrtho, mapUv).r, wIn);
 if (uHi.w > 0.5) {
   vec2 hu = (vWorldP.xz - uHi.xy) / uHi.z;
   vec2 e = smoothstep(vec2(0.0), vec2(0.03), hu) * smoothstep(vec2(0.0), vec2(0.03), 1.0 - hu);
@@ -164,7 +177,11 @@ float baked = texture2D(uBaked, mapUv).r;
 // Near the rover only large-scale DTM shadows come from the bake (soft, 2 m);
 // fine shadows come from the real-time map.
 float rtW = 1.0 - smoothstep(uRtRange * 0.5, uRtRange * 0.8, length(vWorldP.xz - uRover));
-float bakedSun = mix(smoothstep(0.2, 0.8, baked), smoothstep(0.05, 0.5, baked), rtW);`,
+float bakedSun = mix(smoothstep(0.2, 0.8, baked), smoothstep(0.05, 0.5, baked), rtW);
+if (wIn < 1.0) {
+  float farS = smoothstep(0.2, 0.8, texture2D(uFarShadow, (vWorldP.xz + uFarHalf) / (2.0 * uFarHalf)).r);
+  bakedSun = mix(farS, bakedSun, wIn);
+}`,
         )
         .replace(
           '#include <normal_fragment_begin>',
@@ -175,7 +192,7 @@ vec2 sl = (texture2D(uDtmN, mapUv).rg - 0.5) * 5.0;
 sl *= 1.0 - 2.0 * mod(floor(mapUv), 2.0);
 vec3 nDtm = normalize(vec3(-sl.x, 1.0, -sl.y));
 float farW = smoothstep(uNearN * 0.5, uNearN, length(vWorldP.xz - cameraPosition.xz));
-vec3 nBase = normalize(mix(normalize(vNormalW), nDtm, farW));
+vec3 nBase = normalize(mix(normalize(vNormalW), nDtm, farW * wIn));
 vec3 nW = normalize(nBase - vec3(grad.x, 0.0, grad.y));
 normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`,
         )
@@ -191,7 +208,7 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`,
     const nWorkers = Math.max(1, Math.min(3, (navigator.hardwareConcurrency || 2) - 1));
     for (let i = 0; i < nWorkers; i++) {
       const w = new Worker(new URL('./terrainWorker.ts', import.meta.url), { type: 'module' });
-      w.postMessage({ type: 'init', meta, heights: terrain.heights });
+      w.postMessage({ type: 'init', meta, heights: terrain.heights, far: terrain.far });
       w.onmessage = (e: MessageEvent<BuildResult>) => this.onBuilt(i, e.data);
       this.workers.push(w);
       this.busy.push(0);

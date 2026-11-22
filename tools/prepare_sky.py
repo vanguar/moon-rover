@@ -15,7 +15,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ephemeris import APOLLO15_LANDING, LunarSky  # noqa: E402
+from ephemeris import GAME_EPOCH, LunarSky  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RAW = os.path.join(ROOT, "raw_data")
@@ -28,7 +28,7 @@ def radec(ra_deg, dec_deg):
 
 
 def main():
-    sky = LunarSky(APOLLO15_LANDING, 26.13224, 3.63400)
+    sky = LunarSky(GAME_EPOCH, 26.13224, 3.63400)
     data = json.load(open(os.path.join(RAW, "constellations.lines.json"), encoding="utf-8"))
     segs = []
     for f in data["features"]:

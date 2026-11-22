@@ -48,7 +48,7 @@ async function boot(): Promise<void> {
   loadText.textContent = t('loading');
   const bin = (name: string) =>
     fetch(`${BASE}data/${name}`).then((r) => (r.ok ? r.arrayBuffer() : null)).then((b) => (b ? new Float32Array(b) : undefined)).catch(() => undefined);
-  const [terrain, ortho, baked, orthoHi, stars, constellations] = await Promise.all([
+  const [terrain, ortho, baked, orthoHi, stars, constellations, farShadow] = await Promise.all([
     loadTerrainData(BASE, (f) => {
       progress.height = f;
       showProgress();
@@ -58,12 +58,13 @@ async function boot(): Promise<void> {
     loadTexture(`${BASE}data/ortho_hi.jpg`, 'other').catch(() => undefined),
     bin('stars.bin'),
     bin('constellations.bin'),
+    loadTexture(`${BASE}data/far_shadow.png`, 'other').catch(() => undefined),
   ]);
   loadText.textContent = t('loadPhysics');
   const physics = await Physics.create(terrain);
 
   const level: QualityLevel = settings.quality === 'auto' ? autoQuality() : settings.quality;
-  const game = new Game($('#app'), terrain, physics, ortho, baked, makeQuality(level), settings.quality === 'auto', { stars, orthoHi, constellations });
+  const game = new Game($('#app'), terrain, physics, ortho, baked, makeQuality(level), settings.quality === 'auto', { stars, orthoHi, constellations, farShadow });
   (window as unknown as { game: Game }).game = game;
 
   loadText.textContent = t('loadBuild');
