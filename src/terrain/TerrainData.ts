@@ -20,6 +20,9 @@ export interface TerrainMeta {
   centerLon: number;
   landing: { x: number; z: number };
   sun: { azimuth: number; elevation: number };
+  earth?: { azimuth: number; elevation: number };
+  orthoHi?: { x: number; z: number; size: number };
+  epoch?: string;
 }
 
 export function mulberry32(seed: number): () => number {

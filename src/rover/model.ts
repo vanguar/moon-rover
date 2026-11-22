@@ -1,29 +1,105 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { InstrumentPanel } from './InstrumentPanel';
+
+export const WHEEL_VIS_R = 0.409;
+
+export interface WheelVisual {
+  steer: THREE.Group;
+  spin: THREE.Group;
+  /** Shared uniforms of this wheel's deforming materials. */
+  uniforms: { uCenter: { value: THREE.Vector3 }; uDown: { value: THREE.Vector3 }; uDefl: { value: number } };
+  blurMat: THREE.MeshBasicMaterial;
+  chevronMat: THREE.MeshStandardMaterial;
+}
 
 export interface RoverModel {
   root: THREE.Group;
-  wheels: THREE.Group[];
+  wheels: WheelVisual[];
   cockpitAnchor: THREE.Object3D;
   lights: THREE.SpotLight[];
+  panel: InstrumentPanel;
   setHeadlights(on: boolean): void;
   setSteering(a: number): void;
 }
 
-/** A six-wheeled lunar rover, local frame +z forward, +x left, +y up. */
+function canvasTex(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  draw(c.getContext('2d')!);
+  const t = new THREE.CanvasTexture(c);
+  t.anisotropy = 4;
+  return t;
+}
+
+/** Woven piano-wire mesh (LRV tyre, HGA reflector). alphaMap reads the green channel. */
+function weaveTexture(cells: number): THREE.CanvasTexture {
+  const t = canvasTex(128, 128, (g) => {
+    g.fillStyle = '#000';
+    g.fillRect(0, 0, 128, 128);
+    g.strokeStyle = '#fff';
+    g.lineWidth = 3;
+    const s = 128 / cells;
+    for (let i = -cells; i <= cells * 2; i++) {
+      g.beginPath();
+      g.moveTo(i * s, 0);
+      g.lineTo(i * s + 128, 128);
+      g.stroke();
+      g.beginPath();
+      g.moveTo(i * s, 128);
+      g.lineTo(i * s + 128, 0);
+      g.stroke();
+    }
+  });
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
+/**
+ * Deforming wheel material: the wire-mesh tyre flattens against the ground
+ * under load (vertices past the contact plane are projected onto it).
+ */
+function deformable<T extends THREE.Material>(mat: T, u: WheelVisual['uniforms']): T {
+  mat.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, u);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform vec3 uCenter;\nuniform vec3 uDown;\nuniform float uDefl;')
+      .replace(
+        '#include <project_vertex>',
+        `vec4 wpF = modelMatrix * vec4( transformed, 1.0 );
+float dd = dot( wpF.xyz - uCenter, uDown );
+float lim = ${WHEEL_VIS_R.toFixed(3)} - uDefl;
+if ( dd > lim ) wpF.xyz -= uDown * ( dd - lim );
+vec4 mvPosition = viewMatrix * wpF;
+gl_Position = projectionMatrix * mvPosition;`,
+      );
+  };
+  mat.customProgramCacheKey = () => 'wheel-deform';
+  return mat;
+}
+
+/** Lunar Roving Vehicle-style rover. Local frame: +z forward, +x left, +y up. */
 export function buildRoverModel(): RoverModel {
   const root = new THREE.Group();
 
-  // Metals are PBR: bright specular glints from the unfiltered sun.
-  const alu = new THREE.MeshStandardMaterial({ color: 0xa8acb0, metalness: 0.85, roughness: 0.38 });
-  const darkAlu = new THREE.MeshStandardMaterial({ color: 0x55595e, metalness: 0.7, roughness: 0.5 });
-  const gold = new THREE.MeshStandardMaterial({ color: 0xd9a443, metalness: 1, roughness: 0.22 });
-  const silverFoil = new THREE.MeshStandardMaterial({ color: 0xe8e8ea, metalness: 1, roughness: 0.12, side: THREE.DoubleSide });
-  const fender = new THREE.MeshStandardMaterial({ color: 0x7f8c99, metalness: 0.2, roughness: 0.6, side: THREE.DoubleSide });
-  const fabric = new THREE.MeshStandardMaterial({ color: 0x5d6b78, metalness: 0, roughness: 0.9 });
-  const black = new THREE.MeshStandardMaterial({ color: 0x18191b, metalness: 0.3, roughness: 0.6 });
-  const mesh = new THREE.MeshStandardMaterial({ color: 0xb59b6a, metalness: 0.9, roughness: 0.45 });
+  // PBR metals; they reflect the sunlit regolith via the scene environment map.
+  const alu = new THREE.MeshStandardMaterial({ color: 0xb9bdc1, metalness: 0.9, roughness: 0.35 });
+  const anod = new THREE.MeshStandardMaterial({ color: 0x6e7378, metalness: 0.7, roughness: 0.45 });
+  const gold = new THREE.MeshStandardMaterial({ color: 0xe0a94a, metalness: 1, roughness: 0.18 });
+  const mylar = new THREE.MeshStandardMaterial({ color: 0xf2f2f4, metalness: 1, roughness: 0.08 });
+  const whitePaint = new THREE.MeshStandardMaterial({ color: 0xe9e7e2, metalness: 0, roughness: 0.55 });
+  const mirror = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 1, roughness: 0.02 });
+  const fenderMat = new THREE.MeshStandardMaterial({ color: 0x9ea6ae, metalness: 0.15, roughness: 0.55, side: THREE.DoubleSide });
+  const webbing = new THREE.MeshStandardMaterial({ color: 0x6f7c88, metalness: 0, roughness: 0.95, side: THREE.DoubleSide });
+  const black = new THREE.MeshStandardMaterial({ color: 0x141516, metalness: 0.2, roughness: 0.7 });
+  const lens = new THREE.MeshStandardMaterial({ color: 0x101820, metalness: 0.3, roughness: 0.05 });
   const lampMat = new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0xfff2d8, emissiveIntensity: 0 });
+  const hgaWeave = weaveTexture(10);
+  hgaWeave.repeat.set(6, 3);
+  const hgaMesh = new THREE.MeshStandardMaterial({
+    color: 0xe3b25c, metalness: 1, roughness: 0.3, alphaMap: hgaWeave, alphaTest: 0.5, side: THREE.DoubleSide,
+  });
 
   const add = (geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number, parent: THREE.Object3D = root) => {
     const m = new THREE.Mesh(geo, mat);
@@ -33,109 +109,209 @@ export function buildRoverModel(): RoverModel {
     parent.add(m);
     return m;
   };
+  const tube = (a: THREE.Vector3, b: THREE.Vector3, r: number, mat: THREE.Material, parent: THREE.Object3D = root) => {
+    const d = new THREE.Vector3().subVectors(b, a);
+    const m = add(new THREE.CylinderGeometry(r, r, d.length(), 8), mat, (a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2, parent);
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize());
+    return m;
+  };
+  const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 
-  // Chassis: tubular frame + floor pan.
-  add(new THREE.BoxGeometry(1.7, 0.08, 3.1), darkAlu, 0, -0.12, 0);
-  for (const sx of [-1, 1]) add(new THREE.BoxGeometry(0.08, 0.1, 3.3), alu, sx * 0.86, -0.08, 0);
-  for (const z of [-1.55, -0.6, 0.6, 1.55]) add(new THREE.BoxGeometry(1.8, 0.07, 0.07), alu, 0, -0.06, z);
-
-  // Forward chassis: gold-foil insulated electronics boxes.
-  add(new THREE.BoxGeometry(1.2, 0.32, 0.7), gold, 0, 0.1, 1.15);
-  add(new THREE.BoxGeometry(0.5, 0.18, 0.45), silverFoil, 0.35, 0.34, 1.2);
-  // Aft chassis: tool rack / sample bags.
-  add(new THREE.BoxGeometry(1.4, 0.45, 0.6), gold, 0, 0.17, -1.3);
-  add(new THREE.BoxGeometry(1.2, 0.1, 0.55), alu, 0, 0.45, -1.3);
-
-  // Seats (two crew stations).
-  for (const sx of [0.42, -0.42]) {
-    add(new THREE.BoxGeometry(0.55, 0.06, 0.55), fabric, sx, 0.22, -0.3);
-    const back = add(new THREE.BoxGeometry(0.55, 0.55, 0.05), fabric, sx, 0.5, -0.6);
-    back.rotation.x = 0.25;
-    add(new THREE.BoxGeometry(0.04, 0.3, 0.5), alu, sx + 0.29, 0.35, -0.3);
-    add(new THREE.BoxGeometry(0.04, 0.3, 0.5), alu, sx - 0.29, 0.35, -0.3);
+  // ---- Chassis: aluminium tube frame in three sections, floor panels.
+  for (const sx of [-0.62, 0.62]) tube(V(sx, -0.08, -1.55), V(sx, -0.08, 1.55), 0.025, alu);
+  for (const z of [-1.55, -0.75, 0, 0.75, 1.55]) tube(V(-0.66, -0.08, z), V(0.66, -0.08, z), 0.02, alu);
+  add(new THREE.BoxGeometry(1.2, 0.012, 1.4), anod, 0, -0.1, -0.05);
+  // Suspension wishbones and dampers to each wheel.
+  for (const [x, z] of [[1, 1.25], [-1, 1.25], [1, 0], [-1, 0], [1, -1.25], [-1, -1.25]] as const) {
+    const sx = Math.sign(x);
+    tube(V(sx * 0.62, -0.06, z + 0.18), V(sx * 0.86, -0.2, z), 0.018, alu);
+    tube(V(sx * 0.62, -0.06, z - 0.18), V(sx * 0.86, -0.2, z), 0.018, alu);
+    tube(V(sx * 0.62, 0.06, z), V(sx * 0.84, -0.12, z), 0.014, anod);
   }
 
-  // Control & display console on a post between the seats.
-  add(new THREE.CylinderGeometry(0.03, 0.03, 0.42), alu, 0, 0.32, 0.5);
-  const console_ = add(new THREE.BoxGeometry(0.36, 0.22, 0.06), black, 0, 0.58, 0.52);
-  console_.rotation.x = -0.6;
-  for (let i = 0; i < 3; i++) {
-    const d = add(new THREE.CylinderGeometry(0.035, 0.035, 0.02, 16), alu, -0.1 + i * 0.1, 0.6, 0.5);
-    d.rotation.x = Math.PI / 2 - 0.6;
+  // ---- Forward chassis: batteries & signal processor in MLI, LCRU on the front.
+  add(new THREE.BoxGeometry(1.1, 0.26, 0.55), gold, 0, 0.06, 1.2);
+  add(new THREE.BoxGeometry(0.45, 0.2, 0.42), mylar, 0.3, 0.29, 1.18);
+  add(new THREE.BoxGeometry(0.45, 0.2, 0.42), mylar, -0.3, 0.29, 1.18);
+  // Battery radiator mirrors (second-surface mirrors -> strong sun glints).
+  add(new THREE.BoxGeometry(0.4, 0.01, 0.37), mirror, 0.3, 0.395, 1.18);
+  add(new THREE.BoxGeometry(0.4, 0.01, 0.37), mirror, -0.3, 0.395, 1.18);
+  // LCRU communications relay.
+  add(new THREE.BoxGeometry(0.55, 0.32, 0.24), whitePaint, 0, 0.36, 1.5);
+  add(new THREE.BoxGeometry(0.5, 0.012, 0.2), mirror, 0, 0.525, 1.5);
+  // Low-gain helical antenna (front right).
+  tube(V(-0.3, 0.52, 1.5), V(-0.32, 1.3, 1.52), 0.012, alu);
+  add(new THREE.CylinderGeometry(0.035, 0.035, 0.55, 10), mylar, -0.32, 1.55, 1.52);
+  // High-gain umbrella antenna (front left): gold-plated wire-mesh reflector on ribs.
+  tube(V(0.22, 0.52, 1.52), V(0.22, 1.95, 1.55), 0.016, alu);
+  const hga = new THREE.Group();
+  hga.position.set(0.22, 1.98, 1.58);
+  hga.rotation.set(-1.15, 0.5, 0);
+  root.add(hga);
+  add(new THREE.SphereGeometry(0.62, 24, 6, 0, Math.PI * 2, 0, 0.82), hgaMesh, 0, -0.5, 0, hga);
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2;
+    const p = V(Math.sin(0.82) * 0.62 * Math.cos(a), Math.cos(0.82) * 0.62 - 0.5, Math.sin(0.82) * 0.62 * Math.sin(a));
+    tube(V(0, 0.12, 0), p, 0.006, alu, hga);
   }
-  // T-handle hand controller in front of the driver (left seat).
+  tube(V(0, 0.12, 0), V(0, 0.32, 0), 0.01, alu, hga);
+  // TV camera (GCTA) on its mast: pan/tilt head, white body with mirror radiator, lens and sunshade.
+  tube(V(-0.12, 0.52, 1.58), V(-0.12, 1.12, 1.6), 0.022, alu);
+  const tvHead = new THREE.Group();
+  tvHead.position.set(-0.12, 1.15, 1.6);
+  root.add(tvHead);
+  add(new THREE.CylinderGeometry(0.045, 0.05, 0.07, 14), anod, 0, 0, 0, tvHead);
+  const tvBody = new THREE.Group();
+  tvBody.position.set(0, 0.1, 0);
+  tvBody.rotation.x = 0.1;
+  tvHead.add(tvBody);
+  add(new THREE.BoxGeometry(0.13, 0.12, 0.3), whitePaint, 0, 0, 0, tvBody);
+  add(new THREE.BoxGeometry(0.135, 0.004, 0.25), mirror, 0, 0.062, -0.01, tvBody);
+  const barrel = add(new THREE.CylinderGeometry(0.035, 0.035, 0.12, 16), black, 0, 0, 0.2, tvBody);
+  barrel.rotation.x = Math.PI / 2;
+  const hood = add(new THREE.CylinderGeometry(0.055, 0.04, 0.08, 16, 1, true), black, 0, 0, 0.29, tvBody);
+  hood.rotation.x = Math.PI / 2;
+  const glass = add(new THREE.CircleGeometry(0.03, 16), lens, 0, 0, 0.262, tvBody);
+  glass.castShadow = false;
+
+  // ---- Centre chassis: two seats (tubular frames + nylon webbing), footrests.
+  for (const sx of [0.4, -0.4]) {
+    add(new THREE.BoxGeometry(0.48, 0.012, 0.46), webbing, sx, 0.2, -0.32);
+    const back = add(new THREE.BoxGeometry(0.48, 0.5, 0.012), webbing, sx, 0.47, -0.6);
+    back.rotation.x = 0.22;
+    tube(V(sx - 0.25, 0.2, -0.1), V(sx - 0.25, 0.2, -0.56), 0.014, alu);
+    tube(V(sx + 0.25, 0.2, -0.1), V(sx + 0.25, 0.2, -0.56), 0.014, alu);
+    tube(V(sx - 0.25, 0.2, -0.56), V(sx - 0.25, 0.72, -0.66), 0.014, alu);
+    tube(V(sx + 0.25, 0.2, -0.56), V(sx + 0.25, 0.72, -0.66), 0.014, alu);
+    tube(V(sx - 0.25, 0.72, -0.66), V(sx + 0.25, 0.72, -0.66), 0.014, alu);
+    for (const leg of [-0.22, 0.22]) tube(V(sx + leg, -0.08, -0.12), V(sx + leg, 0.2, -0.12), 0.014, alu);
+    add(new THREE.BoxGeometry(0.36, 0.02, 0.18), anod, sx, -0.02, 0.38).rotation.x = -0.5;
+    tube(V(sx - 0.22, 0.25, -0.45), V(sx + 0.2, 0.3, -0.2), 0.012, webbing);
+  }
+  // Armrest between the seats, carrying the hand controller.
+  tube(V(0, 0.2, -0.55), V(0, 0.36, 0.0), 0.02, alu);
   const stick = new THREE.Group();
-  stick.position.set(0.22, 0.42, 0.05);
+  stick.position.set(0.12, 0.38, 0.0);
   root.add(stick);
-  add(new THREE.CylinderGeometry(0.02, 0.02, 0.22), black, 0, 0.11, 0, stick);
-  const tbar = add(new THREE.CylinderGeometry(0.018, 0.018, 0.16), black, 0, 0.22, 0, stick);
+  add(new THREE.BoxGeometry(0.08, 0.05, 0.1), anod, 0, -0.03, 0, stick);
+  add(new THREE.CylinderGeometry(0.014, 0.014, 0.2), black, 0, 0.1, 0, stick);
+  const tbar = add(new THREE.CylinderGeometry(0.016, 0.016, 0.14), black, 0, 0.2, 0, stick);
   tbar.rotation.z = Math.PI / 2;
 
-  // High-gain umbrella antenna on a mast (mirror-like mesh -> sun glints).
-  add(new THREE.CylinderGeometry(0.025, 0.025, 1.3), alu, -0.62, 0.8, -1.05);
-  const dish = add(new THREE.ConeGeometry(0.48, 0.16, 24, 1, true), silverFoil, -0.62, 1.52, -1.08);
-  dish.rotation.set(-1.0, 0.4 + Math.PI, 0);
-  add(new THREE.CylinderGeometry(0.012, 0.012, 0.3), alu, -0.62, 1.55, -1.0).rotation.x = 1.0;
-  // Low-gain helical antenna.
-  add(new THREE.CylinderGeometry(0.03, 0.03, 0.6), silverFoil, -0.78, 0.6, 1.4);
-  // TV camera on its mast.
-  add(new THREE.CylinderGeometry(0.02, 0.02, 0.8), alu, -0.3, 0.6, 1.45);
-  add(new THREE.BoxGeometry(0.18, 0.14, 0.28), silverFoil, -0.3, 1.05, 1.5);
+  // ---- Control & Display Console on its post, angled toward the crew.
+  tube(V(0, -0.08, 0.6), V(0, 0.72, 0.52), 0.025, alu);
+  const panel = new InstrumentPanel();
+  panel.group.position.set(0.06, 0.9, 0.5);
+  panel.group.rotation.set(-0.62, 0.12, 0, 'YXZ');
+  root.add(panel.group);
 
-  // Wheels with fenders.
+  // ---- Aft chassis: tool & sample pallet, sample bags, gnomon and tongs.
+  add(new THREE.BoxGeometry(1.3, 0.3, 0.55), gold, 0, 0.08, -1.3);
+  add(new THREE.BoxGeometry(1.25, 0.04, 0.5), alu, 0, 0.25, -1.3);
+  for (const [x, z] of [[-0.35, -1.25], [0.0, -1.35], [0.35, -1.25]] as const) add(new THREE.BoxGeometry(0.28, 0.3, 0.2), webbing, x, 0.42, z);
+  tube(V(0.55, 0.25, -1.5), V(0.62, 1.2, -1.6), 0.01, alu);
+  tube(V(-0.5, 0.25, -1.55), V(-0.55, 0.95, -1.6), 0.008, alu);
+
+  // ---- Second crew member in the right seat.
+  root.add(buildAstronaut(-0.4, 0.22, -0.36));
+
+  // ---- Wheels: woven wire-mesh tyre, titanium chevrons, inner bump-stop frame,
+  // spun-aluminium hub disc, traction drive; a fender above each.
   const wheelPos: [number, number][] = [[1.0, 1.25], [-1.0, 1.25], [1.0, 0], [-1.0, 0], [1.0, -1.25], [-1.0, -1.25]];
-  const tire = new THREE.CylinderGeometry(0.41, 0.41, 0.23, 28, 1, true);
-  tire.rotateZ(Math.PI / 2);
-  const hub = new THREE.CylinderGeometry(0.14, 0.14, 0.26, 16);
-  hub.rotateZ(Math.PI / 2);
-  const chevron = new THREE.BoxGeometry(0.2, 0.02, 0.05);
-  const spokeGeo = new THREE.BoxGeometry(0.02, 0.7, 0.03);
-  const wheels: THREE.Group[] = [];
-  wheelPos.forEach(([x, z]) => {
+  const weave = weaveTexture(8);
+  weave.repeat.set(26, 2);
+  const tireGeo = new THREE.CylinderGeometry(WHEEL_VIS_R, WHEEL_VIS_R, 0.23, 72, 3, true);
+  tireGeo.rotateZ(Math.PI / 2);
+  const bumpGeo = new THREE.CylinderGeometry(0.31, 0.31, 0.18, 32, 1, true);
+  bumpGeo.rotateZ(Math.PI / 2);
+  const flangeGeo = new THREE.TorusGeometry(WHEEL_VIS_R - 0.004, 0.01, 6, 72);
+  flangeGeo.rotateY(Math.PI / 2);
+  const hubDisc = new THREE.LatheGeometry(
+    [new THREE.Vector2(0.001, 0.06), new THREE.Vector2(0.1, 0.055), new THREE.Vector2(0.2, 0.03), new THREE.Vector2(0.3, 0.0), new THREE.Vector2(0.39, -0.02)],
+    32,
+  );
+  hubDisc.rotateZ(-Math.PI / 2);
+  const driveGeo = new THREE.CylinderGeometry(0.11, 0.11, 0.16, 20);
+  driveGeo.rotateZ(Math.PI / 2);
+  // V-shaped chevron: two titanium strips across the tread.
+  const chevGeo = (() => {
+    const parts: THREE.BufferGeometry[] = [];
+    for (const s of [-1, 1]) {
+      const b = new THREE.BoxGeometry(0.125, 0.012, 0.022);
+      b.rotateY(s * 0.5);
+      b.translate(s * 0.052, WHEEL_VIS_R + 0.006, s * -0.018);
+      parts.push(b);
+    }
+    return mergeGeometries(parts)!;
+  })();
+  const blurGeo = new THREE.CylinderGeometry(WHEEL_VIS_R + 0.012, WHEEL_VIS_R + 0.012, 0.235, 48, 1, true);
+  blurGeo.rotateZ(Math.PI / 2);
+  const blurTex = canvasTex(16, 64, (g) => {
+    // Motion-smeared tread: chevrons averaged into soft bands across the width.
+    const grd = g.createLinearGradient(0, 0, 0, 64);
+    grd.addColorStop(0, 'rgba(150,150,150,0.0)');
+    grd.addColorStop(0.15, 'rgba(165,165,165,0.9)');
+    grd.addColorStop(0.5, 'rgba(120,120,125,0.75)');
+    grd.addColorStop(0.85, 'rgba(165,165,165,0.9)');
+    grd.addColorStop(1, 'rgba(150,150,150,0.0)');
+    g.fillStyle = grd;
+    g.fillRect(0, 0, 16, 64);
+  });
+
+  const wheels: WheelVisual[] = wheelPos.map(([x, z]) => {
     const steer = new THREE.Group();
     steer.position.set(x, -0.35, z);
     root.add(steer);
     const spin = new THREE.Group();
     steer.add(spin);
-    add(tire, mesh, 0, 0, 0, spin);
-    add(hub, alu, 0, 0, 0, spin);
-    // Titanium chevron treads.
-    for (let k = 0; k < 18; k++) {
-      const a = (k / 18) * Math.PI * 2;
-      const c = add(chevron, alu, 0, Math.cos(a) * 0.415, Math.sin(a) * 0.415, spin);
-      c.rotation.x = -a;
-    }
-    for (let k = 0; k < 3; k++) {
-      const s = add(spokeGeo, darkAlu, 0, 0, 0, spin);
-      s.rotation.x = (k / 3) * Math.PI;
-    }
-    wheels.push(steer);
-    // Fender over the wheel (fixed to chassis).
-    const f = add(new THREE.CylinderGeometry(0.5, 0.5, 0.3, 20, 1, true, -Math.PI * 0.45, Math.PI * 0.9), fender, x, -0.25, z);
+    const uniforms = { uCenter: { value: new THREE.Vector3() }, uDown: { value: new THREE.Vector3(0, -1, 0) }, uDefl: { value: 0.02 } };
+    const tireMat = deformable(
+      new THREE.MeshStandardMaterial({ color: 0xa9a59c, metalness: 0.85, roughness: 0.42, alphaMap: weave, alphaTest: 0.45, side: THREE.DoubleSide }),
+      uniforms,
+    );
+    const chevronMat = deformable(new THREE.MeshStandardMaterial({ color: 0x9c9da1, metalness: 0.8, roughness: 0.35, transparent: true }), uniforms);
+    const flangeMat = deformable(new THREE.MeshStandardMaterial({ color: 0xb8b9bc, metalness: 0.85, roughness: 0.3 }), uniforms);
+    add(tireGeo, tireMat, 0, 0, 0, spin);
+    add(bumpGeo, anod, 0, 0, 0, spin);
+    add(flangeGeo, flangeMat, 0.115, 0, 0, spin);
+    add(flangeGeo, flangeMat, -0.115, 0, 0, spin);
+    const outward = Math.sign(x);
+    const disc = add(hubDisc, alu, outward * 0.02, 0, 0, spin);
+    if (outward < 0) disc.rotation.y = Math.PI;
+    add(driveGeo, anod, -outward * 0.06, 0, 0, spin);
+    const chevs: THREE.BufferGeometry[] = [];
+    const m4 = new THREE.Matrix4();
+    for (let k = 0; k < 18; k++) chevs.push(chevGeo.clone().applyMatrix4(m4.makeRotationX((k / 18) * Math.PI * 2)));
+    add(mergeGeometries(chevs)!, chevronMat, 0, 0, 0, spin);
+    const blurMat = new THREE.MeshBasicMaterial({ map: blurTex, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
+    const blur = add(blurGeo, blurMat, 0, 0, 0, steer);
+    blur.castShadow = false;
+    // Fender covering the top 150° of the wheel.
+    const f = add(new THREE.CylinderGeometry(0.47, 0.47, 0.32, 24, 1, true, Math.PI * 0.08, Math.PI * 0.84), fenderMat, x, -0.33, z);
     f.rotation.set(0, 0, Math.PI / 2);
+    return { steer, spin, uniforms, blurMat, chevronMat };
   });
 
-  // Headlights: two lamps at the front with spot lights.
+  // ---- Headlights (not on the real LRV; a game concession) at the front corners.
   const lights: THREE.SpotLight[] = [];
-  for (const sx of [0.55, -0.55]) {
-    add(new THREE.BoxGeometry(0.16, 0.1, 0.06), black, sx, 0.32, 1.56);
-    const lens = add(new THREE.CircleGeometry(0.045, 16), lampMat, sx, 0.32, 1.595);
-    lens.castShadow = false;
-    const l = new THREE.SpotLight(0xfff2d8, 0, 120, 0.5, 0.55, 2);
-    l.position.set(sx, 0.32, 1.6);
-    l.target.position.set(sx * 1.6, -1.0, 22);
+  for (const sx of [0.5, -0.5]) {
+    add(new THREE.BoxGeometry(0.14, 0.09, 0.07), black, sx, 0.2, 1.5);
+    const l = add(new THREE.CircleGeometry(0.04, 16), lampMat, sx, 0.2, 1.536);
     l.castShadow = false;
-    root.add(l, l.target);
-    lights.push(l);
+    const s = new THREE.SpotLight(0xfff2d8, 0, 120, 0.5, 0.55, 2);
+    s.position.set(sx, 0.2, 1.56);
+    s.target.position.set(sx * 1.6, -1.0, 22);
+    s.castShadow = false;
+    root.add(s, s.target);
+    lights.push(s);
   }
 
   // Merge static parts per material (hundreds of meshes -> a handful of draw calls).
-  const dynamic = new Set<THREE.Object3D>([stick, ...wheels]);
-  bakeByMaterial(root, dynamic);
-  for (const w of wheels) bakeByMaterial(w.children[0], new Set());
+  bakeByMaterial(root, new Set<THREE.Object3D>([stick, panel.group, ...wheels.map((w) => w.steer)]));
+  for (const w of wheels) bakeByMaterial(w.spin, new Set());
 
   const cockpitAnchor = new THREE.Object3D();
-  cockpitAnchor.position.set(0.42, 1.18, -0.3);
+  cockpitAnchor.position.set(0.4, 1.22, -0.34);
   root.add(cockpitAnchor);
 
   return {
@@ -143,6 +319,7 @@ export function buildRoverModel(): RoverModel {
     wheels,
     cockpitAnchor,
     lights,
+    panel,
     setHeadlights(on: boolean) {
       for (const l of lights) l.intensity = on ? 140 : 0;
       lampMat.emissiveIntensity = on ? 6 : 0;
@@ -153,6 +330,42 @@ export function buildRoverModel(): RoverModel {
   };
 }
 
+/** Seated suited astronaut (A7LB suit, PLSS backpack, gold visor down). */
+function buildAstronaut(x: number, y: number, z: number): THREE.Group {
+  const g = new THREE.Group();
+  const suit = new THREE.MeshStandardMaterial({ color: 0xe6e3dc, roughness: 0.85, metalness: 0 });
+  const joints = new THREE.MeshStandardMaterial({ color: 0xcfcbc2, roughness: 0.9 });
+  const visor = new THREE.MeshStandardMaterial({ color: 0xd9a441, metalness: 1, roughness: 0.05 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x2b2d30, roughness: 0.6, metalness: 0.3 });
+  const red = new THREE.MeshStandardMaterial({ color: 0xa8322a, roughness: 0.6 });
+  const m = (geo: THREE.BufferGeometry, mat: THREE.Material, px: number, py: number, pz: number, rx = 0, ry = 0, rz = 0) => {
+    const o = new THREE.Mesh(geo, mat);
+    o.position.set(px, py, pz);
+    o.rotation.set(rx, ry, rz);
+    o.castShadow = o.receiveShadow = true;
+    g.add(o);
+    return o;
+  };
+  m(new THREE.CapsuleGeometry(0.2, 0.3, 4, 12), suit, 0, 0.42, -0.08, -0.2);
+  m(new THREE.BoxGeometry(0.46, 0.6, 0.2), suit, 0, 0.5, -0.32, -0.2);
+  m(new THREE.BoxGeometry(0.3, 0.12, 0.14), dark, 0, 0.86, -0.3, -0.2);
+  m(new THREE.SphereGeometry(0.17, 20, 14), suit, 0, 0.88, 0.0);
+  m(new THREE.SphereGeometry(0.172, 20, 12, -Math.PI * 0.42, Math.PI * 0.84, Math.PI * 0.18, Math.PI * 0.45), visor, 0, 0.88, 0.005);
+  m(new THREE.BoxGeometry(0.2, 0.12, 0.08), dark, 0, 0.55, 0.15, -0.2);
+  m(new THREE.BoxGeometry(0.06, 0.03, 0.02), red, 0.05, 0.59, 0.195, -0.2);
+  for (const s of [-1, 1]) {
+    m(new THREE.CapsuleGeometry(0.085, 0.32, 4, 10), suit, s * 0.11, 0.08, 0.15, Math.PI / 2 - 0.15);
+    m(new THREE.SphereGeometry(0.09, 10, 8), joints, s * 0.11, 0.06, 0.36);
+    m(new THREE.CapsuleGeometry(0.075, 0.3, 4, 10), suit, s * 0.11, -0.12, 0.47, 0.45);
+    m(new THREE.BoxGeometry(0.13, 0.1, 0.25), joints, s * 0.11, -0.3, 0.58, -0.3);
+    m(new THREE.CapsuleGeometry(0.07, 0.24, 4, 10), suit, s * 0.25, 0.48, 0.02, 0.6, 0, s * 0.15);
+    m(new THREE.CapsuleGeometry(0.06, 0.22, 4, 10), suit, s * 0.26, 0.32, 0.2, 1.3);
+    m(new THREE.SphereGeometry(0.065, 10, 8), dark, s * 0.26, 0.28, 0.36);
+  }
+  g.position.set(x, y, z);
+  return g;
+}
+
 /** Replace mesh descendants of `group` (outside `skip` subtrees) by one merged mesh per material. */
 function bakeByMaterial(group: THREE.Object3D, skip: Set<THREE.Object3D>): void {
   group.updateMatrixWorld(true);
@@ -161,21 +374,21 @@ function bakeByMaterial(group: THREE.Object3D, skip: Set<THREE.Object3D>): void 
   const victims: THREE.Mesh[] = [];
   const visit = (o: THREE.Object3D) => {
     if (skip.has(o)) return;
-    const m = o as THREE.Mesh;
-    if (m.isMesh && m !== group) {
-      const g = m.geometry.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld));
-      if (!g.index) return;
-      const mat = m.material as THREE.Material;
+    const mesh = o as THREE.Mesh;
+    if (mesh.isMesh && mesh !== group) {
+      let geo = mesh.geometry.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, mesh.matrixWorld));
+      if (!geo.index) geo = indexed(geo);
+      const mat = mesh.material as THREE.Material;
       if (!byMat.has(mat)) byMat.set(mat, []);
-      byMat.get(mat)!.push(g);
-      victims.push(m);
+      byMat.get(mat)!.push(normalizeAttrs(geo));
+      victims.push(mesh);
     }
     for (const c of o.children) visit(c);
   };
   for (const c of group.children) visit(c);
   for (const v of victims) v.parent?.remove(v);
   for (const [mat, geos] of byMat) {
-    const merged = mergeGeometries(geos.map((g) => (g.getAttribute('uv') ? g : withUv(g))), false);
+    const merged = mergeGeometries(geos, false);
     if (!merged) continue;
     const mesh = new THREE.Mesh(merged, mat);
     mesh.castShadow = mesh.receiveShadow = true;
@@ -183,7 +396,16 @@ function bakeByMaterial(group: THREE.Object3D, skip: Set<THREE.Object3D>): void 
   }
 }
 
-function withUv(g: THREE.BufferGeometry): THREE.BufferGeometry {
-  g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.getAttribute('position').count * 2), 2));
+function indexed(g: THREE.BufferGeometry): THREE.BufferGeometry {
+  const n = g.getAttribute('position').count;
+  g.setIndex(Array.from({ length: n }, (_, i) => i));
+  return g;
+}
+
+/** Keep only position/normal/uv so differently built geometries can merge. */
+function normalizeAttrs(g: THREE.BufferGeometry): THREE.BufferGeometry {
+  for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(name)) g.deleteAttribute(name);
+  if (!g.getAttribute('uv')) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.getAttribute('position').count * 2), 2));
+  if (!g.getAttribute('normal')) g.computeVertexNormals();
   return g;
 }

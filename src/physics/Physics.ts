@@ -9,7 +9,13 @@ const PATCH_SIZE = 128;
 const PATCH_CELLS = 256; // 0.5 m cells: matches the finest render LOD and small craters
 const PATCH_RECENTER = 32;
 
-export const FIXED_DT = 1 / 60;
+export const FIXED_DT = 1 / 120;
+
+export interface ContactForce {
+  c1: number;
+  c2: number;
+  force: number;
+}
 
 /**
  * Rapier world in lunar gravity. No air: rigid bodies get zero linear damping
@@ -23,12 +29,17 @@ export class Physics {
   private patchX = Number.NaN;
   private patchZ = Number.NaN;
   private acc = 0;
+  private events: RAPIER.EventQueue;
+  /** Contact force events (above each collider's threshold) since the last read. */
+  private contacts: ContactForce[] = [];
 
   constructor(R: Rapier, terrain: TerrainData) {
     this.R = R;
     this.terrain = terrain;
     this.world = new R.World({ x: 0, y: -MOON_GRAVITY, z: 0 });
     this.world.timestep = FIXED_DT;
+    this.events = new R.EventQueue(true);
+    this.world.numSolverIterations = 8;
   }
 
   static async create(terrain: TerrainData): Promise<Physics> {
@@ -52,13 +63,19 @@ export class Physics {
     }
     const desc = this.R.ColliderDesc.heightfield(n, n, heights, { x: PATCH_SIZE, y: 1, z: PATCH_SIZE })
       .setTranslation(cx, 0, cz)
-      .setFriction(0.9)
+      .setFriction(0.7)
       .setRestitution(0.05);
     const next = this.world.createCollider(desc);
     if (this.patch) this.world.removeCollider(this.patch, false);
     this.patch = next;
     this.patchX = cx;
     this.patchZ = cz;
+  }
+
+  takeContacts(): ContactForce[] {
+    const c = this.contacts;
+    this.contacts = [];
+    return c;
   }
 
   /**
@@ -68,13 +85,16 @@ export class Physics {
   step(dt: number, pre: (h: number) => void): number {
     this.acc += Math.min(dt, 0.1);
     let steps = 0;
-    while (this.acc >= FIXED_DT && steps < 5) {
+    while (this.acc >= FIXED_DT && steps < 8) {
       pre(FIXED_DT);
-      this.world.step();
+      this.world.step(this.events);
+      this.events.drainContactForceEvents((e) => {
+        if (this.contacts.length < 64) this.contacts.push({ c1: e.collider1(), c2: e.collider2(), force: e.totalForceMagnitude() });
+      });
       this.acc -= FIXED_DT;
       steps++;
     }
-    if (steps === 5) this.acc = 0;
+    if (steps === 8) this.acc = 0;
     return this.acc / FIXED_DT;
   }
 }

@@ -7,20 +7,30 @@ Inputs  (raw_data/, not committed):
 Outputs (public/data/):
   heightmap.png   16-bit grayscale PNG, heights normalized to [min, max]
   ortho.jpg       orthophoto, downscaled, same footprint
-  shadow.png      8-bit baked terrain cast-shadow mask for the game sun
-  terrain.json    metadata (size in metres, min/max height, sun direction, geo info)
+  ortho_hi.jpg    orthophoto at ~0.6 m/px for the central area (LM site + east rille rim)
+  shadow.png      8-bit baked terrain cast-shadow mask for the real sun position
+  stars.bin       Yale Bright Star Catalog in the local sky: float32 [x, y, z, Vmag, T_K] per star
+  terrain.json    metadata (size in metres, min/max height, sun/earth direction, geo info)
+
+Sky: the moment of the Apollo 15 landing (1971-07-30 22:16 UTC). Sun, Earth and
+star directions come from tools/ephemeris.py, so lighting, shadows and the star
+field are mutually consistent and match what the crew saw.
 
 Usage: python tools/prepare_terrain.py
 """
 import json
 import math
 import os
+import sys
 
 import numpy as np
 import rasterio
 from PIL import Image
 from rasterio.fill import fillnodata
 from rasterio.windows import Window
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from ephemeris import APOLLO15_LANDING, LunarSky  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RAW = os.path.join(ROOT, "raw_data")
@@ -35,12 +45,12 @@ LANDING_LAT, LANDING_LON = 26.13224, 3.63400  # Apollo 15 LM "Falcon"
 # 4 x 4 km window (2000 x 2000 px at 2 m/px): Hadley Rille on the west, LM site near centre.
 COL0, ROW0, SIZE = 400, 5100, 2000
 ORTHO_OUT = 4096
-SHADOW_OUT = 1024
-# Game sun: low and harsh, from the south-east (roughly along the rille axis,
-# so part of the rille floor stays lit). The orthophoto is a high-sun image,
-# so its baked shading is mild and works as albedo.
-GAME_SUN_AZ_DEG = 135.0
-GAME_SUN_ELEV_DEG = 9.0
+SHADOW_OUT = 2000
+# High-resolution ortho tile (game coords, metres): LM site and the east rim of the rille.
+HI_CENTER = (-200.0, 0.0)
+HI_SIZE = 2458.0
+HI_OUT = 4096
+STAR_FILE = os.path.join(RAW, "bsc5-short.json")
 
 
 def read_dtm():
@@ -53,6 +63,47 @@ def read_dtm():
     if (~valid).any():
         h = fillnodata(h, mask=valid.astype(np.uint8), max_search_distance=200, smoothing_iterations=2)
     return h, transform
+
+
+def read_ortho_hi(transform):
+    left, top = transform.c, transform.f
+    half = SIZE * 2.0 / 2
+    with rasterio.open(ORTHO_FILE) as o:
+        x0 = left + half + HI_CENTER[0] - HI_SIZE / 2
+        y0 = top - half - HI_CENTER[1] + HI_SIZE / 2  # game -z is north
+        c0 = int(round((x0 - o.transform.c) / o.res[0]))
+        r0 = int(round((o.transform.f - y0) / o.res[1]))
+        n = int(round(HI_SIZE / o.res[0]))
+        img = o.read(1, window=Window(c0, r0, n, n), out_shape=(HI_OUT, HI_OUT),
+                     resampling=rasterio.enums.Resampling.lanczos)
+    m = img > 0
+    return np.where(m, img, int(img[m].mean())).astype(np.uint8)
+
+
+def write_stars(sky, path):
+    def parse_ra(s):
+        h, m, sec = s.replace("h", "").replace("m", "").replace("s", "").split()
+        return (float(h) + float(m) / 60 + float(sec) / 3600) * 15
+
+    def parse_dec(s):
+        sign = -1 if s.strip().startswith("-") else 1
+        d, m, sec = s.replace("°", " ").replace("′", " ").replace("″", " ").replace("+", "").replace("-", "").split()
+        return sign * (float(d) + float(m) / 60 + float(sec) / 3600)
+
+    rows = []
+    for st in json.load(open(STAR_FILE, encoding="utf-8")):
+        try:
+            ra, dec, v = parse_ra(st["RA"]), parse_dec(st["Dec"]), float(st["V"])
+        except (KeyError, ValueError):
+            continue
+        rows.append((ra, dec, v, float(st.get("K") or 5800)))
+    a = np.array(rows)
+    ra, dec = np.radians(a[:, 0]), np.radians(a[:, 1])
+    icrf = np.stack([np.cos(dec) * np.cos(ra), np.cos(dec) * np.sin(ra), np.sin(dec)], axis=1)
+    g = sky.to_game(icrf)
+    out = np.concatenate([g, a[:, 2:3], a[:, 3:4]], axis=1).astype(np.float32)
+    out.tofile(path)
+    print(f"Stars: {len(out)} (brightest V={a[:, 2].min():.2f})")
 
 
 def read_ortho(transform):
@@ -79,7 +130,8 @@ def bake_shadow(h, px, az_deg, el_deg, out_size):
     tan_el = math.tan(el)
     rows, cols = np.mgrid[0:out_size, 0:out_size].astype(np.float64)
     lit = np.ones_like(hh)
-    max_d = int(1.5 * out_size)
+    relief = float(hh.max() - hh.min())
+    max_d = min(int(1.5 * out_size), int(relief / (tan_el * step)) + 2)
     for d in range(1, max_d):
         rr, cc = rows + dr * d, cols + dc * d
         inside = (rr >= 0) & (rr <= out_size - 1) & (cc >= 0) & (cc <= out_size - 1)
@@ -108,7 +160,16 @@ def main():
     ortho = np.where(m, ortho, int(ortho[m].mean())).astype(np.uint8)
     Image.fromarray(ortho).save(os.path.join(OUT, "ortho.jpg"), quality=82, optimize=True, progressive=True)
 
-    shadow = bake_shadow(h, 2.0, GAME_SUN_AZ_DEG, GAME_SUN_ELEV_DEG, SHADOW_OUT)
+    hi = read_ortho_hi(transform)
+    Image.fromarray(hi).save(os.path.join(OUT, "ortho_hi.jpg"), quality=80, optimize=True, progressive=True)
+
+    sky = LunarSky(APOLLO15_LANDING, LANDING_LAT, LANDING_LON)
+    sun_az, sun_el = sky.az_el(sky.sun())
+    earth_az, earth_el = sky.az_el(sky.earth())
+    print(f"Sun az {sun_az:.1f} el {sun_el:.1f}; Earth az {earth_az:.1f} el {earth_el:.1f}")
+    write_stars(sky, os.path.join(OUT, "stars.bin"))
+
+    shadow = bake_shadow(h, 2.0, sun_az, sun_el, SHADOW_OUT)
     Image.fromarray((shadow * 255).astype(np.uint8)).save(os.path.join(OUT, "shadow.png"), optimize=True)
 
     left, top = transform.c, transform.f
@@ -131,7 +192,10 @@ def main():
         "centerLon": lon_c,
         # Game coords: +x east, -z north, origin at the window centre.
         "landing": {"x": lx - cx, "z": -(ly - cy)},
-        "sun": {"azimuth": GAME_SUN_AZ_DEG, "elevation": GAME_SUN_ELEV_DEG},
+        "orthoHi": {"x": HI_CENTER[0], "z": HI_CENTER[1], "size": HI_SIZE},
+        "epoch": APOLLO15_LANDING.isoformat(),
+        "sun": {"azimuth": sun_az, "elevation": sun_el},
+        "earth": {"azimuth": earth_az, "elevation": earth_el},
     }
     with open(os.path.join(OUT, "terrain.json"), "w") as f:
         json.dump(meta, f, indent=2)

@@ -71,7 +71,7 @@ export class Game {
     // --- Lighting: one hard sun, no sky light. Shadows are filled only by light
     // bounced off sunlit regolith (albedo ~0.12) — modelled as a hemisphere light
     // that reaches surfaces facing down/sideways — and by faint earthshine.
-    this.sky = new Sky(terrain.meta.sun.azimuth, terrain.meta.sun.elevation, quality.stars);
+    this.sky = new Sky(terrain.meta.sun.azimuth, terrain.meta.sun.elevation, quality.stars, terrain.meta.earth);
     this.scene.add(this.sky.group);
     this.sun = new THREE.DirectionalLight(0xfff8f0, SUN_INTENSITY);
     this.sun.castShadow = true;
@@ -94,6 +94,7 @@ export class Game {
     physics.updatePatch(startX, startZ, true);
     this.rover = new Rover(physics, terrain, this.sky.sunDir, startX, startZ, Math.PI - THREE.MathUtils.degToRad(270));
     this.scene.add(this.rover.object);
+    this.rover.isRock = (c) => this.rocks.sizeOf(c);
 
     this.dust = new Dust(terrain, quality.dustParticles, this.sky.sunDir);
     this.scene.add(this.dust.points);
@@ -285,7 +286,10 @@ export class Game {
     this.input.update(dt);
     const rover = this.rover;
     this.physics.step(dt, (h) => rover.step(h, this.input.drive));
+    rover.onContacts(this.physics.takeContacts());
     rover.sync(dt);
+    this.updatePanel(dt);
+    rover.knocks.length = 0;
     const p = rover.object.position;
     this.physics.updatePatch(p.x, p.z);
     this.rocks.update(p);
@@ -307,6 +311,28 @@ export class Game {
     this.audio.update(dt, rover, this.input.drive.steer, this.hud.warningLevel);
     this.adaptQuality(dt);
     this.renderer.render(this.scene, this.camera);
+  }
+
+  private updatePanel(dt: number): void {
+    const r = this.rover;
+    const p = r.object.position;
+    const t = this.terrain;
+    const { roll, pitch, heading } = r.attitude();
+    const lm = t.meta.landing;
+    const dx = lm.x - p.x, dz = lm.z - p.z;
+    let bearing = (Math.atan2(dx, -dz) * 180) / Math.PI;
+    if (bearing < 0) bearing += 360;
+    const n = [0, 1, 0];
+    t.normal(p.x, p.z, n, 1.5);
+    r.model.panel.update(dt, {
+      speedKmh: Math.abs(r.speed) * 3.6, pitch, roll, heading, bearing,
+      range: Math.hypot(dx, dz) / 1000, distance: r.odometer / 1000, battery: r.battery,
+      volts: r.volts, battTempC: r.battTemp, motorTempC: r.motorTemp,
+      slope: (Math.acos(Math.min(1, n[1])) * 180) / Math.PI, elevation: p.y + t.meta.minHeight,
+      parkBrake: r.parkBrake || this.input.drive.handbrake, headlights: r.headlights,
+      warnRoll: Math.abs(roll) > 30 || Math.abs(pitch) > 30, warnBatt: r.battery < 0.15,
+      warnTemp: Math.max(...r.motorTemp) > 110,
+    });
   }
 
   private updateSun(p: THREE.Vector3): void {

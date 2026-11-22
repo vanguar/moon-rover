@@ -74,10 +74,10 @@ export class Sky {
   private stars: THREE.Points;
   private mountains: THREE.Mesh;
 
-  constructor(sunAz: number, sunEl: number, starCount: number) {
+  constructor(sunAz: number, sunEl: number, starCount: number, earthPos?: { azimuth: number; elevation: number }) {
     this.sunDir = azElToDir(sunAz, sunEl);
     // Earth from Hadley Rille (26.1 N, 3.6 E): az ≈ 188°, el ≈ 64° (librations ignored).
-    this.earthDir = azElToDir(188, 63.8);
+    this.earthDir = earthPos ? azElToDir(earthPos.azimuth, earthPos.elevation) : azElToDir(188, 63.8);
 
     // Stars: magnitude-distributed points, fixed screen size.
     const rnd = mulberry32(42);
