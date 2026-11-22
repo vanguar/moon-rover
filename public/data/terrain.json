@@ -1,0 +1,20 @@
+{
+  "source": "LROC NAC DTM NAC_DTM_APOLLO15 + orthophoto M111571816 (NASA/GSFC/Arizona State University)",
+  "width": 2000,
+  "height": 2000,
+  "pixelSize": 2.0,
+  "sizeX": 3998.0,
+  "sizeZ": 3998.0,
+  "minHeight": -2242.03076171875,
+  "maxHeight": -1889.947998046875,
+  "centerLat": 26.133787622924398,
+  "centerLon": 3.605372332144185,
+  "landing": {
+    "x": 780.2312513021752,
+    "z": 46.92911226104479
+  },
+  "sun": {
+    "azimuth": 135.0,
+    "elevation": 9.0
+  }
+}
