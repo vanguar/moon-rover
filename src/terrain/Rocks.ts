@@ -70,7 +70,7 @@ function rockGeometry(seed: number, detail: number): THREE.BufferGeometry {
 
 /** Layered basalt slab: lava-flow units exposed in the rille wall. */
 function outcropGeometry(seed: number): THREE.BufferGeometry {
-  const g = new THREE.BoxGeometry(1, 1, 1, 14, 10, 8);
+  const g = new THREE.BoxGeometry(1, 1, 1, 8, 5, 4);
   const p = g.getAttribute('position') as THREE.BufferAttribute;
   const rnd = mulberry32(seed);
   const noise = displaceNoise(rnd);
@@ -117,14 +117,17 @@ export class Rocks {
     this.q = quality;
     const mat = makeLunar(new THREE.MeshLambertMaterial({ color: 0x8e8a83 }), 'rock');
     for (let v = 0; v < VARIANTS; v++) {
-      const m = new THREE.InstancedMesh(rockGeometry(100 + v * 7, 2), mat, this.capacity());
+      // Cobbles are small on screen: 80-triangle shapes are enough.
+      const m = new THREE.InstancedMesh(rockGeometry(100 + v * 7, 1), mat, this.capacity());
       this.prep(m);
       this.meshes.push(m);
     }
-    this.boulderNear = new THREE.InstancedMesh(rockGeometry(311, 4), mat, 1500);
+    this.boulderNear = new THREE.InstancedMesh(rockGeometry(311, 3), mat, 1500);
     this.boulderFar = new THREE.InstancedMesh(rockGeometry(311, 1), mat, 6000);
-    this.outcropMesh = new THREE.InstancedMesh(outcropGeometry(5), mat, 1500);
+    this.outcropMesh = new THREE.InstancedMesh(outcropGeometry(5), mat, 800);
     for (const m of [this.boulderNear, this.boulderFar, this.outcropMesh]) this.prep(m);
+    // Far boulders are not drawn into the real-time shadow map (instanced meshes are not culled).
+    this.boulderFar.castShadow = false;
     this.placeBoulders();
   }
 

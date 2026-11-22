@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import type { Rover } from '../rover/Rover';
 import type { TerrainData } from '../terrain/TerrainData';
 
@@ -49,13 +50,13 @@ export class Hud {
   update(dt: number, rover: Rover, fps: number): void {
     const p = rover.object.position;
     const { roll, pitch, heading } = rover.attitude();
-    const t = this.terrain;
+    const ter = this.terrain;
     const e = this.els;
 
     e.speed.textContent = (Math.abs(rover.speed) * 3.6).toFixed(1);
-    const altAbs = p.y + t.meta.minHeight;
+    const altAbs = p.y + ter.meta.minHeight;
     e.alt.textContent = `${altAbs.toFixed(0)}`;
-    t.normal(p.x, p.z, this.slopeN, 1.5);
+    ter.normal(p.x, p.z, this.slopeN, 1.5);
     const slope = (Math.acos(Math.min(1, this.slopeN[1])) * 180) / Math.PI;
     e.slope.textContent = slope.toFixed(1);
     e.odo.textContent = (rover.odometer / 1000).toFixed(2);
@@ -70,20 +71,21 @@ export class Hud {
     e.pitch.textContent = `${pitch.toFixed(0)}°`;
     e.lights.classList.toggle('on', rover.headlights);
     e.fps.textContent = fps.toFixed(0);
-    const lat = t.meta.centerLat - (p.z / 1737400) * (180 / Math.PI);
-    const lon = t.meta.centerLon + (p.x / (1737400 * Math.cos((lat * Math.PI) / 180))) * (180 / Math.PI);
+    const lat = ter.meta.centerLat - (p.z / 1737400) * (180 / Math.PI);
+    const lon = ter.meta.centerLon + (p.x / (1737400 * Math.cos((lat * Math.PI) / 180))) * (180 / Math.PI);
     e.coords.textContent = `${lat.toFixed(4)}°N ${lon.toFixed(4)}°E`;
 
     // Warnings.
     const warns: string[] = [];
     let level = 0;
-    if (Math.abs(roll) > 30) { warns.push(`КРЕН ${Math.abs(roll).toFixed(0)}°`); level = 2; }
-    else if (Math.abs(roll) > 22) { warns.push('КРЕН'); level = Math.max(level, 1); }
-    if (Math.abs(pitch) > 30) { warns.push(`ТАНГАЖ ${Math.abs(pitch).toFixed(0)}°`); level = 2; }
-    if (rover.battery <= 0) { warns.push('БАТАРЕЯ РАЗРЯЖЕНА — РЕЗЕРВ 10%'); level = 2; }
-    else if (rover.battery < 0.15) { warns.push('НИЗКИЙ ЗАРЯД'); level = Math.max(level, 1); }
-    if (!t.inside(p.x, p.z)) { warns.push('ВНЕ УЧАСТКА DTM'); level = Math.max(level, 1); }
-    if (Math.abs(roll) > 100) warns.push('R — ПОСТАВИТЬ НА КОЛЁСА');
+    if (Math.abs(roll) > 30) { warns.push(`${t('wRoll')} ${Math.abs(roll).toFixed(0)}°`); level = 2; }
+    else if (Math.abs(roll) > 22) { warns.push(t('wRoll')); level = Math.max(level, 1); }
+    if (Math.abs(pitch) > 30) { warns.push(`${t('wPitch')} ${Math.abs(pitch).toFixed(0)}°`); level = 2; }
+    if (rover.battery <= 0) { warns.push(t('wBattEmpty')); level = 2; }
+    else if (rover.battery < 0.15) { warns.push(t('wBattLow')); level = Math.max(level, 1); }
+    if (!ter.inside(p.x, p.z)) { warns.push(t('wOutside')); level = Math.max(level, 1); }
+    if (Math.abs(roll) > 100) warns.push(t('wReset'));
+    if (rover.parkBrake && rover.motorLoadFactor === 0 && Math.abs(rover.speed) < 0.05) warns.push(t('wPark'));
     this.warningLevel = level;
     e.warn.textContent = warns.join(' · ');
     e.warn.className = level === 2 ? 'danger' : level === 1 ? 'caution' : '';

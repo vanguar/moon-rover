@@ -130,6 +130,10 @@ class RoverProcessor extends AudioWorkletProcessor {
   private breathF2 = Biquad.bandpass(2200, 1.5);
   private breathHp = Biquad.highpass(300, 0.7);
   private seed = 22222;
+  /** Pending knocks: [side -1..1, strength, hardness]. */
+  private knocks: [number, number, number][] = [];
+  private clickL = 0;
+  private clickR = 0;
 
   constructor() {
     super();
@@ -140,7 +144,11 @@ class RoverProcessor extends AudioWorkletProcessor {
     this.modesR = mk(1.031);
     this.tireL = Biquad.bandpass(1900, 2.5);
     this.tireR = Biquad.bandpass(2150, 2.5);
-    this.port.onmessage = (e: MessageEvent<Partial<RoverAudioParams>>) => Object.assign(this.p, e.data);
+    this.port.onmessage = (e: MessageEvent<{ type: 'params'; p: Partial<RoverAudioParams> } | { type: 'knock'; side: number; strength: number; hard: number }>) => {
+      const m = e.data;
+      if (m.type === 'params') Object.assign(this.p, m.p);
+      else if (m.type === 'knock' && this.knocks.length < 16) this.knocks.push([m.side, m.strength, m.hard]);
+    };
   }
 
   private rnd(): number {
@@ -168,6 +176,19 @@ class RoverProcessor extends AudioWorkletProcessor {
     let shock = 0;
     for (let w = 0; w < 6; w++) shock = Math.max(shock, p.susp[w]);
     if (shock > 0.35) this.thumpEnv = Math.max(this.thumpEnv, Math.min(1.5, (shock - 0.35) * 0.9));
+
+    // Rock strikes and chassis impacts: a sharp contact transient into the frame
+    // (hardness = how much high-frequency energy), plus a low body thump.
+    for (const [side, strength, hard] of this.knocks) {
+      const a = Math.min(2.5, strength);
+      const l = side <= 0 ? 1 : 0.45, r = side >= 0 ? 1 : 0.45;
+      this.clickL += a * hard * l * 1.2;
+      this.clickR += a * hard * r * 1.2;
+      this.burstL += a * (0.6 + hard) * l;
+      this.burstR += a * (0.6 + hard) * r;
+      this.thumpEnv = Math.max(this.thumpEnv, a * (0.5 + 0.5 * (1 - hard)));
+    }
+    this.knocks.length = 0;
 
     // Rates per wheel (Hz).
     const grouserHz = new Float32Array(6), motorHz = new Float32Array(6), crunch = new Float32Array(6);
@@ -204,8 +225,10 @@ class RoverProcessor extends AudioWorkletProcessor {
       }
       // Bursts are ~1.5 ms noise grains (contact durations), not clicks.
       const nzA = this.rnd() * 2 - 1, nzB = this.rnd() * 2 - 1;
-      exL += nzA * this.burstL;
-      exR += nzB * this.burstR;
+      exL += nzA * this.burstL + (this.rnd() * 2 - 1) * this.clickL;
+      exR += nzB * this.burstR + (this.rnd() * 2 - 1) * this.clickR;
+      this.clickL *= 0.9;
+      this.clickR *= 0.9;
       this.burstL *= 0.985;
       this.burstR *= 0.985;
 
@@ -215,11 +238,11 @@ class RoverProcessor extends AudioWorkletProcessor {
         if (motorHz[w] < 1) continue;
         this.motorPh[w] = (this.motorPh[w] + motorHz[w] / fs) % 1;
         const ph = this.motorPh[w] * 2 * Math.PI;
-        const ripple = Math.sin(ph) * 0.5 + Math.sin(2 * ph + 0.3) * 0.3 + Math.sin(COMMUTATOR * ph) * 0.12;
-        const brush = (this.rnd() * 2 - 1) * (0.5 + 0.5 * Math.sin(ph)) * 0.25;
+        const ripple = Math.sin(ph) * 0.6 + Math.sin(2 * ph + 0.3) * 0.25 + Math.sin(COMMUTATOR * ph) * 0.03;
+        const brush = (this.rnd() * 2 - 1) * (0.5 + 0.5 * Math.sin(ph)) * 0.08;
         mot += (ripple + brush) * (0.25 + this.load * 0.9);
       }
-      mot *= 0.035;
+      mot *= 0.011;
       exL += mot;
       exR += mot;
 
@@ -247,8 +270,8 @@ class RoverProcessor extends AudioWorkletProcessor {
         fl += this.modesL[m].tick(exL);
         fr += this.modesR[m].tick(exR);
       }
-      fl += this.tireL.tick(exL) * 0.25;
-      fr += this.tireR.tick(exR) * 0.25;
+      fl += this.tireL.tick(exL) * 0.15;
+      fr += this.tireR.tick(exR) * 0.15;
       // Whole-body low rumble felt through the seat (terrain roughness at speed).
       const rumble = this.rumbleLp.tick((this.rnd() * 2 - 1) * Math.min(1, speed / 4)) * 0.9;
       let sl = fl * 1.8 + rumble + th * 0.6;

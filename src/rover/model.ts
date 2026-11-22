@@ -139,16 +139,17 @@ export function buildRoverModel(): RoverModel {
   // LCRU communications relay.
   add(new THREE.BoxGeometry(0.55, 0.32, 0.24), whitePaint, 0, 0.36, 1.5);
   add(new THREE.BoxGeometry(0.5, 0.012, 0.2), mirror, 0, 0.525, 1.5);
-  // Low-gain helical antenna (front right).
-  tube(V(-0.3, 0.52, 1.5), V(-0.32, 1.3, 1.52), 0.012, alu);
-  add(new THREE.CylinderGeometry(0.035, 0.035, 0.55, 10), mylar, -0.32, 1.55, 1.52);
+  // Low-gain helical antenna (front right, outboard).
+  tube(V(-0.68, 0.3, 1.35), V(-0.7, 1.0, 1.36), 0.012, alu);
+  add(new THREE.CylinderGeometry(0.035, 0.035, 0.5, 10), mylar, -0.7, 1.25, 1.36);
   // High-gain umbrella antenna (front left): gold-plated wire-mesh reflector on ribs.
-  tube(V(0.22, 0.52, 1.52), V(0.22, 1.95, 1.55), 0.016, alu);
+  tube(V(-0.5, 0.52, 1.5), V(-0.52, 2.05, 1.5), 0.016, alu);
   const hga = new THREE.Group();
-  hga.position.set(0.22, 1.98, 1.58);
-  hga.rotation.set(-1.15, 0.5, 0);
+  hga.position.set(-0.52, 2.08, 1.52);
+  hga.rotation.set(-1.15, -0.6, 0);
   root.add(hga);
   add(new THREE.SphereGeometry(0.62, 24, 6, 0, Math.PI * 2, 0, 0.82), hgaMesh, 0, -0.5, 0, hga);
+  hga.scale.setScalar(0.455 / (0.62 * Math.sin(0.82)));
   for (let i = 0; i < 10; i++) {
     const a = (i / 10) * Math.PI * 2;
     const p = V(Math.sin(0.82) * 0.62 * Math.cos(a), Math.cos(0.82) * 0.62 - 0.5, Math.sin(0.82) * 0.62 * Math.sin(a));
@@ -202,7 +203,8 @@ export function buildRoverModel(): RoverModel {
   tube(V(0, -0.08, 0.6), V(0, 0.72, 0.52), 0.025, alu);
   const panel = new InstrumentPanel();
   panel.group.position.set(0.06, 0.9, 0.5);
-  panel.group.rotation.set(-0.62, 0.12, 0, 'YXZ');
+  // Face toward the crew (the panel's front is its +z).
+  panel.group.rotation.set(-0.4, Math.PI - 0.35, 0, 'YXZ');
   root.add(panel.group);
 
   // ---- Aft chassis: tool & sample pallet, sample bags, gnomon and tongs.

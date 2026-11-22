@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
-import { makeLunar } from '../render/lunar';
+import { makeLunar, NOISE_GLSL } from '../render/lunar';
 import { mulberry32 } from '../terrain/TerrainData';
 
 /** Unit vector for azimuth (deg, from north, clockwise) and elevation (deg). North = -z, east = +x. */
@@ -73,31 +73,26 @@ export class Sky {
   readonly earthDir: THREE.Vector3;
   private stars: THREE.Points;
   private mountains: THREE.Mesh;
+  private flare: Lensflare;
 
-  constructor(sunAz: number, sunEl: number, starCount: number, earthPos?: { azimuth: number; elevation: number }) {
+  private milkyWay: THREE.Mesh | null = null;
+  private constLines: THREE.LineSegments | null = null;
+  private flashes: { sprite: THREE.Sprite; t: number; peak: number }[] = [];
+  private flashTex: THREE.Texture;
+
+  constructor(
+    sunAz: number,
+    sunEl: number,
+    starCount: number,
+    earthPos?: { azimuth: number; elevation: number },
+    stars?: Float32Array,
+    extras: { constellations?: Float32Array; galaxy?: { pole: number[]; center: number[] } } = {},
+  ) {
     this.sunDir = azElToDir(sunAz, sunEl);
     // Earth from Hadley Rille (26.1 N, 3.6 E): az ≈ 188°, el ≈ 64° (librations ignored).
     this.earthDir = earthPos ? azElToDir(earthPos.azimuth, earthPos.elevation) : azElToDir(188, 63.8);
 
-    // Stars: magnitude-distributed points, fixed screen size.
-    const rnd = mulberry32(42);
-    const pos = new Float32Array(starCount * 3);
-    const col = new Float32Array(starCount * 3);
-    for (let i = 0; i < starCount; i++) {
-      const u = rnd() * 2 - 1, a = rnd() * Math.PI * 2, s = Math.sqrt(1 - u * u);
-      pos.set([Math.cos(a) * s * 9000, u * 9000, Math.sin(a) * s * 9000], i * 3);
-      const mag = Math.pow(rnd(), 6); // most stars faint
-      const tint = rnd();
-      const k = 0.25 + mag * 1.6;
-      col.set([k * (tint > 0.8 ? 1 : 0.85 + tint * 0.15), k * 0.95, k * (tint < 0.2 ? 1 : 0.85 + (1 - tint) * 0.2)], i * 3);
-    }
-    const sg = new THREE.BufferGeometry();
-    sg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    sg.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    this.stars = new THREE.Points(
-      sg,
-      new THREE.PointsMaterial({ size: 1.6, sizeAttenuation: false, vertexColors: true, depthWrite: false, fog: false }),
-    );
+    this.stars = buildStars(stars, starCount);
     this.stars.renderOrder = -10;
     this.stars.frustumCulled = false;
     this.group.add(this.stars);
@@ -127,6 +122,7 @@ export class Sky {
     flare.addElement(new LensflareElement(ghost, 40, 1.15));
     flare.position.copy(this.sunDir).multiplyScalar(sunDist * 0.98);
     this.group.add(flare);
+    this.flare = flare;
 
     // Earth: 1.9° disc, phase from the true sun direction, thin atmosphere rim.
     const earthDist = 8000;
@@ -152,6 +148,24 @@ export class Sky {
     earth.rotation.set(0.4, 2.2, 0.1);
     earth.renderOrder = -9;
     this.group.add(earth);
+
+    if (extras.galaxy) {
+      this.milkyWay = buildMilkyWay(new THREE.Vector3(...extras.galaxy.pole), new THREE.Vector3(...extras.galaxy.center));
+      this.group.add(this.milkyWay);
+    }
+    if (extras.constellations && extras.constellations.length >= 6) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(extras.constellations.map((v) => v * 8900), 3));
+      this.constLines = new THREE.LineSegments(
+        g,
+        new THREE.LineBasicMaterial({ color: 0x5f8fd6, transparent: true, opacity: 0.35, depthWrite: false, blending: THREE.AdditiveBlending }),
+      );
+      this.constLines.visible = false;
+      this.constLines.frustumCulled = false;
+      this.constLines.renderOrder = -10;
+      this.group.add(this.constLines);
+    }
+    this.flashTex = radialTexture([[0, 'rgba(255,255,255,1)'], [0.15, 'rgba(255,240,210,0.8)'], [0.4, 'rgba(255,200,150,0.15)'], [1, 'rgba(0,0,0,0)']], 64);
 
     this.mountains = this.buildMountains();
     this.group.add(this.mountains);
@@ -204,14 +218,200 @@ export class Sky {
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setIndex(idx);
     g.computeVertexNormals();
-    const m = new THREE.Mesh(g, makeLunar(new THREE.MeshLambertMaterial({ color: 0x3c3a37, side: THREE.DoubleSide }), 'mountain'));
+    const mat = makeLunar(new THREE.MeshLambertMaterial({ color: 0x55524d, side: THREE.DoubleSide }), 'mountain', (shader) => {
+      // Distant massifs: ridges and crater pocks as normal perturbation + albedo mottling.
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vLocal;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvLocal = position;');
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>\nvarying vec3 vLocal;\n${NOISE_GLSL}`)
+        .replace('#include <map_fragment>', `vec2 mp = vec2(atan(vLocal.z, vLocal.x) * 2400.0, vLocal.y);
+vec3 n1 = lnoised(mp * 0.004), n2 = lnoised(mp * 0.017 + 7.0), n3 = lnoised(mp * 0.06 + 3.0);
+vec2 mg = n1.yz * 1.2 + n2.yz * 0.6 + n3.yz * 0.3;
+diffuseColor.rgb *= 0.8 + 0.35 * n2.x + 0.15 * n3.x;`)
+        .replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
+normal = normalize(normal + vec3(mg.x, mg.y, 0.0) * 0.5);`);
+    });
+    const m = new THREE.Mesh(g, mat);
     m.renderOrder = -8;
     m.frustumCulled = false;
     return m;
   }
 
+  /** 1 = dark-adapted eye (all catalogue stars), lower = only the brightest remain. */
+  setAdaptation(a: number): void {
+    const u = (this.stars.material as THREE.ShaderMaterial).uniforms.uAdapt;
+    u.value += (a - u.value) * 0.08;
+    if (this.milkyWay) (this.milkyWay.material as THREE.ShaderMaterial).uniforms.uAdapt.value = u.value;
+    if (this.constLines) (this.constLines.material as THREE.LineBasicMaterial).opacity = 0.12 + 0.3 * u.value;
+  }
+
+  toggleConstellations(): boolean {
+    if (!this.constLines) return false;
+    this.constLines.visible = !this.constLines.visible;
+    return this.constLines.visible;
+  }
+
+  /**
+   * Meteoroid impact flash. With no atmosphere there are no shooting stars on the
+   * Moon: meteoroids arrive unseen at 20–70 km/s and flash briefly on impact —
+   * visible only where the ground is dark (in shadow).
+   */
+  impactFlash(scene: THREE.Scene, pos: THREE.Vector3, dist: number): void {
+    const mat = new THREE.SpriteMaterial({ map: this.flashTex, color: 0xfff1dc, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
+    const sprite = new THREE.Sprite(mat);
+    sprite.position.copy(pos);
+    sprite.scale.setScalar(Math.max(0.6, dist * 0.004));
+    scene.add(sprite);
+    this.flashes.push({ sprite, t: 0, peak: 1.5 + Math.random() * 3 });
+  }
+
+  updateFlashes(dt: number, scene: THREE.Scene): void {
+    for (let i = this.flashes.length - 1; i >= 0; i--) {
+      const f = this.flashes[i];
+      f.t += dt;
+      // ~20 ms rise, ~150 ms thermal glow decay.
+      const k = f.t < 0.02 ? f.t / 0.02 : Math.exp(-(f.t - 0.02) / 0.08);
+      (f.sprite.material as THREE.SpriteMaterial).opacity = Math.min(1, k);
+      (f.sprite.material as THREE.SpriteMaterial).color.setScalar(f.peak * k);
+      if (f.t > 0.6) {
+        scene.remove(f.sprite);
+        f.sprite.material.dispose();
+        this.flashes.splice(i, 1);
+      }
+    }
+  }
+
   update(camera: THREE.Camera, groundY: number): void {
     this.group.position.copy(camera.position);
+    // Lensflare projects points behind the camera to the front; hide it then.
+    const dir = camera.getWorldDirection(new THREE.Vector3());
+    this.flare.visible = dir.dot(this.sunDir) > 0.05;
     this.mountains.position.y = groundY - camera.position.y;
   }
+}
+
+/** Approximate sRGB colour of a black body (Tanner Helland fit). */
+function blackbody(T: number): [number, number, number] {
+  const t = T / 100;
+  let r: number, g: number, b: number;
+  if (t <= 66) {
+    r = 255;
+    g = 99.47 * Math.log(t) - 161.12;
+    b = t <= 19 ? 0 : 138.52 * Math.log(t - 10) - 305.04;
+  } else {
+    r = 329.7 * Math.pow(t - 60, -0.1332);
+    g = 288.12 * Math.pow(t - 60, -0.0755);
+    b = 255;
+  }
+  const c = (v: number) => Math.min(255, Math.max(0, v)) / 255;
+  return [c(r), c(g), c(b)];
+}
+
+/**
+ * Real star field: Yale Bright Star Catalogue (V <= 6.5) placed for the Apollo 15
+ * site and epoch. Point sources with flux 10^(-0.4 V), colour from temperature;
+ * no twinkling (no atmosphere). Falls back to a random field if data is missing.
+ */
+function buildStars(data: Float32Array | undefined, fallbackCount: number): THREE.Points {
+  let n: number;
+  const pos: number[] = [], col: number[] = [], flux: number[] = [];
+  if (data && data.length >= 5) {
+    n = data.length / 5;
+    for (let i = 0; i < n; i++) {
+      const o = i * 5;
+      pos.push(data[o] * 9000, data[o + 1] * 9000, data[o + 2] * 9000);
+      const [r, g, b] = blackbody(data[o + 4] || 5800);
+      col.push(r, g, b);
+      flux.push(Math.pow(10, -0.4 * data[o + 3]));
+    }
+  } else {
+    const rnd = mulberry32(42);
+    n = fallbackCount;
+    for (let i = 0; i < n; i++) {
+      const u = rnd() * 2 - 1, a = rnd() * Math.PI * 2, s = Math.sqrt(1 - u * u);
+      pos.push(Math.cos(a) * s * 9000, u * 9000, Math.sin(a) * s * 9000);
+      col.push(1, 1, 1);
+      flux.push(Math.pow(10, -0.4 * (6.5 - 7 * Math.pow(rnd(), 0.3))));
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setAttribute('flux', new THREE.Float32BufferAttribute(flux, 1));
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { uAdapt: { value: 1 }, uScale: { value: Math.min(2, window.devicePixelRatio || 1) } },
+    vertexShader: /* glsl */ `
+      attribute float flux;
+      uniform float uAdapt;
+      uniform float uScale;
+      varying vec3 vCol;
+      void main() {
+        // Perceived brightness ~ flux^0.5 (eye/camera response); the threshold
+        // rises when the eye is light-adapted to the sunlit ground.
+        float b = sqrt(flux) * 3.2;
+        float vis = max(b - (1.0 - uAdapt) * 1.6, 0.0) * mix(0.35, 1.0, uAdapt);
+        vCol = color * min(vis, 2.5);
+        gl_PointSize = (2.2 + 2.6 * clamp(b - 1.0, 0.0, 1.8)) * uScale * step(0.01, vis);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: /* glsl */ `
+      varying vec3 vCol;
+      void main() {
+        vec2 c = gl_PointCoord - 0.5;
+        float a = exp(-dot(c, c) * 9.0);
+        gl_FragColor = vec4(vCol * a, 1.0);
+      }`,
+    vertexColors: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    transparent: true,
+  });
+  const p = new THREE.Points(g, mat);
+  p.frustumCulled = false;
+  return p;
+}
+
+/**
+ * Milky Way: a band along the real galactic plane (pole/centre given in the
+ * local sky frame), wider and brighter toward the galactic centre, mottled, with
+ * the Great Rift dust lane. Only visible to a dark-adapted eye.
+ */
+function buildMilkyWay(pole: THREE.Vector3, center: THREE.Vector3): THREE.Mesh {
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { uPole: { value: pole.normalize() }, uCenter: { value: center.normalize() }, uAdapt: { value: 1 } },
+    vertexShader: 'varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: /* glsl */ `
+      varying vec3 vD;
+      uniform vec3 uPole, uCenter;
+      uniform float uAdapt;
+      float h3(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+      float n3(vec3 x) {
+        vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(mix(h3(i), h3(i + vec3(1,0,0)), f.x), mix(h3(i + vec3(0,1,0)), h3(i + vec3(1,1,0)), f.x), f.y),
+                   mix(mix(h3(i + vec3(0,0,1)), h3(i + vec3(1,0,1)), f.x), mix(h3(i + vec3(0,1,1)), h3(i + vec3(1,1,1)), f.x), f.y), f.z);
+      }
+      float fbm(vec3 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++) { s += a * n3(p); p *= 2.03; a *= 0.5; } return s; }
+      void main() {
+        vec3 d = normalize(vD);
+        float b = asin(clamp(dot(d, uPole), -1.0, 1.0));
+        vec3 e2 = normalize(cross(uPole, uCenter));
+        float l = atan(dot(d, e2), dot(d, uCenter));
+        float bulge = exp(-l * l / 0.35);
+        float width = 0.10 + 0.12 * bulge;
+        float band = exp(-b * b / (width * width)) * (0.35 + 0.65 * exp(-l * l / 2.5));
+        float mott = fbm(d * 9.0) * 0.8 + fbm(d * 30.0) * 0.4;
+        float rift = 1.0 - 0.75 * exp(-pow((b - 0.02 * sin(l * 3.0)) / 0.025, 2.0)) * smoothstep(1.6, 0.2, abs(l));
+        float I = band * mott * rift * 0.22 * uAdapt * uAdapt;
+        gl_FragColor = vec4(vec3(1.0, 0.95, 0.88) * I, 1.0);
+      }`,
+    side: THREE.BackSide,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    transparent: true,
+  });
+  const m = new THREE.Mesh(new THREE.SphereGeometry(9200, 64, 32), mat);
+  m.renderOrder = -11;
+  m.frustumCulled = false;
+  return m;
 }

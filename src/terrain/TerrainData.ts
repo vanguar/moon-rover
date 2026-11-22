@@ -23,6 +23,7 @@ export interface TerrainMeta {
   earth?: { azimuth: number; elevation: number };
   orthoHi?: { x: number; z: number; size: number };
   epoch?: string;
+  galaxy?: { pole: number[]; center: number[] };
 }
 
 export function mulberry32(seed: number): () => number {
@@ -43,7 +44,7 @@ export function hash2(x: number, y: number, seed = 0): number {
 }
 
 const CRATER_SEED = 1971; // Apollo 15 year
-const CRATER_COUNT = 9000;
+const CRATER_COUNT = 5500;
 const CRATER_RMIN = 1.2;
 const CRATER_RMAX = 30;
 const HASH_CELL = 16;
@@ -76,7 +77,8 @@ export class TerrainData {
       let R = CRATER_RMIN * Math.pow(1 - rnd(), -0.5);
       if (R > CRATER_RMAX) R = CRATER_RMIN + rnd() * 3;
       const fresh = rnd();
-      const depth = 2 * R * (0.04 + 0.16 * fresh * fresh);
+      // Most small craters on an old mare surface are degraded (shallow, soft rims).
+      const depth = 2 * R * (0.03 + 0.15 * fresh * fresh * fresh);
       const rim = depth * (0.1 + 0.25 * fresh);
       const o = i * 5;
       this.craters[o] = (rnd() - 0.5) * meta.sizeX;

@@ -34,7 +34,7 @@ export default defineConfig({
       },
       workbox: {
         // Game data (heightmap, ortho, shadow mask) is precached for offline play.
-        globPatterns: ['**/*.{js,css,html,png,jpg,json,wasm}'],
+        globPatterns: ['**/*.{js,css,html,png,jpg,json,wasm,bin}'],
         maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,
         cleanupOutdatedCaches: true,
       },

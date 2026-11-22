@@ -25,12 +25,12 @@ const PRESETS: Record<QualityLevel, Omit<QualitySettings, 'level' | 'pixelRatio'
     rockRadius: 110, rockDensity: 0.45, maxRocks: 2500, dustParticles: 1200, stars: 2500,
   },
   medium: {
-    maxPixelRatio: 1.5, shadowMapSize: 2048, shadowRange: 90, drawDistance: 2600,
+    maxPixelRatio: 1.25, shadowMapSize: 2048, shadowRange: 70, drawDistance: 2600,
     lodSegments: [128, 64, 32, 16, 8], lodDistances: [110, 360, 800, 1600],
     rockRadius: 170, rockDensity: 0.7, maxRocks: 6000, dustParticles: 2500, stars: 4500,
   },
   high: {
-    maxPixelRatio: 2, shadowMapSize: 4096, shadowRange: 120, drawDistance: 3800,
+    maxPixelRatio: 1.5, shadowMapSize: 2048, shadowRange: 100, drawDistance: 3800,
     lodSegments: [256, 128, 64, 32, 16], lodDistances: [90, 380, 900, 1900],
     rockRadius: 240, rockDensity: 1.0, maxRocks: 12000, dustParticles: 5000, stars: 7000,
   },
@@ -51,6 +51,15 @@ export function autoQuality(): QualityLevel {
   if (isMobile) {
     const mem = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4;
     return mem >= 6 && (navigator.hardwareConcurrency ?? 4) >= 8 ? 'medium' : 'low';
+  }
+  // Integrated GPUs (Intel Iris/UHD, Apple M-series iGPU is fine) start one level lower.
+  try {
+    const gl = document.createElement('canvas').getContext('webgl2');
+    const ext = gl?.getExtension('WEBGL_debug_renderer_info');
+    const name = ext && gl ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
+    if (/Intel|UHD|Iris|Mali|Adreno|PowerVR|SwiftShader|llvmpipe/i.test(name)) return 'medium';
+  } catch {
+    /* ignore */
   }
   return 'high';
 }

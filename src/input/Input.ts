@@ -1,6 +1,6 @@
 import type { DriveInput } from '../rover/Rover';
 
-export type Action = 'camera' | 'reset' | 'lights' | 'pause';
+export type Action = 'camera' | 'top' | 'reset' | 'lights' | 'pause' | 'park' | 'hud' | 'zoomin' | 'zoomout' | 'const';
 
 /**
  * Merges keyboard, gamepad, touch (joystick + pedals) and device-tilt steering
@@ -26,7 +26,10 @@ export class Input {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
       this.lastDevice = 'keyboard';
       if (!e.repeat) {
-        const map: Record<string, Action> = { KeyC: 'camera', KeyR: 'reset', KeyH: 'lights', Escape: 'pause', KeyP: 'pause' };
+        const map: Record<string, Action> = {
+          KeyC: 'camera', KeyV: 'top', KeyR: 'reset', KeyH: 'lights', Escape: 'pause', KeyP: 'park', KeyI: 'hud', KeyK: 'const',
+          Equal: 'zoomin', NumpadAdd: 'zoomin', Minus: 'zoomout', NumpadSubtract: 'zoomout',
+        };
         const a = map[e.code];
         if (a) this.emit(a);
       }
@@ -63,6 +66,7 @@ export class Input {
     joy.addEventListener('pointerdown', (e) => {
       joyId = e.pointerId;
       joy.setPointerCapture(e.pointerId);
+      joy.classList.add('active');
       this.lastDevice = 'touch';
       joyMove(e);
     });
@@ -70,6 +74,7 @@ export class Input {
     const joyEnd = (e: PointerEvent) => {
       if (e.pointerId !== joyId) return;
       joyId = null;
+      joy.classList.remove('active');
       knob.style.transform = '';
       this.touch.steer = 0;
       this.touch.joyY = 0;
@@ -93,16 +98,6 @@ export class Input {
     };
     pedal('#gas', 'gas');
     pedal('#brake', 'brake');
-    const hb = root.querySelector<HTMLElement>('#hand')!;
-    hb.addEventListener('pointerdown', () => { this.touch.hand = true; hb.classList.add('on'); });
-    const hbOff = () => { this.touch.hand = false; hb.classList.remove('on'); };
-    hb.addEventListener('pointerup', hbOff);
-    hb.addEventListener('pointercancel', hbOff);
-    hb.addEventListener('pointerleave', hbOff);
-
-    for (const [id, a] of [['#btn-cam', 'camera'], ['#btn-reset', 'reset'], ['#btn-lights', 'lights'], ['#btn-pause', 'pause']] as const) {
-      root.querySelector<HTMLElement>(id)!.addEventListener('pointerdown', (e) => { e.preventDefault(); this.emit(a); });
-    }
   }
 
   /** Enable steering by tilting the phone (asks permission on iOS). */
