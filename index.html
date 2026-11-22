@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="description" content="Луноход от первого лица по реальному рельефу места посадки Аполлона-15 (борозда Хэдли), данные LROC NAC DTM." />
+    <link rel="icon" href="icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="icons/icon-192.png" />
+    <title>Луноход: Хэдли</title>
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <div id="hud" class="hidden">
+      <div id="h-warn"></div>
+      <div id="h-top">
+        <canvas id="h-hdgtape"></canvas>
+        <div id="h-hdg">000°</div>
+      </div>
+      <div id="h-panel">
+        <div class="cell speed">
+          <div class="lbl">СКОРОСТЬ</div>
+          <div><span id="h-speed" class="big">0.0</span><span class="unit">км/ч</span></div>
+        </div>
+        <div class="cell att">
+          <canvas id="h-att"></canvas>
+          <div class="att-vals">крен <b id="h-roll">0°</b> тангаж <b id="h-pitch">0°</b></div>
+        </div>
+        <div class="cell nums">
+          <div><span class="lbl">ВЫСОТА</span> <b id="h-alt">0</b> м</div>
+          <div><span class="lbl">УКЛОН</span> <b id="h-slope">0</b>°</div>
+          <div><span class="lbl">ОДОМЕТР</span> <b id="h-odo">0.00</b> км</div>
+          <div class="sm" id="h-coords"></div>
+        </div>
+        <div class="cell batt">
+          <div class="lbl">БАТАРЕЯ <b id="h-batt">100</b>%</div>
+          <div class="bar"><div id="h-batt-bar"></div></div>
+          <div class="sm">нагрузка <b id="h-power">0</b> Вт · солнце <b id="h-solar">0</b> Вт</div>
+          <div class="sm"><span id="h-lights" class="ind">ФАРЫ</span> <span class="fps"><b id="h-fps">0</b> fps</span></div>
+        </div>
+        <canvas id="h-map" class="cell"></canvas>
+      </div>
+    </div>
+
+    <div id="touch" class="hidden">
+      <div id="joy"><div class="knob"></div></div>
+      <div id="pedals">
+        <div id="hand" class="pbtn">РУЧН.</div>
+        <div id="brake" class="pedal">ТОРМ<br />НАЗАД</div>
+        <div id="gas" class="pedal">ГАЗ</div>
+      </div>
+      <div id="tbtns">
+        <div id="btn-cam" class="tbtn" title="Камера">👁</div>
+        <div id="btn-lights" class="tbtn" title="Фары">💡</div>
+        <div id="btn-reset" class="tbtn" title="На колёса">⟲</div>
+        <div id="btn-pause" class="tbtn" title="Меню">☰</div>
+      </div>
+    </div>
+
+    <div id="menu">
+      <div class="box">
+        <h1>ЛУНОХОД · ХЭДЛИ</h1>
+        <p class="sub">Место посадки «Аполлона-15», 26.13° с.ш. 3.63° в.д. Реальный рельеф LROC NAC DTM, участок 4×4 км.</p>
+        <div id="loading">
+          <div class="bar"><div id="load-bar"></div></div>
+          <div id="load-text">Загрузка…</div>
+        </div>
+        <div id="ready" class="hidden">
+          <button id="start" class="primary">ПОЕХАЛИ</button>
+          <div class="row">
+            <label>Качество
+              <select id="quality">
+                <option value="auto">Авто</option>
+                <option value="low">Низкое</option>
+                <option value="medium">Среднее</option>
+                <option value="high">Высокое</option>
+                <option value="ultra">Ультра</option>
+              </select>
+            </label>
+            <label>Громкость <input id="volume" type="range" min="0" max="1" step="0.05" /></label>
+          </div>
+          <div class="row" id="tilt-row">
+            <label><input id="tilt" type="checkbox" /> Руль наклоном телефона</label>
+          </div>
+          <div class="help">
+            <div class="kb">
+              <b>Клавиатура:</b> W/S — газ/тормоз (назад), A/D — руль, Space — ручник, C — камера, R — на колёса, H — фары,
+              Esc — меню. Мышь — осмотреться.
+            </div>
+            <div class="gp"><b>Геймпад:</b> RT/LT — газ/тормоз, стик — руль, A — ручник, Y — камера, X — фары, B — на колёса.</div>
+            <div class="tc"><b>Телефон:</b> джойстик слева — руль (вверх/вниз — газ/тормоз), педали справа. Проведите по экрану — осмотреться.</div>
+          </div>
+          <p class="credit">Данные: NASA/GSFC/Arizona State University (LRO LROC NAC DTM, ортоснимок M111571816).</p>
+        </div>
+      </div>
+    </div>
+    <div id="rotate">Поверните телефон горизонтально</div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
