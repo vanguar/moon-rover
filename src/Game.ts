@@ -20,6 +20,11 @@ import { Rover } from './rover/Rover';
 import { buildLunarModule } from './rover/models/nasa';
 import { ROVERS, type RoverSpec } from './rover/specs';
 import { Helicopter } from './heli/Helicopter';
+import { Radio } from './audio/Radio';
+import { Discoveries } from './game/Discoveries';
+import { buildAlsep } from './game/Hardware';
+import { buildLrvModel } from './rover/model';
+import { applyWear } from './rover/models/wear';
 import { Rocks } from './terrain/Rocks';
 import type { TerrainData } from './terrain/TerrainData';
 import { FarTerrain } from './terrain/FarTerrain';
@@ -76,6 +81,8 @@ export class Game {
   /** Ingenuity, when it is the selected vehicle (Perseverance then stays parked nearby). */
   heli: Helicopter | null = null;
   private heliHud: HTMLElement | null = null;
+  readonly radio: Radio;
+  readonly finds: Discoveries | null = null;
   private dust: Dust;
   private tracks: Tracks;
   private hud: Hud;
@@ -203,7 +210,10 @@ export class Game {
     // Moon: start ~45 m west of the LM, facing the rille (west).
     // Mars: at Octavia E. Butler Landing, facing the delta front (west).
     const [startX, startZ] = this.startPoint();
-    if (!mars) this.addLunarModule(terrain.meta.landing.x, terrain.meta.landing.z);
+    if (!mars) {
+      this.addLunarModule(terrain.meta.landing.x, terrain.meta.landing.z);
+      this.addApolloHardware();
+    }
     physics.updatePatch(startX, startZ, true);
     this.rover = this.makeRover(spec.heli ? ROVERS.perseverance : spec, startX, startZ, START_YAW);
 
@@ -222,6 +232,11 @@ export class Game {
     }
     if (ortho.image) this.hud.setMapImage(ortho.image as CanvasImageSource);
 
+    this.radio = new Radio(() => this.audio.output);
+    if (!mars) {
+      this.finds = new Discoveries(terrain);
+      this.finds.onFound = (site) => this.radio.say(`find_${site.id}`, { delay: 0.5 });
+    }
     if (spec.heli) this.enterHeli();
     this.input.onAction((a) => this.onAction(a));
     this.bindLook(this.renderer.domElement);
@@ -577,6 +592,8 @@ export class Game {
       this.zoom(-1);
     } else if (a === 'zoomout') {
       this.zoom(1);
+    } else if (a === 'photo') {
+      this.takePhoto();
     } else if (a === 'brush') {
       this.rover.brushDust();
       this.audio.click(500);
@@ -692,6 +709,8 @@ export class Game {
     this.updateSun(p);
     this.updateImpacts(dt);
     this.updateEnergy(dt);
+    this.radio.update(dt);
+    this.radioEvents();
 
     this.fpsAcc.t += dt;
     this.fpsAcc.n++;
@@ -736,6 +755,72 @@ export class Game {
       parked: idle || r.parkBrake || this.still > 3,
       wheelLocal: r.wheelLocal, preview: false,
     });
+  }
+
+  /** The parked Apollo 15 LRV and the ALSEP at their LROC positions. */
+  private addApolloHardware(): void {
+    const s = this.terrain.meta.sites;
+    if (!s) return;
+    if (s.alsep) this.scene.add(buildAlsep(this.terrain, s.alsep.x, s.alsep.z));
+    if (s.lrv) {
+      const m = buildLrvModel();
+      applyWear(m.root, { dust: { value: 0.7 }, dustColor: new THREE.Color(0.2, 0.195, 0.188), lowY: -0.4, rootInv: { value: new THREE.Matrix4() } });
+      const x = s.lrv.x, z = s.lrv.z;
+      const g = new THREE.Group();
+      g.add(m.root);
+      // Final parking: ~90 m east of the LM, the TV camera pointed at Falcon for the lift-off.
+      const lm = this.terrain.meta.landing;
+      g.rotation.y = Math.atan2(lm.x - x, lm.z - z);
+      g.position.set(x, this.terrain.height(x, z) + 0.76, z);
+      m.animate({ dt: 0.016, time: 0, speed: 0, steer: 0, lookYaw: 0, lookPitch: 0, parked: true, wheelLocal: m.wheels.map((w) => w.steer.position.clone()), preview: false });
+      this.scene.add(g);
+      const R = this.physics.R;
+      this.physics.world.createCollider(R.ColliderDesc.cuboid(0.9, 0.35, 1.5).setTranslation(x, g.position.y - 0.2, z).setRotation(new THREE.Quaternion().setFromEuler(g.rotation)));
+    }
+  }
+
+  private shotN = 0;
+  /** Photo (F): shutter, saves the frame, and discovers the site in view. */
+  private takePhoto(): void {
+    this.audio.click(3200);
+    this.render();
+    const flash = document.getElementById('flash');
+    flash?.classList.remove('go');
+    void flash?.offsetWidth;
+    flash?.classList.add('go');
+    const site = this.finds?.photograph(this.camera);
+    if (!site) {
+      try {
+        const a = document.createElement('a');
+        a.href = this.renderer.domElement.toDataURL('image/jpeg', 0.92);
+        a.download = `planetokhod-${++this.shotN}.jpg`;
+        a.click();
+      } catch {
+        /* canvas not readable */
+      }
+    }
+  }
+
+  private radioState = { started: false, shadow: false, low: false, base: false, far: false };
+  /** Houston comments on what happens (each reply 2.6 s later: light time Earth–Moon and back). */
+  private radioEvents(): void {
+    if (!this.sky) return;
+    const r = this.rover, st = this.radioState;
+    if (!st.started) {
+      st.started = true;
+      this.radio.say('start', { delay: 1 });
+    }
+    if (r.sunLit < 0.5 && !st.shadow) this.radio.say('shadow', { repeat: true });
+    st.shadow = r.sunLit < 0.5;
+    if (r.battery < 0.2 && !st.low) this.radio.say('lowbatt', { repeat: true });
+    st.low = r.battery < 0.2;
+    if (this.hud.atBase && !st.base) this.radio.say('base', { repeat: true });
+    st.base = this.hud.atBase;
+    const lm = this.terrain.meta.landing, p = r.object.position;
+    const far = Math.hypot(p.x - lm.x, p.z - lm.z) > 2500;
+    if (far && !st.far) this.radio.say('far');
+    st.far = far;
+    if (Math.abs(r.attitude().roll) > 30) this.radio.say('roll');
   }
 
   private litTimer = 0;
