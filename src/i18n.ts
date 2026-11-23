@@ -1,3 +1,4 @@
+import { GAME_STRINGS } from './i18nGame';
 import { WORLD_STRINGS } from './i18nWorlds';
 
 export type Lang = 'ru' | 'uk' | 'en' | 'de' | 'ar' | 'zh';
@@ -542,7 +543,7 @@ const zh: Dict = {
 };
 
 const DICTS: Record<Lang, Dict> = { ru, uk, en, de, ar, zh };
-for (const l of Object.keys(DICTS) as Lang[]) Object.assign(DICTS[l], WORLD_STRINGS[l]);
+for (const l of Object.keys(DICTS) as Lang[]) Object.assign(DICTS[l], WORLD_STRINGS[l], GAME_STRINGS[l] ?? {});
 let current: Lang = 'ru';
 /** World variant: keys `<key>_mars` override `<key>` on Mars. */
 let variant = '';

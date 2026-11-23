@@ -18,11 +18,13 @@ import { setSurfacePhotometry } from './render/lunar';
 import { ShadowBaker } from './render/ShadowBaker';
 import { Rover } from './rover/Rover';
 import { buildLunarModule } from './rover/models/nasa';
-import type { RoverSpec } from './rover/specs';
+import { ROVERS, type RoverSpec } from './rover/specs';
+import { Helicopter } from './heli/Helicopter';
 import { Rocks } from './terrain/Rocks';
 import type { TerrainData } from './terrain/TerrainData';
 import { FarTerrain } from './terrain/FarTerrain';
 import { TerrainRenderer } from './terrain/TerrainRenderer';
+import { t } from './i18n';
 import { world } from './world';
 
 export interface GameExtras {
@@ -70,6 +72,9 @@ export class Game {
   private terrainR: TerrainRenderer;
   private rocks: Rocks;
   rover: Rover;
+  /** Ingenuity, when it is the selected vehicle (Perseverance then stays parked nearby). */
+  heli: Helicopter | null = null;
+  private heliHud: HTMLElement | null = null;
   private dust: Dust;
   private tracks: Tracks;
   private hud: Hud;
@@ -193,7 +198,7 @@ export class Game {
     const [startX, startZ] = this.startPoint();
     if (!mars) this.addLunarModule(terrain.meta.landing.x, terrain.meta.landing.z);
     physics.updatePatch(startX, startZ, true);
-    this.rover = this.makeRover(spec, startX, startZ, START_YAW);
+    this.rover = this.makeRover(spec.heli ? ROVERS.perseverance : spec, startX, startZ, START_YAW);
 
     this.dust = new Dust(terrain, quality.dustParticles);
     this.scene.add(this.dust.mesh);
@@ -210,6 +215,7 @@ export class Game {
     }
     if (ortho.image) this.hud.setMapImage(ortho.image as CanvasImageSource);
 
+    if (spec.heli) this.enterHeli();
     this.input.onAction((a) => this.onAction(a));
     this.bindLook(this.renderer.domElement);
     window.addEventListener('resize', () => this.resize());
@@ -249,8 +255,47 @@ export class Game {
     return r;
   }
 
+  /** Ingenuity on its airfield ~15 m from the parked rover (Perseverance watched every flight). */
+  private enterHeli(): void {
+    if (this.heli) return;
+    const r = this.rover.object.position;
+    const f = this.rover.forwardVector(new THREE.Vector3());
+    const px = r.x + f.x * 14 + f.z * 4, pz = r.z + f.z * 14 - f.x * 4;
+    const w = this.weather;
+    const zero = new THREE.Vector3();
+    this.heli = new Helicopter(this.terrain, px, pz, () => (w ? w.wind : zero));
+    this.heli.yaw = Math.atan2(f.x, f.z);
+    this.scene.add(this.heli.object, this.heli.dustObject);
+    this.rover.parkBrake = true;
+    this.input.heliMode = true;
+    this.heliHud = document.getElementById('heli-hud');
+    this.heliHud?.classList.remove('hidden');
+    document.body.classList.add('heli');
+    this.chasePos.set(0, 0, 0);
+    this.orbit.dist = 4;
+    this.orbit.pitch = 0.35;
+    this.cameraMode = 'chase';
+  }
+
+  private exitHeli(): void {
+    if (!this.heli) return;
+    this.scene.remove(this.heli.object, this.heli.dustObject);
+    this.heli = null;
+    this.input.heliMode = false;
+    this.rover.parkBrake = false;
+    this.heliHud?.classList.add('hidden');
+    document.body.classList.remove('heli');
+    this.orbit.dist = 9 * this.sizeK;
+  }
+
   /** Swap the rover in place (menu selection), keeping position and heading. */
   setRover(spec: RoverSpec): void {
+    if (spec.heli) {
+      if (this.rover.spec.id !== 'perseverance') this.setRover(ROVERS.perseverance);
+      this.enterHeli();
+      return;
+    }
+    this.exitHeli();
     const old = this.rover;
     const p = old.object.position.clone();
     const { heading } = old.attitude();
@@ -524,6 +569,12 @@ export class Game {
       this.zoom(-1);
     } else if (a === 'zoomout') {
       this.zoom(1);
+    } else if (a === 'auto') {
+      this.heli?.startAuto();
+      this.audio.click(1500);
+    } else if (a === 'reset' && this.heli) {
+      this.heli.reset();
+      this.audio.click(900);
     } else if (a === 'reset') {
       this.rover.reset();
       this.audio.click(900);
@@ -606,7 +657,15 @@ export class Game {
     this.time += dt;
     this.input.update(dt);
     const rover = this.rover;
-    const alpha = this.physics.step(dt, (h) => rover.step(h, this.input.drive));
+    const parkedInput = { throttle: 0, brake: 0, steer: 0, handbrake: true };
+    const alpha = this.physics.step(dt, (h) => rover.step(h, this.heli ? parkedInput : this.input.drive));
+    if (this.heli) {
+      const d = this.input.drive;
+      this.heli.attachAudio(this.audio.output);
+      this.heli.update(dt, { fwd: d.throttle - d.brake, yaw: d.steer, lift: this.input.lift }, true);
+      this.heli.setListener(this.camera.position.distanceTo(this.heli.pos));
+      this.updateHeliHud();
+    }
     rover.onContacts(this.physics.takeContacts());
     rover.sync(dt, alpha);
     this.animateRover(dt, false);
@@ -821,8 +880,49 @@ export class Game {
     this.sun.target.updateMatrixWorld();
   }
 
+  private updateHeliHud(): void {
+    const h = this.heli, el = this.heliHud;
+    if (!h || !el) return;
+    const sp = Math.hypot(h.vel.x, h.vel.z);
+    el.innerHTML =
+      `<b>INGENUITY</b> · ${t(`heliPhase_${h.phase}`)}<br>` +
+      `${t('heliAlt')} <b>${h.agl.toFixed(1)}</b> ${t('hM')} · ${t('heliSpeed')} <b>${sp.toFixed(1)}</b> ${t('hMs')} · ↕ <b>${h.vel.y.toFixed(1)}</b><br>` +
+      `${t('heliRotor')} <b>${Math.round(h.rpm)}</b> ${t('hRpm')} · ${t('hBatt')} <b>${Math.round(h.battery * 100)}</b>% (${Math.round(h.endurance)} ${t('hS')})<br>` +
+      `${t('heliFlights')} <b>${h.flights}</b> · ${t('heliTime')} <b>${Math.round(h.flightTime)}</b> ${t('hS')}` +
+      (h.status ? `<div class="hs">${t(h.status)}</div>` : '') +
+      `<div class="hk">${t('heliKeys')}</div>`;
+  }
+
   private updateCamera(dt: number): void {
     const rover = this.rover;
+    if (this.heli && !this.debugCam) {
+      const h = this.heli;
+      if (this.cameraMode === 'cabin') {
+        h.camAnchor.updateMatrixWorld();
+        h.camAnchor.getWorldPosition(this.camera.position);
+        h.camAnchor.getWorldQuaternion(this.camera.quaternion);
+        this.camera.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(this.look.pitch + 0.12, this.look.yaw, 0, 'YXZ')));
+        this.camera.near = 0.05;
+      } else {
+        const p = h.object.position;
+        const top = this.cameraMode === 'top';
+        const yaw = h.yaw + this.orbit.yaw;
+        const d = top ? Math.max(6, this.topHeight * 0.3) : this.orbit.dist;
+        const pitch = top ? 1.45 : this.orbit.pitch;
+        const target = new THREE.Vector3(p.x - Math.sin(yaw) * Math.cos(pitch) * d, p.y + 0.3 + Math.sin(pitch) * d, p.z - Math.cos(yaw) * Math.cos(pitch) * d);
+        if (this.chasePos.lengthSq() === 0 || dt === 0) this.chasePos.copy(target);
+        else this.chasePos.lerp(target, 1 - Math.exp(-dt * 4));
+        const gy = this.terrain.height(this.chasePos.x, this.chasePos.z) + 0.4;
+        if (this.chasePos.y < gy) this.chasePos.y = gy;
+        this.camera.position.copy(this.chasePos);
+        this.camera.up.set(0, 1, 0);
+        this.camera.lookAt(p.x, p.y + 0.25, p.z);
+        this.camera.near = 0.05;
+      }
+      this.camera.updateProjectionMatrix();
+      this.camera.updateMatrixWorld();
+      return;
+    }
     if (this.debugCam) {
       const d = this.debugCam;
       this.camera.position.set(d.x, this.terrain.height(d.x, d.z) + d.h, d.z);

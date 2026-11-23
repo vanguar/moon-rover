@@ -217,3 +217,27 @@ export function buildIngenuity(): { root: THREE.Object3D; rotors: [THREE.Object3
   const r1 = root.getObjectByName('rotors_01')!, r2 = root.getObjectByName('rotors_02')!;
   return { root, rotors: [r1, r2] };
 }
+
+/** Ingenuity as a garage model (preview: the rotors turn slowly). */
+export function buildIngenuityModel(): RoverModel {
+  const root = new THREE.Group();
+  const m = buildIngenuity();
+  if (m) root.add(m.root);
+  const anchor = new THREE.Object3D();
+  anchor.position.set(0, 0.15, 0.1);
+  root.add(anchor);
+  return {
+    root,
+    wheels: [],
+    cockpitAnchor: anchor,
+    lights: [],
+    setHeadlights: () => undefined,
+    setSteering: () => undefined,
+    animate(s: RoverAnimState) {
+      if (m) {
+        m.rotors[0].rotation.y += s.dt * 1.5;
+        m.rotors[1].rotation.y -= s.dt * 1.5;
+      }
+    },
+  };
+}

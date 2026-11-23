@@ -108,12 +108,12 @@ export class Garage {
     const rows: [string, string][] = [
       [t('sMass'), `${num(s.real.massKg, 1)} ${t('uKg')}`],
       [t('sLength'), `${num(s.real.lengthM, 2)} ${t('hM')}`],
-      [t('sWheels'), `${s.real.wheels}${s.skid ? ` · ${t('sSkid')}` : ''}`],
+      s.heli ? [t('sRotors'), t('sRotorsVal')] : [t('sWheels'), `${s.real.wheels}${s.skid ? ` · ${t('sSkid')}` : ''}`],
       [t('sPower'), t(`r_${s.id}_power`)],
       [t('sRealSpeed'), `${num(s.real.speedKmh, s.real.speedKmh < 1 ? 3 : 0)} ${t('hKmh')}`],
       [t('sGameSpeed'), `${num(s.maxSpeed * 3.6, 0)} ${t('hKmh')}`],
       [t('sDistance'), s.real.distanceKm !== undefined ? `${num(s.real.distanceKm, 1)} ${t('hKm')}` : t('sActive')],
-      [t('sView'), t(s.crew ? 'sViewCrew' : 'sViewCam')],
+      [t('sView'), t(s.heli ? 'sViewHeli' : s.crew ? 'sViewCrew' : 'sViewCam')],
     ];
     const dl = $('#d-specs');
     dl.innerHTML = '';

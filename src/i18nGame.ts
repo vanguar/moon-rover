@@ -1,0 +1,99 @@
+/**
+ * Strings for the helicopter and the gameplay layer. Languages without an entry
+ * fall back to English (see t() in i18n.ts).
+ */
+type Dict = Record<string, string>;
+
+const ru: Dict = {
+  r_ingenuity: 'Ingenuity',
+  r_ingenuity_desc:
+    'Марсианский вертолёт (2021), 1,8 кг. Два соосных винта по 1,2 м, ~2500 об/мин в воздухе в 100 раз реже земного. Совершил 72 полёта — до 24 м высоты и 10 м/с. Летал только автономно: сигнал до Земли идёт 5–20 минут.',
+  r_ingenuity_power: 'Li-ion 38 Вт·ч + солнечная панель',
+  sRotors: 'Винты',
+  sRotorsVal: '2 соосных × 2 лопасти, ⌀ 1,2 м',
+  sViewHeli: 'камера вертолёта / со стороны',
+  heliPhase_landed: 'на земле',
+  heliPhase_spinup: 'раскрутка винтов',
+  heliPhase_manual: 'ручное управление',
+  heliPhase_auto: 'автопилот',
+  heliPhase_crashed: 'АВАРИЯ',
+  heliAlt: 'высота',
+  heliSpeed: 'скорость',
+  heliRotor: 'винты',
+  heliFlights: 'полётов',
+  heliTime: 'налёт',
+  heliAuto: 'Автопилот: взлёт, 5 м, облёт по точкам, возврат и посадка',
+  heliManual: 'Ручное управление — автопилот отключён',
+  heliDone: 'Облёт завершён. T — повторить',
+  heliLanded: 'Посадка. Батарея заряжается от солнечной панели',
+  heliCrash: 'Жёсткая посадка! R — вернуть на площадку',
+  heliLowBatt: 'Резерв батареи: вертолёт садится. Нужна зарядка на земле',
+  heliKeys: 'T — автопилот · Space/Shift — вверх/вниз · W/S — вперёд/назад · A/D — разворот · C — камера',
+  hMs: 'м/с',
+  hRpm: 'об/мин',
+  hS: 'с',
+  bAuto: 'Автопилот (T)',
+};
+
+const uk: Dict = {
+  r_ingenuity_desc:
+    'Марсіанський гелікоптер (2021), 1,8 кг. Два співвісні гвинти по 1,2 м, ~2500 об/хв у повітрі в 100 разів рідшому за земне. Здійснив 72 польоти — до 24 м висоти та 10 м/с. Літав лише автономно: сигнал до Землі йде 5–20 хвилин.',
+  r_ingenuity_power: 'Li-ion 38 Вт·год + сонячна панель',
+  sRotors: 'Гвинти',
+  sRotorsVal: '2 співвісні × 2 лопаті, ⌀ 1,2 м',
+  sViewHeli: 'камера гелікоптера / збоку',
+  heliPhase_landed: 'на землі',
+  heliPhase_spinup: 'розкрутка гвинтів',
+  heliPhase_manual: 'ручне керування',
+  heliPhase_auto: 'автопілот',
+  heliPhase_crashed: 'АВАРІЯ',
+  heliAlt: 'висота',
+  heliSpeed: 'швидкість',
+  heliRotor: 'гвинти',
+  heliFlights: 'польотів',
+  heliTime: 'наліт',
+  heliAuto: 'Автопілот: зліт, 5 м, обліт по точках, повернення й посадка',
+  heliManual: 'Ручне керування — автопілот вимкнено',
+  heliDone: 'Обліт завершено. T — повторити',
+  heliLanded: 'Посадка. Батарея заряджається від сонячної панелі',
+  heliCrash: 'Жорстка посадка! R — повернути на майданчик',
+  heliLowBatt: 'Резерв батареї: гелікоптер сідає. Потрібна зарядка на землі',
+  heliKeys: 'T — автопілот · Space/Shift — вгору/вниз · W/S — вперед/назад · A/D — розворот · C — камера',
+  hMs: 'м/с',
+  hRpm: 'об/хв',
+  hS: 'с',
+  bAuto: 'Автопілот (T)',
+};
+
+const en: Dict = {
+  r_ingenuity: 'Ingenuity',
+  r_ingenuity_desc:
+    'The Mars helicopter (2021), 1.8 kg. Two coaxial 1.2 m rotors at ~2500 rpm in air 100 times thinner than Earth’s. It flew 72 times — up to 24 m high and 10 m/s. Every flight was autonomous: signals take 5–20 minutes to reach Earth.',
+  r_ingenuity_power: 'Li-ion 38 Wh + solar panel',
+  sRotors: 'Rotors',
+  sRotorsVal: '2 coaxial × 2 blades, ⌀ 1.2 m',
+  sViewHeli: 'helicopter camera / chase',
+  heliPhase_landed: 'on the ground',
+  heliPhase_spinup: 'rotor spin-up',
+  heliPhase_manual: 'manual control',
+  heliPhase_auto: 'autopilot',
+  heliPhase_crashed: 'CRASH',
+  heliAlt: 'alt',
+  heliSpeed: 'speed',
+  heliRotor: 'rotors',
+  heliFlights: 'flights',
+  heliTime: 'flight time',
+  heliAuto: 'Autopilot: take-off, 5 m, waypoint loop, return and landing',
+  heliManual: 'Manual control — autopilot off',
+  heliDone: 'Loop complete. T — fly again',
+  heliLanded: 'Landed. The solar panel is charging the battery',
+  heliCrash: 'Hard landing! R — back to the airfield',
+  heliLowBatt: 'Battery reserve: landing now. Recharge on the ground',
+  heliKeys: 'T — autopilot · Space/Shift — up/down · W/S — forward/back · A/D — yaw · C — camera',
+  hMs: 'm/s',
+  hRpm: 'rpm',
+  hS: 's',
+  bAuto: 'Autopilot (T)',
+};
+
+export const GAME_STRINGS: Record<string, Dict> = { ru, uk, en };

@@ -306,3 +306,18 @@ kbd { min-width: 27px; height: 27px; font-size: 13px; }
 @media (max-width: 900px) {
   .cards { grid-template-columns: 1fr; }
 }
+
+/* ===== Ingenuity telemetry ===== */
+#heli-hud {
+  position: fixed; left: 16px; bottom: 16px; z-index: 6; max-width: min(560px, calc(100vw - 120px));
+  padding: 10px 14px; border-radius: 12px; background: rgba(12, 10, 8, 0.72); color: #f3e6d8;
+  font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 170, 100, 0.25); pointer-events: none;
+}
+#heli-hud b { color: #ffc46b; font-weight: 600; }
+#heli-hud .hs { margin-top: 4px; color: #ffd9a0; }
+#heli-hud .hk { margin-top: 4px; opacity: 0.6; font-size: 11px; }
+body.mobile #heli-hud .hk { display: none; }
+body.heli #hud { display: none; }
+.tb.heli-only { display: none; }
+body.heli .tb.heli-only { display: grid; }

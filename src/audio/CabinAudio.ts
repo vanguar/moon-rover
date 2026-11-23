@@ -75,6 +75,11 @@ export class CabinAudio {
     }
   }
 
+  /** Audio graph for other sound sources (helicopter rotors); null before start(). */
+  get output(): { ctx: AudioContext; dest: AudioNode } | null {
+    return this.ctx ? { ctx: this.ctx, dest: this.master } : null;
+  }
+
   setVolume(v: number): void {
     if (this.ctx) this.master.gain.setTargetAtTime(v, this.ctx.currentTime, 0.05);
   }

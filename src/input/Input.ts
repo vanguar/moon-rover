@@ -1,6 +1,6 @@
 import type { DriveInput } from '../rover/Rover';
 
-export type Action = 'camera' | 'top' | 'reset' | 'lights' | 'pause' | 'park' | 'hud' | 'zoomin' | 'zoomout' | 'const' | 'weather';
+export type Action = 'camera' | 'top' | 'reset' | 'lights' | 'pause' | 'park' | 'hud' | 'zoomin' | 'zoomout' | 'const' | 'weather' | 'auto';
 
 /**
  * Merges keyboard, gamepad, touch (joystick + pedals) and device-tilt steering
@@ -9,6 +9,10 @@ export type Action = 'camera' | 'top' | 'reset' | 'lights' | 'pause' | 'park' | 
 export class Input {
   readonly drive: DriveInput = { throttle: 0, brake: 0, steer: 0, handbrake: false };
   tiltEnabled = false;
+  /** Helicopter: vertical command −1 (descend) .. 1 (climb). */
+  lift = 0;
+  /** Helicopter mode: the joystick's vertical axis is the collective, not the throttle. */
+  heliMode = false;
   lastDevice: 'keyboard' | 'gamepad' | 'touch' = 'keyboard';
 
   private keys = new Set<string>();
@@ -27,7 +31,7 @@ export class Input {
       this.lastDevice = 'keyboard';
       if (!e.repeat) {
         const map: Record<string, Action> = {
-          KeyC: 'camera', KeyV: 'top', KeyR: 'reset', KeyH: 'lights', Escape: 'pause', KeyP: 'park', KeyI: 'hud', KeyK: 'const', KeyB: 'weather',
+          KeyC: 'camera', KeyV: 'top', KeyR: 'reset', KeyH: 'lights', Escape: 'pause', KeyP: 'park', KeyI: 'hud', KeyK: 'const', KeyB: 'weather', KeyT: 'auto',
           Equal: 'zoomin', NumpadAdd: 'zoomin', Minus: 'zoomout', NumpadSubtract: 'zoomout',
         };
         const a = map[e.code];
@@ -153,6 +157,7 @@ export class Input {
     else this.kbSteer += (0 - this.kbSteer) * Math.min(1, dt * 6);
 
     let throttle = kThrottle, brake = kBrake, steer = this.kbSteer, hand = k.has('Space');
+    let lift = (k.has('Space') ? 1 : 0) - (k.has('ShiftLeft') || k.has('ShiftRight') || k.has('ControlLeft') ? 1 : 0);
 
     // Gamepad (standard mapping).
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -166,7 +171,9 @@ export class Input {
       brake = Math.max(brake, lt);
       if (sx !== 0) steer = sx;
       if (p.buttons[0]?.pressed) hand = true;
-      const edges: [number, Action][] = [[3, 'camera'], [2, 'lights'], [8, 'reset'], [9, 'pause'], [1, 'reset']];
+      const ry = p.axes[3] ?? 0;
+      if (Math.abs(ry) > 0.15) lift = -ry;
+      const edges: [number, Action][] = [[3, 'camera'], [2, 'lights'], [8, 'reset'], [9, 'pause'], [1, 'reset'], [5, 'auto']];
       for (const [b, a] of edges) {
         const now = !!p.buttons[b]?.pressed;
         if (now && !this.padPrev[b]) this.emit(a);
@@ -177,8 +184,15 @@ export class Input {
 
     // Touch.
     const t = this.touch;
-    throttle = Math.max(throttle, t.gas, Math.max(0, t.joyY));
-    brake = Math.max(brake, t.brake, Math.max(0, -t.joyY));
+    if (this.heliMode) {
+      throttle = Math.max(throttle, t.gas);
+      brake = Math.max(brake, t.brake);
+      if (t.joyY !== 0) lift = t.joyY;
+    } else {
+      throttle = Math.max(throttle, t.gas, Math.max(0, t.joyY));
+      brake = Math.max(brake, t.brake, Math.max(0, -t.joyY));
+    }
+    this.lift = Math.max(-1, Math.min(1, lift));
     if (t.steer !== 0) steer = t.steer;
     else if (this.tiltEnabled && this.tilt !== 0) steer = this.tilt;
     if (t.hand) hand = true;

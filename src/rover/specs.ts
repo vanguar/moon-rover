@@ -3,12 +3,12 @@ import { buildLrvModel, LRV_WHEELS } from './model';
 import type { RoverModel } from './models/kit';
 import { buildLunokhodModel, LUNOKHOD_AXLE, LUNOKHOD_R, LUNOKHOD_WHEELS } from './models/lunokhod';
 import { buildMslModel, MSL_AXLE, MSL_WHEELS } from './models/msl';
-import { buildPerseveranceGlb, PERSE_GLB_AXLE, PERSE_GLB_WHEELS } from './models/nasa';
+import { buildIngenuityModel, buildPerseveranceGlb, PERSE_GLB_AXLE, PERSE_GLB_WHEELS } from './models/nasa';
 import { buildSojournerModel, SOJOURNER_AXLE, SOJOURNER_R, SOJOURNER_WHEELS } from './models/sojourner';
 import { buildYutuModel, YUTU_AXLE, YUTU_R, YUTU_WHEELS } from './models/yutu';
 import { buildZhurongModel, ZHURONG_AXLE, ZHURONG_R, ZHURONG_WHEELS } from './models/zhurong';
 
-export type RoverId = 'lrv' | 'lunokhod' | 'yutu2' | 'sojourner' | 'curiosity' | 'perseverance' | 'zhurong';
+export type RoverId = 'lrv' | 'lunokhod' | 'yutu2' | 'sojourner' | 'curiosity' | 'perseverance' | 'zhurong' | 'ingenuity';
 
 /** Part of a photo that is animated on the selection card (coordinates in 0..1 of the cropped photo). */
 export type PhotoPart =
@@ -52,6 +52,8 @@ export interface RoverSpec {
   tread: 'chevron' | 'grouser' | 'cleat';
   /** Crew on board (LRV) or a remote-driven robot seen through its cameras. */
   crew: boolean;
+  /** Not a rover: the Ingenuity helicopter (flies from its pad next to Perseverance). */
+  heli?: boolean;
   build(): RoverModel;
   photo: { file: string; credit: string; license: string; url: string; parts: PhotoPart[] };
   /** Real-mission facts; distance only for completed missions (active rovers keep driving). */
@@ -197,9 +199,26 @@ export const ROVERS: Record<RoverId, RoverSpec> = {
     },
     real: { massKg: 240, lengthM: 2.6, speedKmh: 0.2, wheels: 6, power: 'Solar', distanceKm: 1.9 },
   },
+  ingenuity: {
+    id: 'ingenuity', world: 'mars', country: 'usa', year: 2021, heli: true,
+    wheels: [], wheelRadius: 0, wheelWidth: 0, axleY: 0, travel: 0, mass: 1.8,
+    body: { half: [0.1, 0.1, 0.1], offset: [0, 0.2, 0] },
+    top: { half: [0.1, 0.1, 0.1], offset: [0, 0.4, 0] },
+    steer: [], maxSteer: 0, maxSpeed: 10,
+    batteryWh: 38, idleW: 0, solarW: 0, lightsW: 0,
+    trackWheels: [], tread: 'cleat', crew: false, build: buildIngenuityModel,
+    photo: {
+      file: 'ingenuity.jpg', credit: 'NASA / JPL-Caltech / ASU / MSSS (Mastcam-Z)', license: 'Public domain',
+      url: 'https://commons.wikimedia.org/wiki/File:Mastcam-Z_Gives_Ingenuity_a_Close-up.jpg', parts: [
+        { kind: 'glint', poly: [[0.43, 0.1], [0.57, 0.1], [0.57, 0.28], [0.43, 0.28]], period: 5 },
+        { kind: 'sway', poly: [[0.44, 0.28], [0.56, 0.28], [0.56, 0.64], [0.44, 0.64]], px: 0.5, py: 0.45, amp: 0.02, period: 6 },
+      ],
+    },
+    real: { massKg: 1.8, lengthM: 1.2, speedKmh: 36, wheels: 0, power: 'Li-ion 38 Wh + solar', distanceKm: 17 },
+  },
 };
 
-export const ROVER_ORDER: RoverId[] = ['lrv', 'lunokhod', 'yutu2', 'perseverance', 'curiosity', 'zhurong', 'sojourner'];
+export const ROVER_ORDER: RoverId[] = ['lrv', 'lunokhod', 'yutu2', 'perseverance', 'ingenuity', 'curiosity', 'zhurong', 'sojourner'];
 
 export function roversFor(world: WorldId): RoverSpec[] {
   return ROVER_ORDER.map((id) => ROVERS[id]).filter((r) => r.world === world);
