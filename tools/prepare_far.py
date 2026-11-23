@@ -78,7 +78,7 @@ def main():
 
     # Vertical alignment with the NAC DTM over the DTM window.
     hm = np.asarray(Image.open(os.path.join(OUT, "heightmap.png")), dtype=np.float64)
-    dtm = meta["minHeight"] + hm / 65535.0 * (meta["maxHeight"] - meta["minHeight"])
+    dtm = meta["minHeight"] + hm * meta.get("heightStep", (meta["maxHeight"] - meta["minHeight"]) / 65535.0)
     half_w = meta["sizeX"] / 2
     inwin = (np.abs(xx) < half_w) & (np.abs(zz) < half_w)
     offset = float(dtm.mean() - h[inwin].mean())

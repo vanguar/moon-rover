@@ -26,6 +26,12 @@ export class TerrainRenderer {
   readonly uniforms: {
     uRover: { value: THREE.Vector2 };
     uRtRange: { value: number };
+    uLodD: { value: THREE.Vector4 };
+    /** Direction to the Sun (world), for sub-pixel cast shadows of pebbles and craterlets. */
+    uSun: { value: THREE.Vector3 };
+    uSunShadow: { value: THREE.Vector3 };
+    uBaked: { value: THREE.Texture };
+    uFarShadow: { value: THREE.Texture };
   };
   private chunks = new Map<string, Chunk>();
   private workers: Worker[] = [];
@@ -71,19 +77,24 @@ export class TerrainRenderer {
     this.uniforms = {
       uRover: { value: new THREE.Vector2() },
       uRtRange: { value: quality.shadowRange },
+      uLodD: { value: new THREE.Vector4(...quality.lodDistances) },
+      uSun: { value: new THREE.Vector3(0, 1, 0) },
+      uSunShadow: { value: new THREE.Vector3(1, 0, 0) },
+      uBaked: { value: baked },
+      uFarShadow: { value: farShadow ?? baked },
     };
     const u = this.uniforms;
     this.material = makeLunar(new THREE.MeshLambertMaterial({ color: 0xffffff }), 'terrain', (shader) => {
       shader.defines = { ...(shader.defines ?? {}), CRATERLETS: this.craterletLevel(), MARS: this.mars ? 1 : 0 };
       Object.assign(shader.uniforms, {
         uOrtho: { value: ortho },
-        uBaked: { value: baked },
+        uBaked: u.uBaked,
         uMapSize: { value: new THREE.Vector2(meta.sizeX, meta.sizeZ) },
         uOrthoHi: { value: orthoHi ?? ortho },
         uHi: { value: hiRect },
         uDtmN: { value: dtmNormals },
         uNearN: { value: quality.lodDistances[1] },
-        uFarShadow: { value: farShadow ?? baked },
+        uFarShadow: u.uFarShadow,
         uFarHalf: { value: terrain.far ? terrain.far.half : 1e6 },
         uHasFar: { value: farShadow && terrain.far ? 1 : 0 },
         uFarAlb: { value: farAlbedo ?? ortho },
@@ -117,7 +128,88 @@ uniform float uFarHalf;
 uniform float uHasFar;
 uniform sampler2D uFarAlb;
 uniform float uHasFarAlb;
+uniform vec3 uSunShadow; // (horizontal direction to the Sun, cot(elevation))
 ${NOISE_GLSL}
+// Cast shadows of sub-metre craters (low Sun: the up-Sun inner wall is in shadow).
+// Marches the bowl profile toward the Sun; returns 1 lit .. 0 shadowed.
+float craterShadow(vec2 p, float cell, float seed, vec2 s2, float tanEl) {
+  vec2 c = floor(p / cell);
+  float lit = 1.0;
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      vec2 id = mod(c + vec2(float(i), float(j)), 4096.0);
+      if (lhash12(id + seed) > 0.32) continue;
+      vec2 ctr = (c + vec2(float(i), float(j)) + vec2(lhash12(id + seed + 17.3), lhash12(id + seed + 41.7))) * cell;
+      float R = cell * (0.12 + 0.33 * lhash12(id + seed + 7.1));
+      vec2 d = p - ctr;
+      if (dot(d, d) > R * R) continue;
+      float fresh = lhash12(id + seed + 3.3);
+      float depth = 2.0 * R * (0.025 + 0.09 * fresh * fresh);
+      float rim = depth * (0.12 + 0.25 * fresh);
+      float q0 = length(d) / R, b0 = 1.0 - q0 * q0;
+      float h0 = -depth * b0 * b0;
+      for (int k = 1; k <= 5; k++) {
+        float sk = float(k) * 0.4 * R;
+        float q = length(d + s2 * sk) / R;
+        float b = max(1.0 - q * q, 0.0);
+        float e = (q - 1.0) / 0.38;
+        float hk = -depth * b * b + rim * exp(-e * e);
+        lit = min(lit, smoothstep(-0.004, 0.004, h0 + sk * tanEl - hk));
+      }
+    }
+  }
+  return lit;
+}
+// Lunar rock fragments lying on the regolith: one irregular clast per occupied cell.
+// Returns (dh/dx, dh/dz, coverage, cast shadow on the soil: 1 lit .. 0); tone = clast albedo factor.
+vec4 clastField(vec2 p, float cell, float seed, float density, vec2 s2, float cotEl, out float tone) {
+  vec2 c = floor(p / cell);
+  vec4 acc = vec4(0.0, 0.0, 0.0, 1.0);
+  float best = 0.0;
+  tone = 1.0;
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      vec2 id = mod(c + vec2(float(i), float(j)), 4096.0);
+      if (lhash12(id + seed) > density) continue;
+      vec2 ctr = (c + vec2(float(i), float(j)) + vec2(lhash12(id + seed + 5.1), lhash12(id + seed + 9.7))) * cell;
+      // Size-frequency: many small fragments, few large ones.
+      float R = cell * (0.06 + 0.26 * pow(lhash12(id + seed + 2.3), 2.6));
+      vec2 d = p - ctr;
+      // Cheap reject: beyond the clast and its longest possible shadow.
+      float reach = R * 1.4 + min(R * cotEl, 3.0 * cell);
+      if (dot(d, d) > reach * reach) continue;
+      float a = lhash12(id + seed + 7.7) * 6.2832;
+      vec2 e = vec2(dot(d, vec2(cos(a), sin(a))), dot(d, vec2(-sin(a), cos(a)))) * vec2(1.0, 1.0 + 0.7 * lhash12(id + seed + 1.9));
+      float ang = atan(e.y, e.x);
+      // Angular outline (impact fragments are blocky, not round).
+      float r = length(e) * (1.0 + 0.16 * sin(ang * 3.0 + lhash12(id + seed + 3.3) * 6.28) + 0.1 * sin(ang * 5.0 + seed) + 0.05 * sin(ang * 9.0));
+      float H = R * (0.55 + 0.45 * lhash12(id + seed + 4.4));
+      if (r < R) {
+        float q = r / R;
+        float k = sqrt(max(1.0 - q * q, 1e-3));
+        float h = H * k;
+        if (h > best) {
+          best = h;
+          // Rounded-blocky profile; faceted by a little noise so tops are not flat plates.
+          float sl = clamp(-H / R * q / max(k, 0.12), -5.0, 5.0);
+          vec3 fn = lnoised((p - ctr) / R * 2.3 + id);
+          acc.xy = (r > 1e-5 ? d / length(d) : vec2(0.0)) * sl + fn.yz * 0.35;
+          acc.z = smoothstep(1.0, 0.86, q);
+          // Breccias and anorthosite are brighter than the soil, basalts darker; dust-coated tops.
+          tone = (0.65 + 0.9 * lhash12(id + seed + 6.6)) * (0.85 + 0.3 * fn.x);
+        }
+      } else {
+        // Shadow of the clast on the soil, swept down-Sun (length H·cot(elevation)).
+        float L = min(H * cotEl, 3.0 * cell);
+        float t = dot(d, -s2);
+        float perp = length(d + s2 * t);
+        float w = R * 0.85 * sqrt(max(1.0 - t / (L + 0.5 * R), 0.0));
+        if (t > 0.0 && w > 1e-4) acc.w = min(acc.w, smoothstep(w * 0.75, w, perp)); // (smoothstep with equal edges is undefined)
+      }
+    }
+  }
+  return acc;
+}
 // Sub-metre craters (below DTM and mesh resolution): one random crater per cell,
 // parabolic bowl + raised rim; returns (height, d/dx, d/dz).
 vec3 craterField(vec2 p, float cell, float seed) {
@@ -197,7 +289,8 @@ vec4 pebbleField(vec2 p, float cell, float seed, float density) {
         )
         .replace(
           '#include <map_fragment>',
-          `vec2 mapUv = (vWorldP.xz + 0.5 * uMapSize) / uMapSize;
+          `float microLit = 1.0;
+vec2 mapUv = (vWorldP.xz + 0.5 * uMapSize) / uMapSize;
 // Inside the DTM window: 1; outside (SLDEM terrain): 0, with a 150 m blend.
 vec2 edgeD = 0.5 * uMapSize - abs(vWorldP.xz);
 float wIn = uHasFar > 0.5 ? smoothstep(0.0, 150.0, min(edgeD.x, edgeD.y)) : 1.0;
@@ -261,12 +354,12 @@ float wp2 = clamp(1.6 - fp * 10.0, 0.0, 1.0);
 float pebbleMask = 0.0;
 if (wp1 > 0.0) {
   vec4 pb = pebbleField(vWorldP.xz, 0.3, 61.0, mix(0.16, 0.06, sandy));
-  grad -= pb.yz * wp1 * 0.8;
+  grad += pb.yz * wp1 * 0.8;
   pebbleMask = max(pebbleMask, pb.w * wp1);
 }
 if (wp2 > 0.0) {
   vec4 pg = pebbleField(vWorldP.xz, 0.09, 83.0, mix(0.4, 0.18, sandy));
-  grad -= pg.yz * wp2 * 0.6;
+  grad += pg.yz * wp2 * 0.6;
   pebbleMask = max(pebbleMask, pg.w * wp2 * 0.85);
 }
 // Fine granule speckle below the pebbles.
@@ -276,8 +369,48 @@ if (wsp > 0.0) diffuseColor.rgb *= 1.0 + (lhash12(floor(vWorldP.xz * 55.0)) - 0.
 vec3 basalt = vec3(0.075, 0.062, 0.055) * (0.8 + 0.5 * lhash12(floor(vWorldP.xz * 9.0)));
 diffuseColor.rgb = mix(diffuseColor.rgb, mix(basalt, diffuseColor.rgb, 0.3), pebbleMask * 0.8);
 #else
-vec3 regolith = vec3(1.0, 0.965, 0.92);
-diffuseColor.rgb = regolith * clamp(ortho * 0.9 + albedoVar * 0.25, 0.02, 1.0);
+// Lunar regolith: a nearly neutral, faintly warm grey (reflectance rises slowly toward the red).
+// Calibrated on Apollo 15 Hasselblad frames (docs/REALISM.md): ground/massif brightness ratio ≈ 1 : 1.6.
+vec3 regolith = vec3(1.0, 0.985, 0.965) * 1.5;
+float alb = clamp(ortho * 0.9 + albedoVar * 0.25, 0.02, 1.0);
+diffuseColor.rgb = regolith * alb;
+// Sun geometry for sub-pixel cast shadows.
+vec2 s2 = uSunShadow.xy;
+float cotEl = uSunShadow.z;
+microLit = 1.0;
+#if CRATERLETS > 0
+if (wc1 > 0.0) microLit = min(microLit, mix(1.0, craterShadow(vWorldP.xz, 2.2, 11.0, s2, 1.0 / cotEl), wc1));
+#endif
+#if CRATERLETS > 1
+if (wc2 > 0.0) microLit = min(microLit, mix(1.0, craterShadow(vWorldP.xz, 0.7, 29.0, s2, 1.0 / cotEl), wc2));
+#endif
+// Rock fragments and clods: more on bright (fresh, blocky) ejecta, as on every Apollo
+// surface photograph; brighter than the soil, with hard shadows down-Sun.
+float fresh = smoothstep(0.9, 1.6, ortho / max(textureLod(uOrtho, mapUv, 6.0).r, 0.02));
+float wl1 = clamp(1.6 - fp * 2.2, 0.0, 1.0);
+float wl2 = clamp(1.6 - fp * 7.0, 0.0, 1.0);
+float clastMask = 0.0, clastTone = 1.0, tn;
+if (wl1 > 0.0) {
+  vec4 cl = clastField(vWorldP.xz, 0.55, 61.0, mix(0.07, 0.3, fresh), s2, cotEl, tn);
+  grad += cl.xy * wl1;
+  clastMask = cl.z * wl1;
+  clastTone = tn;
+  microLit = min(microLit, mix(1.0, cl.w, wl1));
+}
+if (wl2 > 0.0) {
+  vec4 cg = clastField(vWorldP.xz, 0.14, 83.0, mix(0.22, 0.45, fresh), s2, cotEl, tn);
+  grad += cg.xy * wl2 * 0.8;
+  if (cg.z * wl2 > clastMask) { clastMask = cg.z * wl2 * 0.9; clastTone = tn; }
+  microLit = min(microLit, mix(1.0, cg.w, wl2 * 0.9));
+}
+diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * clastTone * 1.3, clastMask);
+// Granular speckle of the soil itself (cm-sized aggregates).
+float wsp = clamp(1.5 - fp * 25.0, 0.0, 1.0);
+if (wsp > 0.0) {
+  vec3 gn = lnoised(vWorldP.xz * 38.0);
+  grad += gn.yz * 0.012 * wsp;
+  diffuseColor.rgb *= 1.0 + (lhash12(floor(vWorldP.xz * 70.0)) - 0.5) * 0.16 * wsp;
+}
 #endif
 // Baked far-field cast shadow of the DTM; faded out where the real-time shadow map is valid.
 float baked = texture2D(uBaked, mapUv).r;
@@ -288,7 +421,8 @@ float bakedSun = mix(smoothstep(0.2, 0.8, baked), smoothstep(0.05, 0.5, baked), 
 if (wIn < 1.0) {
   float farS = smoothstep(0.2, 0.8, texture2D(uFarShadow, (vWorldP.xz + uFarHalf) / (2.0 * uFarHalf)).r);
   bakedSun = mix(farS, bakedSun, wIn);
-}`,
+}
+bakedSun *= microLit;`,
         )
         .replace(
           '#include <normal_fragment_begin>',
@@ -331,13 +465,13 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`,
   private buildNormalTexture(t: TerrainData): THREE.DataTexture {
     const w = t.w, h = t.h, px = t.meta.pixelSize;
     const data = new Uint8Array(w * h * 2);
-    const H = t.heights;
+    const H = t.heights, k = t.hScale;
     for (let j = 0; j < h; j++) {
       const j0 = Math.max(0, j - 1), j1 = Math.min(h - 1, j + 1);
       for (let i = 0; i < w; i++) {
         const i0 = Math.max(0, i - 1), i1 = Math.min(w - 1, i + 1);
-        const sx = (H[j * w + i1] - H[j * w + i0]) / ((i1 - i0) * px);
-        const sz = (H[j1 * w + i] - H[j0 * w + i]) / ((j1 - j0) * px);
+        const sx = ((H[j * w + i1] - H[j * w + i0]) * k) / ((i1 - i0) * px);
+        const sz = ((H[j1 * w + i] - H[j0 * w + i]) * k) / ((j1 - j0) * px);
         const o = (j * w + i) * 2;
         data[o] = Math.max(0, Math.min(255, Math.round((sx / 5 + 0.5) * 255)));
         data[o + 1] = Math.max(0, Math.min(255, Math.round((sz / 5 + 0.5) * 255)));
@@ -352,9 +486,23 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`,
     return tex;
   }
 
+  /** Terrain cast-shadow masks recomputed for the current Sun (ShadowBaker). */
+  setShadowMaps(near: THREE.Texture, far: THREE.Texture | null): void {
+    this.uniforms.uBaked.value = near;
+    if (far) this.uniforms.uFarShadow.value = far;
+  }
+
+  /** Sun direction (world, unit) for the sub-pixel cast shadows. */
+  setSun(dir: THREE.Vector3): void {
+    this.uniforms.uSun.value.copy(dir);
+    const h = Math.hypot(dir.x, dir.z) || 1e-6;
+    this.uniforms.uSunShadow.value.set(dir.x / h, dir.z / h, Math.min(30, h / Math.max(dir.y, 0.02)));
+  }
+
   setQuality(q: QualitySettings): void {
     this.q = q;
     this.uniforms.uRtRange.value = q.shadowRange;
+    this.uniforms.uLodD.value.set(...(q.lodDistances as [number, number, number, number]));
     for (const c of this.chunks.values()) c.level = -1; // force rebuild at new LOD
     this.material.customProgramCacheKey = () => `lunar-terrain-${this.craterletLevel()}`;
     this.material.needsUpdate = true;
@@ -432,6 +580,7 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`,
     this.workers[wi].postMessage({
       type: 'build', id, cx: c.ix * CHUNK, cz: c.iz * CHUNK, size: CHUNK, segs,
       skirt: 2 + (CHUNK / segs) * 1.5,
+      level, morph: level < this.q.lodSegments.length - 1 && level < this.q.lodDistances.length,
     });
   }
 
@@ -448,6 +597,7 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`,
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(r.positions, 3));
     g.setAttribute('normal', new THREE.BufferAttribute(r.normals, 3, true));
+    g.setAttribute('aMorph', new THREE.BufferAttribute(r.morph, 2));
     g.setIndex(chunkIndex(n));
     const half = CHUNK / 2;
     g.boundingBox = new THREE.Box3(new THREE.Vector3(-half, r.minY, -half), new THREE.Vector3(half, r.maxY, half));

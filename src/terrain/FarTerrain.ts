@@ -10,7 +10,7 @@ import type { TerrainData } from './TerrainData';
  */
 export class FarTerrain {
   readonly mesh: THREE.Mesh;
-  private uniforms = { uNearR: { value: 3000 } };
+  private uniforms = { uNearR: { value: 3000 }, uFarShadow: { value: null as THREE.Texture | null } };
 
   constructor(terrain: TerrainData, farShadow: THREE.Texture | undefined, mobile: boolean, farAlbedo?: THREE.Texture) {
     const f = terrain.far!;
@@ -67,8 +67,9 @@ export class FarTerrain {
       farAlbedo.wrapS = farAlbedo.wrapT = THREE.ClampToEdgeWrapping;
       farAlbedo.needsUpdate = true;
     }
-    const mat = makeLunar(new THREE.MeshLambertMaterial({ color: mars ? 0xffffff : 0x9a948c, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4 }), 'far', (shader) => {
-      Object.assign(shader.uniforms, { uFarShadow: { value: farShadow ?? null }, uNearR: u.uNearR, uHasShadow: { value: farShadow ? 1 : 0 }, uFarAlb: { value: farAlbedo ?? null } });
+    const mat = makeLunar(new THREE.MeshLambertMaterial({ color: mars ? 0xffffff : 0x989690, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4 }), 'far', (shader) => {
+      u.uFarShadow.value = u.uFarShadow.value ?? farShadow ?? null;
+      Object.assign(shader.uniforms, { uFarShadow: u.uFarShadow, uNearR: u.uNearR, uHasShadow: { value: farShadow ? 1 : 0 }, uFarAlb: { value: farAlbedo ?? null } });
       shader.defines = { ...(shader.defines ?? {}), FAR_ALB: farAlbedo ? 1 : 0 };
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nvarying vec3 vWP;\nvarying vec2 vFarUv;')
@@ -115,6 +116,10 @@ normal = normalize((viewMatrix * vec4(nWf, 0.0)).xyz);`)
     this.mesh.castShadow = false;
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = -1;
+  }
+
+  setShadowMap(t: THREE.Texture): void {
+    this.uniforms.uFarShadow.value = t;
   }
 
   setNearRadius(r: number): void {

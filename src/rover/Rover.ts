@@ -92,6 +92,9 @@ export class Rover {
   /** Sunlight reaching the panels relative to the vacuum value (atmosphere, dust storm). */
   solarScale = 1;
   private mechPower = 0;
+  /** Pose of the chassis and wheels before the last physics step: [x y z qx qy qz qw] per body. */
+  private prevPose: Float32Array;
+  private hasPrev = false;
   private tq = new THREE.Quaternion();
   private tv = new THREE.Vector3();
   private tv2 = new THREE.Vector3();
@@ -117,10 +120,11 @@ export class Rover {
     this.wheelImpact = new Array(n).fill(0);
     this.wheelLoad = new Array(n).fill(0);
     this.lastSusp = new Array(n).fill(0);
+    this.prevPose = new Float32Array(7 * (n + 1));
     this.wheelWorld = Array.from({ length: n }, () => new THREE.Vector3());
     this.wheelNormal = Array.from({ length: n }, () => new THREE.Vector3(0, 1, 0));
     this.wheelLocal = spec.wheels.map(([wx, wz]) => new THREE.Vector3(wx, spec.axleY, wz));
-    this.sunDir = sunDir.clone();
+    this.sunDir = sunDir; // shared with the game: follows the moving Sun
     const mass = spec.mass;
     const perWheel = (mass * g) / n;
     // Static sag ≈ 40 % of the travel; damping ≈ 0.42 of critical (LRV: k 2800 N/m, c 450 N·s/m).
@@ -249,8 +253,33 @@ export class Rover {
     return (a.x - c.x) * axle.x + (a.y - c.y) * axle.y + (a.z - c.z) * axle.z;
   }
 
+  private capturePose(): void {
+    const P = this.prevPose;
+    const put = (k: number, b: RAPIER.RigidBody) => {
+      const t = b.translation(), r = b.rotation();
+      P[k] = t.x; P[k + 1] = t.y; P[k + 2] = t.z;
+      P[k + 3] = r.x; P[k + 4] = r.y; P[k + 5] = r.z; P[k + 6] = r.w;
+    };
+    put(0, this.body);
+    for (let i = 0; i < this.units.length; i++) put(7 * (i + 1), this.units[i].wheel);
+    this.hasPrev = true;
+  }
+
+  /** Render pose of body k (0 = chassis, i + 1 = wheel i) between the last two physics states. */
+  private lerpPose(k: number, b: RAPIER.RigidBody, alpha: number, outP: THREE.Vector3, outQ: THREE.Quaternion): void {
+    const t = b.translation(), r = b.rotation();
+    outP.set(t.x, t.y, t.z);
+    outQ.set(r.x, r.y, r.z, r.w);
+    if (!this.hasPrev || alpha >= 1) return;
+    const P = this.prevPose, o = 7 * k;
+    outP.set(P[o] + (t.x - P[o]) * alpha, P[o + 1] + (t.y - P[o + 1]) * alpha, P[o + 2] + (t.z - P[o + 2]) * alpha);
+    this.tq.set(P[o + 3], P[o + 4], P[o + 5], P[o + 6]);
+    outQ.copy(this.tq.slerp(outQ, alpha));
+  }
+
   /** Called every fixed physics step. */
   step(dt: number, input: DriveInput): void {
+    this.capturePose();
     const spec = this.spec;
     const n = this.n;
     const lv = this.body.linvel();
@@ -360,10 +389,15 @@ export class Rover {
     }
   }
 
-  /** Called once per rendered frame after physics. */
-  sync(dt: number): void {
-    const t = this.body.translation();
-    const cq = this.chassisQuat(new THREE.Quaternion());
+  /**
+   * Called once per rendered frame after physics. `alpha` interpolates the drawn
+   * pose between the last two fixed physics steps, so motion stays smooth at any
+   * frame rate (60, 90, 144 Hz or uneven frames).
+   */
+  sync(dt: number, alpha = 1): void {
+    const t = new THREE.Vector3();
+    const cq = new THREE.Quaternion();
+    this.lerpPose(0, this.body, alpha, t, cq);
     this.object.position.set(t.x, t.y, t.z);
     this.object.quaternion.copy(cq);
     this.object.updateMatrixWorld();
@@ -379,10 +413,11 @@ export class Rover {
     for (let i = 0; i < this.n; i++) {
       const u = this.units[i];
       const wv = this.model.wheels[i];
-      const wp = u.wheel.translation(), wr = u.wheel.rotation();
+      const wp = new THREE.Vector3(), wr = new THREE.Quaternion();
+      this.lerpPose(i + 1, u.wheel, alpha, wp, wr);
       // Visual wheel = physical wheel body, expressed in the chassis frame.
       wv.steer.position.set(wp.x - t.x, wp.y - t.y, wp.z - t.z).applyQuaternion(inv);
-      wv.steer.quaternion.copy(inv).multiply(new THREE.Quaternion(wr.x, wr.y, wr.z, wr.w));
+      wv.steer.quaternion.copy(inv).multiply(wr);
       wv.spin.rotation.set(0, 0, 0);
       this.wheelWorld[i].set(wp.x, wp.y, wp.z);
       this.wheelLocal[i].copy(wv.steer.position);
@@ -403,8 +438,9 @@ export class Rover {
       this.wheelRimSpeed[i] = THREE.MathUtils.clamp(rim, -this.maxSpeed * 1.5, this.maxSpeed * 1.5);
       this.wheelSlip[i] = contact ? this.wheelRimSpeed[i] - this.speed : 0;
       // Suspension: strut displacement along the chassis Y.
-      const sp = u.strut.translation();
-      const local = this.tv.set(sp.x - t.x, sp.y - t.y, sp.z - t.z).applyQuaternion(inv);
+      const sp = u.strut.translation(), bt = this.body.translation();
+      const binv = this.chassisQuat(this.tq).invert();
+      const local = this.tv.set(sp.x - bt.x, sp.y - bt.y, sp.z - bt.z).applyQuaternion(binv);
       const comp = local.y - this.spec.axleY; // + = compressed
       this.wheelImpact[i] = dt > 0 ? (comp - this.lastSusp[i]) / dt : 0;
       this.lastSusp[i] = comp;
@@ -458,6 +494,7 @@ export class Rover {
   private teleport(x: number, y: number, z: number, q: THREE.Quaternion): void {
     const rot = { x: q.x, y: q.y, z: q.z, w: q.w };
     const zero = { x: 0, y: 0, z: 0 };
+    this.hasPrev = false;
     this.body.setTranslation({ x, y, z }, true);
     this.body.setRotation(rot, true);
     this.body.setLinvel(zero, true);

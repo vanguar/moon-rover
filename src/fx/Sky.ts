@@ -72,6 +72,10 @@ export class Sky {
   readonly earthDir: THREE.Vector3;
   private stars: THREE.Points;
   private flare: Lensflare;
+  /** Stars, Milky Way and constellations: rotated as one sphere as time runs. */
+  private celestial = new THREE.Group();
+  private sunDisc!: THREE.Mesh;
+  private earth!: THREE.Mesh;
 
   private milkyWay: THREE.Mesh | null = null;
   private constLines: THREE.LineSegments | null = null;
@@ -93,7 +97,8 @@ export class Sky {
     this.stars = buildStars(stars, starCount);
     this.stars.renderOrder = -10;
     this.stars.frustumCulled = false;
-    this.group.add(this.stars);
+    this.celestial.add(this.stars);
+    this.group.add(this.celestial);
 
     // Sun: 0.53° disc, far brighter than anything else; no atmospheric halo.
     const sunDist = 9500;
@@ -106,6 +111,7 @@ export class Sky {
     sunDisc.lookAt(0, 0, 0);
     sunDisc.renderOrder = -9;
     this.group.add(sunDisc);
+    this.sunDisc = sunDisc;
 
     // Camera-lens glare: starburst + ghosts along the sun-centre axis; hidden when the sun is occluded.
     const glow = radialTexture([[0, 'rgba(255,255,255,1)'], [0.08, 'rgba(255,250,240,0.9)'], [0.25, 'rgba(255,240,220,0.25)'], [1, 'rgba(0,0,0,0)']], 256);
@@ -146,10 +152,11 @@ export class Sky {
     earth.rotation.set(0.4, 2.2, 0.1);
     earth.renderOrder = -9;
     this.group.add(earth);
+    this.earth = earth;
 
     if (extras.galaxy) {
       this.milkyWay = buildMilkyWay(new THREE.Vector3(...extras.galaxy.pole), new THREE.Vector3(...extras.galaxy.center));
-      this.group.add(this.milkyWay);
+      this.celestial.add(this.milkyWay);
     }
     if (extras.constellations && extras.constellations.length >= 6) {
       const g = new THREE.BufferGeometry();
@@ -161,10 +168,24 @@ export class Sky {
       this.constLines.visible = false;
       this.constLines.frustumCulled = false;
       this.constLines.renderOrder = -10;
-      this.group.add(this.constLines);
+      this.celestial.add(this.constLines);
     }
     this.flashTex = radialTexture([[0, 'rgba(255,255,255,1)'], [0.15, 'rgba(255,240,210,0.8)'], [0.4, 'rgba(255,200,150,0.15)'], [1, 'rgba(0,0,0,0)']], 64);
 
+  }
+
+  /**
+   * Move the Sun, the Earth and the star sphere (ephemeris time step). `starRot`
+   * rotates the star field from the catalogue epoch frame to the current one.
+   */
+  setCelestial(sun: THREE.Vector3, earth: THREE.Vector3, starRot: THREE.Quaternion): void {
+    this.sunDir.copy(sun);
+    this.earthDir.copy(earth);
+    this.sunDisc.position.copy(sun).multiplyScalar(9500);
+    this.sunDisc.lookAt(0, 0, 0);
+    this.flare.position.copy(sun).multiplyScalar(9500 * 0.98);
+    this.earth.position.copy(earth).multiplyScalar(8000);
+    this.celestial.quaternion.copy(starRot);
   }
 
   /** 1 = dark-adapted eye (all catalogue stars), lower = only the brightest remain. */

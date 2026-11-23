@@ -1,21 +1,26 @@
 {
-  "source": "LROC NAC DTM NAC_DTM_APOLLO15 + orthophoto M111571816 (NASA/GSFC/Arizona State University)",
-  "width": 2000,
-  "height": 2000,
+  "source": "LROC NAC DTM NAC_DTM_APOLLO15 + orthophoto M111571816 (NASA/GSFC/Arizona State University); edges: SLDEM2015 (LOLA + SELENE TC)",
+  "width": 4000,
+  "height": 4000,
   "pixelSize": 2.0,
-  "sizeX": 3998.0,
-  "sizeZ": 3998.0,
+  "sizeX": 7998.0,
+  "sizeZ": 7998.0,
   "minHeight": -2242.03076171875,
-  "maxHeight": -1889.947998046875,
-  "centerLat": 26.133787622924398,
-  "centerLon": 3.605372332144185,
+  "maxHeight": -1325.91076171875,
+  "heightStep": 0.04,
+  "centerLat": 26.08102300497751,
+  "centerLon": 3.6097752833678953,
+  "projection": {
+    "radius": 1737400.0,
+    "standardParallel": 26.0
+  },
   "landing": {
-    "x": 780.2312513021752,
-    "z": 46.92911226104479
+    "x": 660.2312513020556,
+    "z": -1553.070887738867
   },
   "orthoHi": {
-    "x": -200.0,
-    "z": 0.0,
+    "x": -319.7687486979444,
+    "z": -1600.070887738867,
     "size": 2458.0
   },
   "epoch": "1971-07-31T13:13:00+00:00",
@@ -26,6 +31,44 @@
   "earth": {
     "azimuth": 204.08444601185627,
     "elevation": 67.40129682426209
+  },
+  "sites": {
+    "lm": {
+      "lat": 26.13224,
+      "lon": 3.634,
+      "x": 660.23,
+      "z": -1553.07
+    },
+    "lrv": {
+      "lat": 26.13173,
+      "lon": 3.63808,
+      "x": 771.43,
+      "z": -1537.61
+    },
+    "alsep": {
+      "lat": 26.13406,
+      "lon": 3.62991,
+      "x": 548.76,
+      "z": -1608.26
+    },
+    "elbow": {
+      "lat": 26.03,
+      "lon": 3.6,
+      "x": -266.42,
+      "z": 1547.19
+    },
+    "stgeorge": {
+      "lat": 25.96,
+      "lon": 3.54,
+      "x": -1901.69,
+      "z": 3669.82
+    },
+    "spur": {
+      "lat": 25.98,
+      "lon": 3.67,
+      "x": 1641.39,
+      "z": 3063.36
+    }
   },
   "galaxy": {
     "pole": [
@@ -43,9 +86,9 @@
     "n": 501,
     "spacing": 112.0,
     "size": 56000.0,
-    "min": -725.6015282224357,
-    "max": 4413.510391485283,
-    "offset": 0.604698655453376,
+    "min": -724.2802969808426,
+    "max": 4415.685004085486,
+    "offset": 1.7064247159130446,
     "source": "SLDEM2015 (LOLA + SELENE TC), 512 px/deg"
   }
 }

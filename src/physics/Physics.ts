@@ -28,6 +28,8 @@ export class Physics {
   private patch: RAPIER.Collider | null = null;
   private patchX = Number.NaN;
   private patchZ = Number.NaN;
+  /** Next patch being sampled a few columns per frame (no hitch when it is swapped in). */
+  private pending: { cx: number; cz: number; heights: Float32Array; col: number } | null = null;
   private acc = 0;
   private events: RAPIER.EventQueue;
   /** Contact force events (above each collider's threshold) since the last read. */
@@ -47,29 +49,54 @@ export class Physics {
     return new Physics(RAPIER, terrain);
   }
 
-  /** Rebuild the terrain heightfield patch when the rover nears its border. */
+  /**
+   * Keep the terrain heightfield patch centred on the rover. Sampling 66 k heights
+   * takes several milliseconds, so a new patch is built incrementally over a few
+   * frames as soon as the rover drifts off-centre, and swapped in when complete.
+   */
   updatePatch(x: number, z: number, force = false): void {
-    if (!force && Math.abs(x - this.patchX) < PATCH_RECENTER && Math.abs(z - this.patchZ) < PATCH_RECENTER) return;
+    const off = Math.max(Math.abs(x - this.patchX), Math.abs(z - this.patchZ));
+    if (force || !(off < PATCH_SIZE / 2 - 12)) {
+      // Teleport or far off the patch: build synchronously.
+      this.pending = this.newPending(x, z);
+      this.fillPending(PATCH_CELLS + 1);
+      return;
+    }
+    if (!this.pending) {
+      if (off < PATCH_RECENTER * 0.6) return;
+      this.pending = this.newPending(x, z);
+    }
+    this.fillPending(PATCH_CELLS / 8);
+  }
+
+  private newPending(x: number, z: number): { cx: number; cz: number; heights: Float32Array; col: number } {
     const cell = PATCH_SIZE / PATCH_CELLS;
     // Snap to the cell grid so consecutive patches sample identical points.
-    const cx = Math.round(x / cell) * cell;
-    const cz = Math.round(z / cell) * cell;
+    return { cx: Math.round(x / cell) * cell, cz: Math.round(z / cell) * cell, heights: new Float32Array((PATCH_CELLS + 1) * (PATCH_CELLS + 1)), col: 0 };
+  }
+
+  private fillPending(cols: number): void {
+    const p = this.pending!;
     const n = PATCH_CELLS;
-    const heights = new Float32Array((n + 1) * (n + 1));
-    const x0 = cx - PATCH_SIZE / 2, z0 = cz - PATCH_SIZE / 2;
-    for (let c = 0; c <= n; c++) {
+    const cell = PATCH_SIZE / n;
+    const x0 = p.cx - PATCH_SIZE / 2, z0 = p.cz - PATCH_SIZE / 2;
+    const end = Math.min(n + 1, p.col + cols);
+    for (let c = p.col; c < end; c++) {
       const wx = x0 + c * cell;
-      for (let r = 0; r <= n; r++) heights[r + c * (n + 1)] = this.terrain.height(wx, z0 + r * cell);
+      for (let r = 0; r <= n; r++) p.heights[r + c * (n + 1)] = this.terrain.height(wx, z0 + r * cell);
     }
-    const desc = this.R.ColliderDesc.heightfield(n, n, heights, { x: PATCH_SIZE, y: 1, z: PATCH_SIZE })
-      .setTranslation(cx, 0, cz)
+    p.col = end;
+    if (p.col <= n) return;
+    const desc = this.R.ColliderDesc.heightfield(n, n, p.heights, { x: PATCH_SIZE, y: 1, z: PATCH_SIZE })
+      .setTranslation(p.cx, 0, p.cz)
       .setFriction(0.7)
       .setRestitution(0.05);
     const next = this.world.createCollider(desc);
     if (this.patch) this.world.removeCollider(this.patch, false);
     this.patch = next;
-    this.patchX = cx;
-    this.patchZ = cz;
+    this.patchX = p.cx;
+    this.patchZ = p.cz;
+    this.pending = null;
   }
 
   takeContacts(): ContactForce[] {
@@ -83,6 +110,7 @@ export class Physics {
    * (vehicle controller update, forces).
    */
   step(dt: number, pre: (h: number) => void): number {
+    // Returns the interpolation factor between the last two physics states for rendering.
     this.acc += Math.min(dt, 0.1);
     let steps = 0;
     while (this.acc >= FIXED_DT && steps < 8) {

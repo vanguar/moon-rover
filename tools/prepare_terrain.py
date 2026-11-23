@@ -1,20 +1,26 @@
-"""Prepare game terrain data from LROC NAC DTM + orthophoto (Apollo 15, Hadley Rille).
+"""Prepare game terrain data for the Apollo 15 site (Hadley Rille), 8 x 8 km.
 
 Inputs  (raw_data/, not committed):
-  NAC_DTM_APOLLO15.TIF                     32-bit float DTM, 2 m/px
+  NAC_DTM_APOLLO15.TIF                     32-bit float DTM, 2 m/px (a 4 km wide N-S strip)
   NAC_DTM_APOLLO15_M111571816_50CM.TIF     8-bit orthophoto, 0.5 m/px
+  sldem_512_rows_1470_2500.bin             SLDEM2015 rows (LOLA + SELENE TC, 59 m/px), see README
+  bsc5-short.json                          Yale Bright Star Catalog
 
 Outputs (public/data/):
-  heightmap.png   16-bit grayscale PNG, heights normalized to [min, max]
-  ortho.jpg       orthophoto, downscaled, same footprint
-  ortho_hi.jpg    orthophoto at ~0.6 m/px for the central area (LM site + east rille rim)
-  shadow.png      8-bit baked terrain cast-shadow mask for the real sun position
+  heightmap.png   16-bit grayscale PNG (4000 x 4000, 2 m), heights normalized to [min, max]
+  ortho.jpg       albedo image of the whole window (2 m/px)
+  ortho_hi.jpg    orthophoto at ~0.6 m/px around the LM and the east rim of the rille
+  shadow.png      8-bit baked cast-shadow mask for the game epoch (fallback; the game
+                  recomputes shadows on the GPU as the Sun moves)
   stars.bin       Yale Bright Star Catalog in the local sky: float32 [x, y, z, Vmag, T_K] per star
-  terrain.json    metadata (size in metres, min/max height, sun/earth direction, geo info)
+  terrain.json    metadata (size, heights, geo reference, sun/earth, mission sites)
 
-Sky: the start of Apollo 15 EVA-1 (1971-07-31 13:13 UTC). Sun, Earth and
-star directions come from tools/ephemeris.py, so lighting, shadows and the star
-field are mutually consistent and match what the crew saw.
+The DTM covers only a ~4 km wide strip (E-W) of the window. The strips to the east
+and west come from SLDEM2015, vertically matched to the DTM with a smoothly varying
+offset, given the DTM's own small-scale roughness spectrum (seeded noise), and blended
+into the DTM over 300 m. Where there is no orthophoto, the albedo image is synthesised
+by shading the merged relief with the orthophoto's own (fitted) illumination, so the
+whole window looks like one photograph.
 
 Usage: python tools/prepare_terrain.py
 """
@@ -26,8 +32,8 @@ import sys
 import numpy as np
 import rasterio
 from PIL import Image
-from rasterio.fill import fillnodata
 from rasterio.windows import Window
+from scipy import ndimage
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ephemeris import GAME_EPOCH, LunarSky  # noqa: E402
@@ -38,43 +44,170 @@ OUT = os.path.join(ROOT, "public", "data")
 
 DTM_FILE = os.path.join(RAW, "NAC_DTM_APOLLO15.TIF")
 ORTHO_FILE = os.path.join(RAW, "NAC_DTM_APOLLO15_M111571816_50CM.TIF")
+SLDEM_FILE = os.path.join(RAW, "sldem_512_rows_1470_2500.bin")
+STAR_FILE = os.path.join(RAW, "bsc5-short.json")
 
 MOON_R = 1737400.0
-LANDING_LAT, LANDING_LON = 26.13224, 3.63400  # Apollo 15 LM "Falcon"
+COS_SP = math.cos(math.radians(26.0))  # standard parallel of the DTM projection
+LANDING_LAT, LANDING_LON = 26.13224, 3.63400  # LM Falcon (LROC NAC, Wagner et al. 2017)
 
-# 4 x 4 km window (2000 x 2000 px at 2 m/px): Hadley Rille on the west, LM site near centre.
-COL0, ROW0, SIZE = 400, 5100, 2000
+# 8 x 8 km window (4000 x 4000 px at 2 m/px) in DTM pixel coordinates: from the rille
+# north-west of the LM down to St. George crater on the flank of Hadley Delta.
+COL0, ROW0, SIZE = -540, 4900, 4000
+PX = 2.0
+HSTEP = 0.04
 ORTHO_OUT = 4096
 SHADOW_OUT = 2000
-# High-resolution ortho tile (game coords, metres): LM site and the east rim of the rille.
-HI_CENTER = (-200.0, 0.0)
+BLEND_M = 300.0
+# High-resolution ortho tile, absolute offset from the LM (metres, game axes).
+HI_FROM_LM = (-980.0, -47.0)
 HI_SIZE = 2458.0
 HI_OUT = 4096
-STAR_FILE = os.path.join(RAW, "bsc5-short.json")
+
+# SLDEM2015 tile 00N-30N, 000-045E at 512 px/deg; rows 1470..2499 were downloaded.
+SL_ROW0, SL_NROWS, SL_NCOLS, SL_PPD = 1470, 1030, 23040, 512
+
+# Mission sites (lat, lon). Hardware: LROC NAC (Wagner et al. 2017, "Coordinates of
+# anthropogenic features on the Moon", Icarus 283). Craters: IAU / LTO 41B4 names,
+# centres from the Gazetteer of Planetary Nomenclature (rounded 0.01 deg), refined on
+# the DTM where noted in docs/REALISM.md.
+SITES = {
+    "lm": (26.13224, 3.63400),
+    "lrv": (26.13173, 3.63808),
+    "alsep": (26.13406, 3.62991),
+    "elbow": (26.03, 3.60),
+    "stgeorge": (25.96, 3.54),
+    "spur": (25.98, 3.67),
+}
+
+
+def to_game(lat, lon, lat_c, lon_c):
+    x = MOON_R * COS_SP * math.radians(lon - lon_c)
+    z = -MOON_R * math.radians(lat - lat_c)
+    return x, z
 
 
 def read_dtm():
     with rasterio.open(DTM_FILE) as d:
         win = Window(COL0, ROW0, SIZE, SIZE)
-        h = d.read(1, window=win).astype(np.float32)
+        h = d.read(1, window=win, boundless=True, fill_value=-3.4e38).astype(np.float64)
         transform = d.window_transform(win)
     valid = h > -1e30
-    print(f"DTM window: {h.shape}, invalid px: {(~valid).sum()}")
-    if (~valid).any():
-        h = fillnodata(h, mask=valid.astype(np.uint8), max_search_distance=200, smoothing_iterations=2)
-    return h, transform
+    # Close pinholes inside the strip; the outside is filled from SLDEM below.
+    holes = ~valid & ndimage.binary_closing(valid, iterations=6)
+    if holes.any():
+        idx = ndimage.distance_transform_edt(~valid, return_distances=False, return_indices=True)
+        h[holes] = h[tuple(i[holes] for i in idx)]
+        valid |= holes
+    print(f"DTM window {h.shape}: DTM coverage {valid.mean() * 100:.1f}%")
+    return h, valid, transform
 
 
-def read_ortho_hi(transform):
+def sample_sldem(lat, lon):
+    dem = np.memmap(SLDEM_FILE, "<f4", mode="r", shape=(SL_NROWS, SL_NCOLS))
+    r = (15359.5 - lat * SL_PPD) - SL_ROW0
+    c = lon * SL_PPD - 0.5
+    r0, r1 = int(np.floor(r.min())) - 3, int(np.ceil(r.max())) + 4
+    c0, c1 = int(np.floor(c.min())) - 3, int(np.ceil(c.max())) + 4
+    sub = np.array(dem[r0:r1, c0:c1], dtype=np.float64) * 1000.0
+    # Bicubic spline: no 59 m facets.
+    return ndimage.map_coordinates(sub, [r - r0, c - c0], order=3, mode="nearest")
+
+
+def roughness_noise(shape, target_std, seed=1971):
+    """Seeded fractal noise with a k^-2.2 spectrum between 4 and 120 m wavelengths."""
+    rng = np.random.default_rng(seed)
+    n = rng.standard_normal(shape)
+    fy = np.fft.fftfreq(shape[0], d=PX)[:, None]
+    fx = np.fft.rfftfreq(shape[1], d=PX)[None, :]
+    k = np.sqrt(fx * fx + fy * fy)
+    amp = np.where((k > 1 / 120) & (k < 1 / 4), (k + 1e-9) ** -1.1, 0.0)
+    f = np.fft.irfft2(np.fft.rfft2(n) * amp, s=shape)
+    return f / f.std() * target_std
+
+
+def merge_sldem(h, valid, lat, lon):
+    sl = sample_sldem(lat, lon)
+    # Smoothly varying vertical offset DTM - SLDEM, extrapolated outside the strip.
+    diff = np.where(valid, h - sl, 0.0)
+    wsum = ndimage.gaussian_filter(valid.astype(np.float64), 150)
+    off = ndimage.gaussian_filter(diff, 150) / np.maximum(wsum, 1e-6)
+    far = wsum < 1e-3
+    if far.any():
+        off[far] = float(diff[valid].mean())
+    base = sl + off
+    # DTM roughness below SLDEM resolution: std of DTM minus its 60 m low-pass.
+    hp = (h - ndimage.gaussian_filter(np.where(valid, h, base), 15))[valid]
+    rough = float(np.std(hp[np.abs(hp) < np.percentile(np.abs(hp), 99)]))
+    synth = base + roughness_noise(h.shape, rough)
+    dist = ndimage.distance_transform_edt(valid) * PX
+    w = np.clip(dist / BLEND_M, 0, 1)
+    w = w * w * (3 - 2 * w)
+    out = np.where(valid, h * w + synth * (1 - w), synth)
+    print(f"SLDEM merge: DTM-SLDEM offset mean {diff[valid].mean():.1f} m, roughness std {rough:.2f} m")
+    return out, w
+
+
+def read_ortho(transform, shape):
+    """Orthophoto resampled onto the window grid at 2 m (0 = no data)."""
     left, top = transform.c, transform.f
-    half = SIZE * 2.0 / 2
     with rasterio.open(ORTHO_FILE) as o:
-        x0 = left + half + HI_CENTER[0] - HI_SIZE / 2
-        y0 = top - half - HI_CENTER[1] + HI_SIZE / 2  # game -z is north
+        c0 = int(round((left - o.transform.c) / o.res[0]))
+        r0 = int(round((o.transform.f - top) / o.res[1]))
+        n = SIZE * 4
+        img = o.read(1, window=Window(c0, r0, n, n), out_shape=shape, boundless=True, fill_value=0,
+                     resampling=rasterio.enums.Resampling.average)
+    return img.astype(np.float64)
+
+
+def masked_blur(img, mask, sigma):
+    num = ndimage.gaussian_filter(np.where(mask, img, 0.0), sigma)
+    den = ndimage.gaussian_filter(mask.astype(np.float64), sigma)
+    return num / np.maximum(den, 1e-6), den
+
+
+def synth_albedo(ortho, valid):
+    """
+    The orthophoto was taken under a high Sun: its brightness is essentially albedo
+    (bright fresh-crater halos, darker mature regolith). Two NAC frames with different
+    gains meet along a seam, so the small-scale detail (< ~200 m) is kept and the
+    large-scale level is replaced by a smooth version. Outside the photo the large-scale
+    level is extrapolated and the detail is synthetic speckle with the photo's statistics.
+    """
+    have = (ortho > 0) & valid
+    have = ndimage.binary_erosion(have, iterations=15)  # dark frame borders
+    big, den_big = masked_blur(ortho, have, 200)  # 400 m
+    mean = float(ortho[have].mean())
+    big = np.where(den_big > 0.02, big, mean)
+    big = ndimage.gaussian_filter(big, 60)
+    small, _ = masked_blur(ortho, have, 50)  # 100 m: removes the gain step at the seam
+    detail = np.where(have, ortho / np.maximum(small, 1.0), 1.0)
+    dstd = float(np.std(np.clip(detail[have], 0.3, 3.0)))
+    rng = np.random.default_rng(15415)
+    speck = sum(ndimage.gaussian_filter(rng.standard_normal(ortho.shape), s) * w for s, w in ((0.8, 1.0), (3, 1.2), (10, 1.0)))
+    speck = 1 + speck / speck.std() * dstd * 0.5
+    dist = ndimage.distance_transform_edt(have) * PX
+    w = np.clip(dist / 150.0, 0, 1)
+    dist = ndimage.distance_transform_edt(~have) * PX
+    w = w * w * (3 - 2 * w)
+    # Far from the photo the extrapolated level relaxes to the scene mean (no dark bands).
+    wl = np.clip(dist / 800.0, 0, 1)
+    big = big * (1 - wl) + mean * wl
+    out = big * (detail * w + speck * (1 - w))
+    print(f"Albedo: photo coverage {have.mean() * 100:.0f}%, detail std {dstd:.3f}")
+    return out
+
+
+def read_ortho_hi(transform, centre):
+    left, top = transform.c, transform.f
+    half = SIZE * PX / 2
+    with rasterio.open(ORTHO_FILE) as o:
+        x0 = left + half + centre[0] - HI_SIZE / 2
+        y0 = top - half - centre[1] + HI_SIZE / 2  # game -z is north
         c0 = int(round((x0 - o.transform.c) / o.res[0]))
         r0 = int(round((o.transform.f - y0) / o.res[1]))
         n = int(round(HI_SIZE / o.res[0]))
-        img = o.read(1, window=Window(c0, r0, n, n), out_shape=(HI_OUT, HI_OUT),
+        img = o.read(1, window=Window(c0, r0, n, n), out_shape=(HI_OUT, HI_OUT), boundless=True, fill_value=0,
                      resampling=rasterio.enums.Resampling.lanczos)
     m = img > 0
     return np.where(m, img, int(img[m].mean())).astype(np.uint8)
@@ -106,26 +239,12 @@ def write_stars(sky, path):
     print(f"Stars: {len(out)} (brightest V={a[:, 2].min():.2f})")
 
 
-def read_ortho(transform):
-    left, top = transform.c, transform.f
-    with rasterio.open(ORTHO_FILE) as o:
-        c0 = int(round((left - o.transform.c) / o.res[0]))
-        r0 = int(round((o.transform.f - top) / o.res[1]))
-        n = SIZE * 4
-        img = o.read(1, window=Window(c0, r0, n, n),
-                     out_shape=(ORTHO_OUT, ORTHO_OUT),
-                     resampling=rasterio.enums.Resampling.average)
-    print(f"Ortho window at col {c0} row {r0}, black px: {(img == 0).mean():.4f}")
-    return img
-
-
-def bake_shadow(h, px, az_deg, el_deg, out_size):
+def bake_shadow(h, az_deg, el_deg, out_size):
     """Cast-shadow mask via horizon marching (1 = lit, 0 = shadow)."""
     k = h.shape[0] // out_size
-    hh = h[: out_size * k, : out_size * k].reshape(out_size, k, out_size, k).max(axis=(1, 3)).astype(np.float64)
-    step = px * k
+    hh = h[: out_size * k, : out_size * k].reshape(out_size, k, out_size, k).max(axis=(1, 3))
+    step = PX * k
     az, el = math.radians(az_deg), math.radians(el_deg)
-    # Direction towards the sun in pixel space (col = east, row = south).
     dc, dr = math.sin(az), -math.cos(az)
     tan_el = math.tan(el)
     rows, cols = np.mgrid[0:out_size, 0:out_size].astype(np.float64)
@@ -139,28 +258,42 @@ def bake_shadow(h, px, az_deg, el_deg, out_size):
             break
         ri = np.clip(np.round(rr).astype(int), 0, out_size - 1)
         ci = np.clip(np.round(cc).astype(int), 0, out_size - 1)
-        ray_h = hh + d * step * tan_el
-        blocked = inside & (hh[ri, ci] > ray_h + 0.5)
-        lit[blocked] = 0
+        lit[inside & (hh[ri, ci] > hh + d * step * tan_el + 0.5)] = 0
     return lit
 
 
 def main():
     os.makedirs(OUT, exist_ok=True)
-    h, transform = read_dtm()
+    h, valid, transform = read_dtm()
+    left, top = transform.c, transform.f
+    cx, cy = left + SIZE * PX / 2, top - SIZE * PX / 2
+    lon_c = 180 + math.degrees(cx / (MOON_R * COS_SP))
+    lat_c = math.degrees(cy / MOON_R)
+    # Geographic coordinates of every pixel centre.
+    coords = (np.arange(SIZE) - (SIZE - 1) / 2) * PX
+    zz, xx = np.meshgrid(coords, coords, indexing="ij")
+    lat = lat_c - np.degrees(zz / MOON_R)
+    lon = lon_c + np.degrees(xx / (MOON_R * COS_SP))
+    h, wdtm = merge_sldem(h, valid, lat, lon)
+
     hmin, hmax = float(h.min()), float(h.max())
     print(f"Height range: {hmin:.1f} .. {hmax:.1f} m")
-
-    q = np.round((h - hmin) / (hmax - hmin) * 65535).astype(np.uint16)
+    # 4 cm height steps: far below the DTM's vertical precision (~0.5 m), and a third
+    # smaller PNG than full 16-bit precision.
+    q = np.round((h - hmin) / HSTEP).astype(np.uint16)
+    hmax = hmin + float(q.max()) * HSTEP
     Image.fromarray(q, mode="I;16").save(os.path.join(OUT, "heightmap.png"), optimize=True)
+    # DTM weight (1 = measured at 2 m, 0 = SLDEM + synthetic detail), for docs and debugging.
+    Image.fromarray((wdtm[::4, ::4] * 255).astype(np.uint8)).save(os.path.join(RAW, "dtm_weight.png"))
 
-    ortho = read_ortho(transform)
-    # Fill black no-data in ortho with mean to avoid holes.
-    m = ortho > 0
-    ortho = np.where(m, ortho, int(ortho[m].mean())).astype(np.uint8)
-    Image.fromarray(ortho).save(os.path.join(OUT, "ortho.jpg"), quality=82, optimize=True, progressive=True)
+    ortho = read_ortho(transform, (SIZE, SIZE))
+    ortho = synth_albedo(ortho, valid)
+    img = Image.fromarray(np.clip(ortho, 0, 255).astype(np.uint8)).resize((ORTHO_OUT, ORTHO_OUT), Image.LANCZOS)
+    img.save(os.path.join(OUT, "ortho.jpg"), quality=80, optimize=True, progressive=True)
 
-    hi = read_ortho_hi(transform)
+    lm_x, lm_z = to_game(LANDING_LAT, LANDING_LON, lat_c, lon_c)
+    hi_c = (lm_x + HI_FROM_LM[0], lm_z + HI_FROM_LM[1])
+    hi = read_ortho_hi(transform, hi_c)
     Image.fromarray(hi).save(os.path.join(OUT, "ortho_hi.jpg"), quality=80, optimize=True, progressive=True)
 
     sky = LunarSky(GAME_EPOCH, LANDING_LAT, LANDING_LON)
@@ -169,44 +302,53 @@ def main():
     print(f"Sun az {sun_az:.1f} el {sun_el:.1f}; Earth az {earth_az:.1f} el {earth_el:.1f}")
     write_stars(sky, os.path.join(OUT, "stars.bin"))
 
-    shadow = bake_shadow(h, 2.0, sun_az, sun_el, SHADOW_OUT)
+    shadow = bake_shadow(h, sun_az, sun_el, SHADOW_OUT)
     Image.fromarray((shadow * 255).astype(np.uint8)).save(os.path.join(OUT, "shadow.png"), optimize=True)
 
-    left, top = transform.c, transform.f
-    cx = left + SIZE * 2.0 / 2
-    cy = top - SIZE * 2.0 / 2
-    lon_c = 180 + math.degrees(cx / (MOON_R * math.cos(math.radians(26))))
-    lat_c = math.degrees(cy / MOON_R)
-    lx = MOON_R * math.cos(math.radians(26)) * math.radians(LANDING_LON - 180)
-    ly = MOON_R * math.radians(LANDING_LAT)
+    sites = {}
+    for k, (la, lo) in SITES.items():
+        x, z = to_game(la, lo, lat_c, lon_c)
+        sites[k] = {"lat": la, "lon": lo, "x": round(x, 2), "z": round(z, 2)}
     meta = {
-        "source": "LROC NAC DTM NAC_DTM_APOLLO15 + orthophoto M111571816 (NASA/GSFC/Arizona State University)",
+        "source": "LROC NAC DTM NAC_DTM_APOLLO15 + orthophoto M111571816 (NASA/GSFC/Arizona State University); "
+                  "edges: SLDEM2015 (LOLA + SELENE TC)",
         "width": SIZE,
         "height": SIZE,
-        "pixelSize": 2.0,
-        "sizeX": (SIZE - 1) * 2.0,
-        "sizeZ": (SIZE - 1) * 2.0,
+        "pixelSize": PX,
+        "sizeX": (SIZE - 1) * PX,
+        "sizeZ": (SIZE - 1) * PX,
         "minHeight": hmin,
         "maxHeight": hmax,
+        "heightStep": HSTEP,
         "centerLat": lat_c,
         "centerLon": lon_c,
+        "projection": {"radius": MOON_R, "standardParallel": 26.0},
         # Game coords: +x east, -z north, origin at the window centre.
-        "landing": {"x": lx - cx, "z": -(ly - cy)},
-        "orthoHi": {"x": HI_CENTER[0], "z": HI_CENTER[1], "size": HI_SIZE},
+        "landing": {"x": lm_x, "z": lm_z},
+        "orthoHi": {"x": hi_c[0], "z": hi_c[1], "size": HI_SIZE},
         "epoch": GAME_EPOCH.isoformat(),
         "sun": {"azimuth": sun_az, "elevation": sun_el},
         "earth": {"azimuth": earth_az, "elevation": earth_el},
+        "sites": sites,
     }
-    with open(os.path.join(OUT, "terrain.json"), "w") as f:
+    old = os.path.join(OUT, "terrain.json")
+    if os.path.exists(old):
+        prev = json.load(open(old, encoding="utf-8"))
+        if "galaxy" in prev:
+            meta["galaxy"] = prev["galaxy"]
+    with open(old, "w") as f:
         json.dump(meta, f, indent=2)
+    for k, v in sites.items():
+        print(f"  site {k:9s} x {v['x']:8.1f}  z {v['z']:8.1f}")
 
     total = 0
     for name in os.listdir(OUT):
-        s = os.path.getsize(os.path.join(OUT, name))
-        total += s
-        print(f"  {name}: {s / 1e6:.2f} MB")
-    print(f"Total game data: {total / 1e6:.2f} MB")
-    assert total < 20e6, "game data exceeds 20 MB"
+        p = os.path.join(OUT, name)
+        if os.path.isfile(p):
+            total += os.path.getsize(p)
+            print(f"  {name}: {os.path.getsize(p) / 1e6:.2f} MB")
+    print(f"Total lunar game data: {total / 1e6:.2f} MB")
+    assert total < 30e6, "game data exceeds 30 MB"
 
 
 if __name__ == "__main__":

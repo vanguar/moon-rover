@@ -13,7 +13,9 @@ import { Tracks } from './fx/Tracks';
 import { Hud } from './hud/Hud';
 import { Input } from './input/Input';
 import { Physics } from './physics/Physics';
+import { APOLLO15_EVA1, lunarSky } from './astro/ephemeris';
 import { setSurfacePhotometry } from './render/lunar';
+import { ShadowBaker } from './render/ShadowBaker';
 import { Rover } from './rover/Rover';
 import type { RoverSpec } from './rover/specs';
 import { Rocks } from './terrain/Rocks';
@@ -50,6 +52,14 @@ export class Game {
   private marsSky: MarsSky | null = null;
   readonly weather: MarsWeather | null = null;
   private hemi: THREE.HemisphereLight;
+  private earthshine: THREE.DirectionalLight | null = null;
+  /** Simulated UTC time (ms) and its rate relative to real time (Moon). */
+  simTime = APOLLO15_EVA1;
+  timeScale = 60;
+  private baker: ShadowBaker | null = null;
+  private starFrame0 = new THREE.Matrix4();
+  private envSun = new THREE.Vector3();
+  onTimeChange?: (ms: number) => void;
   readonly sunDir: THREE.Vector3;
   private time = 0;
   private envTau = -1;
@@ -83,6 +93,8 @@ export class Game {
   private fpsAcc = { t: 0, n: 0, fps: 60 };
   private perf = { t: 0, frames: 0, cooldown: 10, strikes: 0 };
   private sunTexel = 1;
+  /** Fixed camera for reference shots (tools/shots.mjs): position, azimuth/pitch in degrees, fov. */
+  debugCam: { x: number; z: number; h: number; az: number; pitch: number; fov: number } | null = null;
   onQualityChange?: (q: QualitySettings) => void;
 
   constructor(
@@ -132,7 +144,8 @@ export class Game {
       this.scene.add(this.sky.group);
       this.sunDir = this.sky.sunDir;
     }
-    this.sun = new THREE.DirectionalLight(0xfff8f0, SUN_INTENSITY);
+    // Sunlight above an atmosphere is white (≈ 5800 K); Mars reddens it in updateAtmosphere.
+    this.sun = new THREE.DirectionalLight(0xffffff, SUN_INTENSITY);
     this.sun.castShadow = true;
     this.scene.add(this.sun, this.sun.target);
     this.configureShadow();
@@ -147,13 +160,27 @@ export class Game {
       const earthshine = new THREE.DirectionalLight(0xbcd4ff, SUN_INTENSITY * 0.0015);
       earthshine.position.copy(this.sky.earthDir);
       this.scene.add(earthshine);
+      this.earthshine = earthshine;
     }
 
     this.shadowMask = this.readMask(baked);
     this.terrainR = new TerrainRenderer(terrain, ortho, baked, quality, extras.orthoHi, extras.farShadow, extras.farAlbedo);
     this.scene.add(this.terrainR.group);
+    this.terrainR.setSun(this.sunDir);
+    if (!mars) {
+      // Terrain shadows follow the Sun: recomputed on the GPU (see ShadowBaker).
+      this.baker = new ShadowBaker(this.renderer, terrain, isMobile);
+      this.baker.setSun(this.sunDir, true);
+      this.baker.bakeAll();
+      this.terrainR.setShadowMaps(this.baker.near.texture, this.baker.far?.texture ?? null);
+      const l = terrain.meta.sites?.lm ?? { lat: 26.13224, lon: 3.634 };
+      const m0 = lunarSky(APOLLO15_EVA1, l.lat, l.lon).icrfToGame;
+      this.starFrame0.set(m0[0][0], m0[0][1], m0[0][2], 0, m0[1][0], m0[1][1], m0[1][2], 0, m0[2][0], m0[2][1], m0[2][2], 0, 0, 0, 0, 1);
+      this.envSun.copy(this.sunDir);
+    }
     if (terrain.far) {
       this.far = new FarTerrain(terrain, extras.farShadow, isMobile, extras.farAlbedo);
+      if (this.baker?.far) this.far.setShadowMap(this.baker.far.texture);
       this.far.setNearRadius(quality.drawDistance - 250);
       this.scene.add(this.far.mesh);
     }
@@ -522,9 +549,9 @@ export class Game {
     this.time += dt;
     this.input.update(dt);
     const rover = this.rover;
-    this.physics.step(dt, (h) => rover.step(h, this.input.drive));
+    const alpha = this.physics.step(dt, (h) => rover.step(h, this.input.drive));
     rover.onContacts(this.physics.takeContacts());
-    rover.sync(dt);
+    rover.sync(dt, alpha);
     this.animateRover(dt, false);
     this.updatePanel(dt);
     const p = rover.object.position;
@@ -583,8 +610,54 @@ export class Game {
     });
   }
 
+  /** Jump to a moment (UTC ms) and set the time rate (1 = real time). */
+  setTime(ms: number, scale = this.timeScale): void {
+    this.simTime = ms;
+    this.timeScale = scale;
+    this.updateClock(0, true);
+  }
+
+  /**
+   * Advance the ephemeris clock: Sun, Earth and stars move, terrain shadows are
+   * recomputed on the GPU, the light level follows the Sun's elevation.
+   */
+  private updateClock(dt: number, jump = false): void {
+    if (!this.sky) return;
+    this.simTime += dt * 1000 * this.timeScale;
+    const l = this.terrain.meta.sites?.lm ?? { lat: 26.13224, lon: 3.634 };
+    const st = lunarSky(this.simTime, l.lat, l.lon);
+    this.sunDir.set(...st.sun);
+    const earth = new THREE.Vector3(...st.earth);
+    const m = st.icrfToGame;
+    const mt = new THREE.Matrix4().set(m[0][0], m[0][1], m[0][2], 0, m[1][0], m[1][1], m[1][2], 0, m[2][0], m[2][1], m[2][2], 0, 0, 0, 0, 1);
+    const rot = mt.multiply(this.starFrame0.clone().transpose());
+    this.sky.setCelestial(this.sunDir, earth, new THREE.Quaternion().setFromRotationMatrix(rot));
+    this.terrainR.setSun(this.sunDir);
+    this.baker?.setSun(this.sunDir, jump);
+    if (jump) this.baker?.bakeAll();
+    else this.baker?.update();
+    // Below the horizon (or behind a mountain) the Sun stops lighting; the bounce light goes with it.
+    const up = THREE.MathUtils.smoothstep(this.sunDir.y, -0.0046, 0.0046);
+    this.sun.intensity = SUN_INTENSITY * up;
+    this.hemi.intensity = THREE.MathUtils.clamp(this.sunDir.y / 0.33, 0, 1.6) * up + 0.02;
+    if (this.earthshine) {
+      this.earthshine.position.copy(earth);
+      // Earthshine ∝ the Earth's lit fraction (full Earth ≈ 0.1 lux·m²/... ≈ 50× brighter than full Moon light).
+      this.earthshine.intensity = SUN_INTENSITY * 0.0035 * st.earthPhase * Math.max(0, earth.y);
+    }
+    // Reflections: rebuild the opposition-lit environment when the Sun has moved > 3°.
+    if (this.envSun.angleTo(this.sunDir) > 0.05) {
+      this.envSun.copy(this.sunDir);
+      const old = this.scene.environment;
+      this.scene.environment = this.buildEnvironment();
+      old?.dispose();
+    }
+    this.onTimeChange?.(this.simTime);
+  }
+
   /** Sky, haze, sunlight and weather of the current body. */
   private updateEnvironment(dt: number): void {
+    this.updateClock(this.paused ? 0 : dt);
     if (this.sky) {
       this.sky.update(this.camera, this.terrain.height(this.camera.position.x, this.camera.position.z));
       return;
@@ -693,6 +766,18 @@ export class Game {
 
   private updateCamera(dt: number): void {
     const rover = this.rover;
+    if (this.debugCam) {
+      const d = this.debugCam;
+      this.camera.position.set(d.x, this.terrain.height(d.x, d.z) + d.h, d.z);
+      this.camera.up.set(0, 1, 0);
+      // Azimuth from north, clockwise; the camera looks down its -z axis.
+      this.camera.quaternion.setFromEuler(new THREE.Euler(THREE.MathUtils.degToRad(d.pitch), -THREE.MathUtils.degToRad(d.az), 0, 'YXZ'));
+      this.camera.fov = d.fov;
+      this.camera.near = 0.05;
+      this.camera.updateProjectionMatrix();
+      this.camera.updateMatrixWorld();
+      return;
+    }
     if (this.cameraMode === 'cabin') {
       const a = rover.model.cockpitAnchor;
       a.updateMatrixWorld();

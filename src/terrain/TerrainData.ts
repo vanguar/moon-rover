@@ -18,6 +18,11 @@ export interface TerrainMeta {
   sizeZ: number;
   minHeight: number;
   maxHeight: number;
+  /** Metres per heightmap unit (default: full 16-bit range between min and max). */
+  heightStep?: number;
+  sites?: Record<string, { lat: number; lon: number; x: number; z: number }>;
+  orthoSun?: { azimuth: number; incidence: number };
+  projection?: { radius: number; standardParallel: number };
   centerLat: number;
   centerLon: number;
   landing: { x: number; z: number };
@@ -61,7 +66,9 @@ const HASH_CELL = 16;
 
 export class TerrainData {
   readonly meta: TerrainMeta;
-  readonly heights: Float32Array;
+  /** Raw 16-bit heightmap; metres = value · hScale (half the memory of floats on 8 × 8 km). */
+  readonly heights: Uint16Array;
+  readonly hScale: number;
   readonly w: number;
   readonly h: number;
   readonly halfX: number;
@@ -73,9 +80,10 @@ export class TerrainData {
   private cellItems: Int32Array;
   private cellsX: number;
 
-  constructor(meta: TerrainMeta, heights: Float32Array, far: FarGrid | null = null) {
+  constructor(meta: TerrainMeta, heights: Uint16Array, far: FarGrid | null = null) {
     this.meta = meta;
     this.heights = heights;
+    this.hScale = meta.heightStep ?? (meta.maxHeight - meta.minHeight) / 65535;
     this.far = far;
     this.w = meta.width;
     this.h = meta.height;
@@ -85,7 +93,9 @@ export class TerrainData {
     const rnd = mulberry32(CRATER_SEED);
     // Mars: wind has filled and planed most small craters; fewer and shallower, sand-filled bowls.
     const mars = meta.body === 'mars';
-    const count = mars ? Math.round(CRATER_COUNT * 0.35 * (meta.sizeX * meta.sizeZ) / 16e6) : CRATER_COUNT;
+    // Crater density per km² is fixed (CRATER_COUNT per 4 × 4 km).
+    const areaK = (meta.sizeX * meta.sizeZ) / 16e6;
+    const count = Math.round(CRATER_COUNT * areaK * (mars ? 0.35 : 1));
     const depthK = mars ? 0.45 : 1;
     this.craters = new Float32Array(count * 5);
     for (let i = 0; i < count; i++) {
@@ -153,7 +163,12 @@ export class TerrainData {
   private px(ix: number, iz: number): number {
     ix = ix < 0 ? 0 : ix >= this.w ? this.w - 1 : ix;
     iz = iz < 0 ? 0 : iz >= this.h ? this.h - 1 : iz;
-    return this.heights[iz * this.w + ix];
+    return this.heights[iz * this.w + ix] * this.hScale;
+  }
+
+  /** Raw DTM sample (metres above minHeight) at integer pixel coordinates. */
+  sample(ix: number, iz: number): number {
+    return this.px(ix, iz);
   }
 
   /** DTM height (Catmull-Rom bicubic) at base-window coordinates. */
@@ -273,9 +288,7 @@ export async function loadTerrainData(base: string, onProgress?: (f: number) => 
   }
   const buf = await new Blob(parts as BlobPart[]).arrayBuffer();
   const png = await decodePng16(buf);
-  const scale = (meta.maxHeight - meta.minHeight) / 65535;
-  const heights = new Float32Array(png.data.length);
-  for (let i = 0; i < heights.length; i++) heights[i] = png.data[i] * scale;
+  const heights = png.data;
   let far: FarGrid | null = null;
   if (meta.far) {
     try {

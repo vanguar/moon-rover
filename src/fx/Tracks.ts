@@ -107,7 +107,7 @@ export class Tracks {
     this.mat = new THREE.ShaderMaterial({
       uniforms: {
         uTread: { value: treadTexture(spec.tread) },
-        uSun: { value: sunDir.clone() },
+        uSun: { value: sunDir }, // shared: follows the moving Sun
         uAmb: { value: world().atmosphere ? 0.55 : 0.06 },
         uHalfW: { value: 0.12 },
         uFresh: { value: world().atmosphere ? 0.84 : 0.9 },

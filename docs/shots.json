@@ -1,0 +1,62 @@
+[
+ {
+  "name": "lm_south",
+  "ref": "AS15-88-11866",
+  "site": "lm",
+  "dx": -18,
+  "dz": -22,
+  "az": 185,
+  "pitch": -4,
+  "fov": 48,
+  "note": "LM area, looking SE to Hadley Delta",
+  "time": "1971-08-01T18:30:00Z"
+ },
+ {
+  "name": "station2",
+  "ref": "AS15-85-11451",
+  "site": "stgeorge",
+  "dx": 900,
+  "dz": -800,
+  "az": 225,
+  "pitch": -10,
+  "fov": 48,
+  "note": "St. George rim (station 2), looking SW into the crater",
+  "time": "1971-07-31T15:40:00Z"
+ },
+ {
+  "name": "delta_lrv",
+  "ref": "AS15-82-11121",
+  "site": "lm",
+  "dx": 300,
+  "dz": 600,
+  "az": 180,
+  "pitch": -6,
+  "fov": 48,
+  "note": "mare plain south of the LM, looking S at Hadley Delta",
+  "time": "1971-08-02T10:00:00Z"
+ },
+ {
+  "name": "boulders",
+  "ref": "AS15-82-11147",
+  "site": "elbow",
+  "dx": 150,
+  "dz": 0,
+  "az": 200,
+  "pitch": -12,
+  "fov": 48,
+  "note": "near Elbow, looking SSW",
+  "time": "1971-08-02T10:30:00Z"
+ },
+ {
+  "name": "ground",
+  "ref": "AS15-86-11654",
+  "site": "lm",
+  "dx": -60,
+  "dz": 20,
+  "az": 270,
+  "pitch": -45,
+  "fov": 48,
+  "note": "ground close-up down-sun",
+  "time": "1971-08-01T14:00:00Z"
+ }
+]

@@ -45,7 +45,7 @@ export default defineConfig({
         // Moon data and the app shell are precached for offline play; Mars data (~17 MB) is cached on first visit.
         globPatterns: ['**/*.{js,css,html,png,jpg,json,wasm,bin,webmanifest}'],
         globIgnores: ['**/data/mars/**', 'sw.js'],
-        maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,
+        maximumFileSizeToCacheInBytes: 16 * 1024 * 1024, // heightmap.png of the 8 × 8 km site is ~14 MB
       },
     }),
   ],

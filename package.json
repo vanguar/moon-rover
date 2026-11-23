@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "data": "python tools/prepare_terrain.py"
+    "data": "python tools/prepare_terrain.py",
+    "shots": "node tools/shots.mjs",
+    "probe": "node tools/probe.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.21.0",
@@ -15,6 +17,7 @@
   },
   "devDependencies": {
     "@types/three": "^0.187.0",
+    "playwright": "^1.65.1",
     "typescript": "^7.0.2",
     "vite": "^6.4.6",
     "vite-plugin-pwa": "^2.0.0"
