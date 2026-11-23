@@ -326,7 +326,13 @@ for (int o = 0; o < 6; o++) {
   mat2 rot = mat2(cos(ra), sin(ra), -sin(ra), cos(ra));
   vec3 nd = lnoised(rot * vWorldP.xz * freq + float(o) * 17.13);
   nd.yz = nd.yz * rot;
+#if MARS > 0
+  // HiRISE DTM (1 m) already holds the metre-scale relief: only sub-metre octaves here,
+  // or a low evening Sun turns them into fake "plasticine" waves.
+  grad += nd.yz * amp * freq * w * (o < 3 ? 0.12 : 0.6);
+#else
   grad += nd.yz * amp * freq * w;
+#endif
   albedoVar += (nd.x - 0.5) * w * (o < 3 ? 0.10 : 0.05);
   freq *= 2.6; amp *= 0.33;
 }
@@ -451,7 +457,8 @@ bakedSun *= microLit;`,
           '#include <normal_fragment_begin>',
           `#include <normal_fragment_begin>
 // Far away the mesh is coarse: take the surface orientation from the 2 m DTM normal map.
-vec2 sl = (texBicubic(uDtmN, mapUv).rg - 0.5) * 5.0;
+vec2 sl = (texBicubic(uDtmN, mapUv).rg - 0.5) * 2.0;
+sl = sign(sl) * sl * sl * 5.0;
 // Mirrored tiles outside the DTM window flip the slope sign.
 sl *= 1.0 - 2.0 * mod(floor(mapUv), 2.0);
 vec3 nDtm = normalize(vec3(-sl.x, 1.0, -sl.y));
@@ -496,8 +503,11 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`,
         const sx = ((H[j * w + i1] - H[j * w + i0]) * k) / ((i1 - i0) * px);
         const sz = ((H[j1 * w + i] - H[j0 * w + i]) * k) / ((j1 - j0) * px);
         const o = (j * w + i) * 2;
-        data[o] = Math.max(0, Math.min(255, Math.round((sx / 5 + 0.5) * 255)));
-        data[o + 1] = Math.max(0, Math.min(255, Math.round((sz / 5 + 0.5) * 255)));
+        // Square-root encoding: fine steps near zero slope, where nearly all the ground
+        // is (linear 8-bit steps of 0.02 drew contour-like banding at low Sun).
+        const enc = (v: number) => Math.sign(v) * Math.sqrt(Math.min(Math.abs(v) / 5, 1));
+        data[o] = Math.max(0, Math.min(255, Math.round((enc(sx) * 0.5 + 0.5) * 255)));
+        data[o + 1] = Math.max(0, Math.min(255, Math.round((enc(sz) * 0.5 + 0.5) * 255)));
       }
     }
     const tex = new THREE.DataTexture(data, w, h, THREE.RGFormat, THREE.UnsignedByteType);
