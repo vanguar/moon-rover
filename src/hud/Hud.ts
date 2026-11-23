@@ -33,6 +33,12 @@ export class Hud {
   private mapImg: CanvasImageSource | null = null;
   private slopeN = [0, 1, 0];
   warningLevel = 0; // 0 none, 1 caution, 2 danger
+  atBase = false;
+  private wasLit = true;
+  private shadowFlash = 0;
+
+  private elec = document.getElementById('h-elec');
+  private range = document.getElementById('h-range');
 
   constructor(private terrain: TerrainData) {
     this.att = $('#h-att');
@@ -73,6 +79,8 @@ export class Hud {
     e.battBar.style.background = pct < 15 ? '#ff4b3e' : pct < 35 ? '#ffb020' : '#58d68d';
     e.power.textContent = Math.round(rover.power + rover.solar).toString();
     e.solar.textContent = Math.round(rover.solar).toString();
+    if (this.elec) this.elec.textContent = rover.elecTemp.toFixed(0);
+    if (this.range) this.range.textContent = rover.rangeKm.toFixed(1);
     e.roll.textContent = `${roll.toFixed(0)}°`;
     e.pitch.textContent = `${pitch.toFixed(0)}°`;
     e.lights.classList.toggle('on', rover.headlights);
@@ -88,6 +96,14 @@ export class Hud {
     if (Math.abs(roll) > 30) { warns.push(`${t('wRoll')} ${Math.abs(roll).toFixed(0)}°`); level = 2; }
     else if (Math.abs(roll) > 22) { warns.push(t('wRoll')); level = Math.max(level, 1); }
     if (Math.abs(pitch) > 30) { warns.push(`${t('wPitch')} ${Math.abs(pitch).toFixed(0)}°`); level = 2; }
+    // Entering shadow: flash the warning; while in shadow keep a caution.
+    if (rover.sunLit < 0.5 && this.wasLit) this.shadowFlash = 4;
+    this.wasLit = rover.sunLit >= 0.5;
+    this.shadowFlash = Math.max(0, this.shadowFlash - dt);
+    if (rover.sunLit < 0.5) { warns.push(t('wShadow')); level = Math.max(level, this.shadowFlash > 0 ? 2 : 1); }
+    if (rover.heater) { warns.push(`${t('wCold')} ${rover.elecTemp.toFixed(0)}°C`); level = Math.max(level, 1); }
+    if (rover.elecTemp > 85) { warns.push(`${t('wHot')} ${rover.elecTemp.toFixed(0)}°C`); level = Math.max(level, 1); }
+    if (this.atBase) warns.push(t('wBase'));
     if (rover.battery <= 0) { warns.push(t('wBattEmpty')); level = 2; }
     else if (rover.battery < 0.15) { warns.push(t('wBattLow')); level = Math.max(level, 1); }
     if (!ter.inside(p.x, p.z)) { warns.push(t('wOutside')); level = Math.max(level, 1); }

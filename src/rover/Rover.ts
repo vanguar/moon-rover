@@ -71,6 +71,15 @@ export class Rover {
   readonly wheelLocal: THREE.Vector3[];
   /** Fraction of the solar array covered by settled dust (Mars), 0..1. */
   panelDust = 0;
+  /** Fraction of the solar disc visible from the panels (terrain shadow), 0..1. */
+  sunLit = 1;
+  /** Electronics box temperature, °C, and the survival heater state. */
+  elecTemp = 20;
+  heater = false;
+  /** External charging (at the base), W. */
+  chargeW = 0;
+  /** Running energy use per distance, Wh/km (for the range forecast). */
+  whPerKm = 60;
   /** Regolith thrown onto the vehicle by its own wheels, 0..1 (shown by the wear shader). */
   dustCoat = 0;
   private wearDust = { value: 0.3 };
@@ -367,12 +376,26 @@ export class Rover {
     this.body.resetForces(true);
     if (this.windForce.lengthSq() > 0) this.body.addForce({ x: this.windForce.x, y: 0, z: this.windForce.z }, true);
 
-    // Energy budget.
+    // Energy budget: panels work only in sunlight (terrain shadow test by the game).
     const up = this.upVector(this.tv);
-    this.solar = spec.solarW * this.solarScale * (1 - this.panelDust) * Math.max(0, up.dot(this.sunDir));
+    this.solar = spec.solarW * this.solarScale * (1 - this.panelDust) * Math.max(0, up.dot(this.sunDir)) * this.sunLit;
     const copper = this.motorLoad * 150 * (spec.mass / 620);
     const motorW = mech / MOTOR_EFF + copper;
-    this.power = spec.idleW + motorW + (this.headlights ? spec.lightsW : 0) - this.solar;
+    // Electronics thermal balance (box ~15 kJ/K, 0.4 m² radiator, ε 0.85): heated by its own
+    // dissipation and the Sun, cooled by radiation to space and to the ground.
+    const sinkK = world().atmosphere ? 230 : this.sunLit > 0.5 ? 250 : 110;
+    const absorbed = (world().atmosphere ? 25 : 60) * this.sunLit * Math.max(0, this.sunDir.y + 0.2);
+    if (this.elecTemp < -10) this.heater = true;
+    else if (this.elecTemp > 0) this.heater = false;
+    const heaterW = this.heater ? 40 : 0;
+    const Tk = this.elecTemp + 273;
+    const qOut = 0.85 * 5.67e-8 * 0.4 * (Tk ** 4 - sinkK ** 4);
+    this.elecTemp += ((spec.idleW * 0.6 + absorbed + heaterW - qOut) * dt) / 15000;
+    // Over-temperature protection derates the drive.
+    const hot = THREE.MathUtils.clamp((this.elecTemp - 85) / 15, 0, 0.7);
+    this.power = spec.idleW + motorW * (1 - hot) + heaterW + (this.headlights ? spec.lightsW : 0) - this.solar - this.chargeW;
+    const sp = Math.abs(this.speed);
+    if (sp > 0.3) this.whPerKm += ((Math.max(0, this.power + this.chargeW) / (sp * 3.6)) - this.whPerKm) * Math.min(1, dt * 0.05);
     this.battery = THREE.MathUtils.clamp(this.battery - (this.power * dt) / 3600 / spec.batteryWh, 0, 1);
     const current = Math.max(0, this.power + this.solar) / 36;
     this.volts = 30 + 7 * this.battery - current * 0.04;
@@ -547,6 +570,11 @@ export class Rover {
     this.teleport(x, this.terrain.height(x, z) + this.rideHeight(), z, new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw));
     this.prevPos.set(x, 0, z);
     this.odometer = 0;
+  }
+
+  /** Forecast range on the remaining charge at the recent consumption, km. */
+  get rangeKm(): number {
+    return (this.battery * this.spec.batteryWh) / Math.max(5, this.whPerKm);
   }
 
   /** Brush the dust off (as the Apollo crews did with a long-handled brush). */

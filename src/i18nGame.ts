@@ -33,6 +33,13 @@ const ru: Dict = {
   hRpm: 'об/мин',
   hS: 'с',
   bAuto: 'Автопилот (T)',
+  hElec: 'электроника',
+  hRange: 'запас хода',
+  wShadow: 'ТЕНЬ — панели не заряжают',
+  wCold: 'ОБОГРЕВ',
+  wHot: 'ПЕРЕГРЕВ',
+  wBase: 'ЗАРЯДКА У LM',
+  kBrush: 'Смахнуть пыль щёткой',
 };
 
 const uk: Dict = {
@@ -63,6 +70,13 @@ const uk: Dict = {
   hRpm: 'об/хв',
   hS: 'с',
   bAuto: 'Автопілот (T)',
+  hElec: 'електроніка',
+  hRange: 'запас ходу',
+  wShadow: 'ТІНЬ — панелі не заряджають',
+  wCold: 'ОБІГРІВ',
+  wHot: 'ПЕРЕГРІВ',
+  wBase: 'ЗАРЯДКА БІЛЯ LM',
+  kBrush: 'Змахнути пил щіткою',
 };
 
 const en: Dict = {
@@ -94,6 +108,13 @@ const en: Dict = {
   hRpm: 'rpm',
   hS: 's',
   bAuto: 'Autopilot (T)',
+  hElec: 'electronics',
+  hRange: 'range',
+  wShadow: 'SHADOW — panels not charging',
+  wCold: 'HEATER ON',
+  wHot: 'OVERHEAT',
+  wBase: 'CHARGING AT THE LM',
+  kBrush: 'Brush the dust off',
 };
 
 export const GAME_STRINGS: Record<string, Dict> = { ru, uk, en };

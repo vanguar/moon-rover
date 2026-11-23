@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { dataUrl } from '../../version';
-import { approach, type RoverAnimState, type RoverModel, type WheelVisual } from './kit';
+import { type RoverAnimState, type RoverModel, type WheelVisual } from './kit';
 
 /**
  * Official NASA 3D models (NASA 3D Resources, github.com/nasa/NASA-3D-Resources,
@@ -175,20 +175,21 @@ export function buildPerseveranceGlb(): RoverModel | null {
     return { steer, spin };
   });
 
-  // Remote Sensing Mast head: pans and tilts with the driver's view.
-  const headPivot = new THREE.Group();
-  const head = scene.getObjectByName('head');
-  const mz = scene.getObjectByName('Mastcam_Z_cams');
-  const nav = scene.getObjectByName('NavCams');
-  headPivot.position.set(0.0, 1.2, 0.27);
-  scene.add(headPivot);
-  scene.updateMatrixWorld(true);
-  for (const o of [head, mz, nav]) if (o) headPivot.attach(o);
+  // Driver's eye: the Mastcam-Z / Navcam head on the Remote Sensing Mast, placed from
+  // the head's actual bounds (the model's node hierarchy is left untouched).
+  root.updateMatrixWorld(true);
+  const head = scene.getObjectByName('Mastcam_Z_cams') ?? scene.getObjectByName('head');
   const cockpitAnchor = new THREE.Object3D();
-  cockpitAnchor.position.set(0.06, 0.05, 0.12);
-  headPivot.add(cockpitAnchor);
-
-  let pan = 0, tilt = 0;
+  if (head) {
+    const hb = new THREE.Box3().setFromObject(head);
+    const c = hb.getCenter(new THREE.Vector3());
+    root.worldToLocal(c);
+    // Navcams of the real rover are ~2.0 m above the ground (the model's mast is shorter).
+    cockpitAnchor.position.set(c.x, PERSE_GLB_AXLE - PERSE_WHEEL_Y + 2.0, c.z + 0.25);
+  } else {
+    cockpitAnchor.position.set(0.05, PERSE_GLB_AXLE - PERSE_WHEEL_Y + 2.0, 0.45);
+  }
+  root.add(cockpitAnchor);
   return {
     root,
     wheels,
@@ -197,10 +198,6 @@ export function buildPerseveranceGlb(): RoverModel | null {
     setHeadlights: () => undefined,
     setSteering: () => undefined,
     animate(s: RoverAnimState) {
-      pan = approach(pan, s.lookYaw, 4, s.dt);
-      tilt = approach(tilt, s.lookPitch, 4, s.dt);
-      headPivot.rotation.set(0, pan, 0);
-      headPivot.rotation.x = -tilt * 0.6;
       if (s.preview) {
         for (const w of wheels) w.spin.rotation.x += s.dt * 0.8;
       }

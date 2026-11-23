@@ -691,6 +691,7 @@ export class Game {
     this.updateEnvironment(dt);
     this.updateSun(p);
     this.updateImpacts(dt);
+    this.updateEnergy(dt);
 
     this.fpsAcc.t += dt;
     this.fpsAcc.n++;
@@ -735,6 +736,25 @@ export class Game {
       parked: idle || r.parkBrake || this.still > 3,
       wheelLocal: r.wheelLocal, preview: false,
     });
+  }
+
+  private litTimer = 0;
+  /**
+   * Is the rover in sunlight (ray to the Sun over the terrain, incl. distant massifs)?
+   * And charging at the base: parked within 20 m of the LM (game liberty: the real
+   * LRV had no recharge; the energy loop needs a base).
+   */
+  private updateEnergy(dt: number): void {
+    const r = this.rover, p = r.object.position;
+    this.litTimer -= dt;
+    if (this.litTimer <= 0) {
+      this.litTimer = 0.5;
+      r.sunLit = this.sky ? ShadowBaker.litAt(this.terrain, p.x, p.z, this.sunDir, 1.2) : 1;
+    }
+    const lm = this.terrain.meta.landing;
+    const atBase = !this.heli && world().id === 'moon' && Math.hypot(p.x - lm.x, p.z - lm.z) < 20 && Math.abs(r.speed) < 0.2;
+    r.chargeW = atBase ? r.spec.batteryWh * 0.02 : 0;
+    this.hud.atBase = atBase;
   }
 
   /** Jump to a moment (UTC ms) and set the time rate (1 = real time). */
