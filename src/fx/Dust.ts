@@ -110,6 +110,8 @@ void RE_IndirectDiffuse_Lambert( const in vec3 irradiance, const in vec3 geometr
       const rim = rover.wheelRimSpeed[w];
       if (Math.abs(rim) < 0.05) continue;
       const slip = Math.abs(rover.wheelSlip[w]);
+      // Part of the throw lands on the vehicle itself (fenders stop most of it on the LRV).
+      rover.dustCoat = Math.min(1, rover.dustCoat + (Math.abs(rim) * 0.0006 + slip * 0.002) * dt * (rover.spec.crew ? 0.5 : 1));
       // Grains entrained per second scale with rim speed and with slip (shearing).
       this.carry[w] += (Math.abs(rim) * 110 + slip * 300) * dt * scale;
       const c = rover.wheelWorld[w];
@@ -160,7 +162,23 @@ void RE_IndirectDiffuse_Lambert( const in vec3 irradiance, const in vec3 geometr
       this.pos[k + 2] += this.vel[k + 2] * dt;
       this.vel[k + 1] -= g * dt;
       this.age[i] += dt;
-      if ((this.vel[k + 1] < 0 && this.pos[k + 1] < this.ground[i]) || this.age[i] > 12) {
+      // Landing: test against the real ground under the grain (slopes, craters), not the
+      // height where it was thrown. Coarse clumps that land fast splash a few fines.
+      if (this.vel[k + 1] < 0 && this.pos[k + 1] < this.ground[i] + 1.5) {
+        const gy = this.terrain.height(this.pos[k], this.pos[k + 2]);
+        this.ground[i] = gy;
+        if (this.pos[k + 1] <= gy) {
+          const vImp = Math.hypot(this.vel[k], this.vel[k + 1], this.vel[k + 2]);
+          if (vImp > 1.5 && this.size[i] > 0.006 && Math.random() < 0.3) {
+            const a = Math.random() * Math.PI * 2, sp = vImp * 0.25;
+            this.spawn(this.pos[k], gy + 0.01, this.pos[k + 2], Math.cos(a) * sp, sp * 0.8, Math.sin(a) * sp, gy - 0.02);
+            this.size[(this.cursor + this.max - 1) % this.max] = 0.002;
+          }
+          this.alive[i] = 0;
+          continue;
+        }
+      }
+      if (this.age[i] > 12) {
         this.alive[i] = 0;
         continue;
       }

@@ -71,6 +71,11 @@ export class Rover {
   readonly wheelLocal: THREE.Vector3[];
   /** Fraction of the solar array covered by settled dust (Mars), 0..1. */
   panelDust = 0;
+  /** Regolith thrown onto the vehicle by its own wheels, 0..1 (shown by the wear shader). */
+  dustCoat = 0;
+  private wearDust = { value: 0.3 };
+  /** Dust already on the vehicle at the start (Mars: settled from the air). */
+  private dustBase = 0.25;
   /** External horizontal force on the chassis (wind), N. */
   readonly windForce = new THREE.Vector3();
   /** Rock size for a collider (0 if not a rock), set by the game. */
@@ -228,8 +233,10 @@ export class Rover {
     this.model = spec.build();
     // Field wear: waviness, dents, scratches, regolith dust (more on Mars, ochre).
     const mars = world().id === 'mars';
+    this.dustBase = mars ? 0.55 : 0.25;
+    this.wearDust.value = this.dustBase;
     applyWear(this.model.root, {
-      dust: mars ? 0.75 : 0.5,
+      dust: this.wearDust,
       dustColor: mars ? new THREE.Color(0.32, 0.17, 0.09) : new THREE.Color(0.2, 0.195, 0.188),
       lowY: spec.axleY + spec.wheelRadius * 0.6,
       rootInv: this.wearInv,
@@ -413,6 +420,7 @@ export class Rover {
     this.object.quaternion.copy(cq);
     this.object.updateMatrixWorld();
     this.wearInv.value.copy(this.object.matrixWorld).invert();
+    this.wearDust.value = Math.min(1, this.dustBase + this.dustCoat * 0.75);
 
     const pos = this.object.position;
     const d = Math.hypot(pos.x - this.prevPos.x, pos.z - this.prevPos.z);
@@ -539,6 +547,12 @@ export class Rover {
     this.teleport(x, this.terrain.height(x, z) + this.rideHeight(), z, new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw));
     this.prevPos.set(x, 0, z);
     this.odometer = 0;
+  }
+
+  /** Brush the dust off (as the Apollo crews did with a long-handled brush). */
+  brushDust(): void {
+    this.dustCoat *= 0.25;
+    this.panelDust *= 0.3;
   }
 
   setHeadlights(on: boolean): void {

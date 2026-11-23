@@ -577,6 +577,9 @@ export class Game {
       this.zoom(-1);
     } else if (a === 'zoomout') {
       this.zoom(1);
+    } else if (a === 'brush') {
+      this.rover.brushDust();
+      this.audio.click(500);
     } else if (a === 'auto') {
       this.heli?.startAuto();
       this.audio.click(1500);

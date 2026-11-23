@@ -16,8 +16,8 @@ import { NOISE_GLSL } from '../../render/lunar';
  * Plus geometric dents on large flat panels and fenders (dentGeometry).
  */
 export interface WearOptions {
-  /** Overall dust level 0..1. */
-  dust: number;
+  /** Overall dust level 0..1 (shared uniform: the owner raises it as dust settles). */
+  dust: { value: number };
   /** Dust colour (linear). */
   dustColor: THREE.Color;
   /** Height (model frame) below which wheel-thrown dust builds up. */
@@ -37,6 +37,8 @@ uniform float uWearLowY;
 uniform float uWearKind; // 0 metal, 1 paint/plastic, 2 foil
 uniform mat4 uWearRootInv;
 ${NOISE_GLSL}
+// Noise values shared by the normal, roughness and colour stages (computed once).
+float gWearA = 0.0, gWearB = 0.0;
 float wTri(vec3 p, vec3 w) {
   return lnoised(p.yz).x * w.x + lnoised(p.xz + 13.1).x * w.y + lnoised(p.xy + 27.7).x * w.z;
 }
@@ -75,7 +77,7 @@ function patch(m: THREE.MeshStandardMaterial, opt: WearOptions): void {
   m.onBeforeCompile = (shader, r) => {
     prev.call(m, shader, r);
     Object.assign(shader.uniforms, {
-      uWearDust: { value: opt.dust },
+      uWearDust: opt.dust,
       uWearDustCol: { value: opt.dustColor },
       uWearLowY: { value: opt.lowY },
       uWearKind: { value: kind },
@@ -100,12 +102,10 @@ vWearY = (uWearRootInv * modelMatrix * vec4(position, 1.0)).y;`,
   vec3 an = abs(normalize(vWearN));
   vec3 w = an / (an.x + an.y + an.z + 1e-4);
   float fw = length(fwidth(vWearP));
-  // Panel waviness / dents (cm-scale relief over decimetres) and fine grain.
-  float wav = wTri(vWearP * 6.0, w) * 0.0025 + wTri(vWearP * 15.0 + 3.0, w) * 0.0012;
-  float grain = wTri(vWearP * 140.0 + 7.0, w) * 0.00025 * (1.0 - smoothstep(0.002, 0.01, fw));
-  // Foil (MLI): crinkled, much stronger relief.
-  float crinkle = uWearKind > 1.5 ? (wTri(vWearP * 45.0, w) * 0.0022 + wTri(vWearP * 110.0, w) * 0.0009) : 0.0;
-  float H = wav + grain + crinkle;
+  // Panel waviness / dents (decimetres) and, on foil, crinkles.
+  gWearA = wTri(vWearP * 6.0, w);
+  gWearB = wTri(vWearP * (uWearKind > 1.5 ? 45.0 : 15.0) + 3.0, w);
+  float H = gWearA * 0.0025 + gWearB * (uWearKind > 1.5 ? 0.0022 : 0.0012);
   vec3 sx = dFdx(-vViewPosition), sy = dFdy(-vViewPosition);
   vec3 r1 = cross(sy, normal), r2 = cross(normal, sx);
   float det = dot(sx, r1);
@@ -119,7 +119,7 @@ vWearY = (uWearRootInv * modelMatrix * vec4(position, 1.0)).y;`,
 {
   vec3 an = abs(normalize(vWearN));
   vec3 w = an / (an.x + an.y + an.z + 1e-4);
-  float n1 = wTri(vWearP * 9.0 + 1.0, w);
+  float n1 = gWearA;
   // Fine scratches along x (handling, tools, dust abrasion).
   float scr = smoothstep(0.93, 0.99, lnoised(vec2(vWearP.x * 3.0, (vWearP.y + vWearP.z) * 180.0)).x);
   roughnessFactor = clamp(roughnessFactor * (0.75 + 0.55 * n1) - scr * 0.15, 0.04, 1.0);
@@ -132,7 +132,7 @@ vWearY = (uWearRootInv * modelMatrix * vec4(position, 1.0)).y;`,
   vec3 an = abs(normalize(vWearN));
   vec3 w = an / (an.x + an.y + an.z + 1e-4);
   float n2 = wTri(vWearP * 4.0 + 9.0, w);
-  float n3 = wTri(vWearP * 30.0 + 2.0, w);
+  float n3 = gWearB;
   // Grime and small chips on paint.
   if (uWearKind > 0.5 && uWearKind < 1.5) diffuseColor.rgb *= 0.9 + 0.12 * n2 - 0.25 * smoothstep(0.86, 0.95, n3);
   // Dust: upward faces and the lower body (thrown by the wheels), patchy.
