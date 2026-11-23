@@ -1,15 +1,13 @@
 import * as THREE from 'three';
 import { makeLunar } from '../render/lunar';
 import type { Rover } from '../rover/Rover';
+import type { RoverSpec } from '../rover/specs';
 import type { TerrainData } from '../terrain/TerrainData';
 
 const SEG_LEN = 0.3;
-const HALF_W = 0.12;
 const PER_TRACK = 3000;
-/** Wheels that leave visible ruts: front pair and rear pair (middle runs in the front ruts). */
-const TRACK_WHEELS = [0, 1, 4, 5];
 
-function chevronTexture(): THREE.CanvasTexture {
+function treadTexture(tread: RoverSpec['tread']): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = 64;
   c.height = 64;
@@ -18,14 +16,22 @@ function chevronTexture(): THREE.CanvasTexture {
   g.fillStyle = 'rgb(140,140,140)';
   g.fillRect(0, 0, 64, 64);
   g.strokeStyle = 'rgb(235,235,235)';
-  g.lineWidth = 7;
+  g.lineWidth = tread === 'cleat' ? 9 : 7;
   g.beginPath();
-  g.moveTo(4, 8);
-  g.lineTo(32, 28);
-  g.lineTo(60, 8);
-  g.moveTo(4, 40);
-  g.lineTo(32, 60);
-  g.lineTo(60, 40);
+  if (tread === 'chevron') {
+    g.moveTo(4, 8);
+    g.lineTo(32, 28);
+    g.lineTo(60, 8);
+    g.moveTo(4, 40);
+    g.lineTo(32, 60);
+    g.lineTo(60, 40);
+  } else {
+    // Straight grousers / cleats across the rut.
+    for (const y of [12, 44]) {
+      g.moveTo(6, y);
+      g.lineTo(58, y + (tread === 'grouser' ? 4 : 0));
+    }
+  }
   g.stroke();
   const grd = g.createLinearGradient(0, 0, 64, 0);
   grd.addColorStop(0, 'rgba(0,0,0,1)');
@@ -44,14 +50,18 @@ export class Tracks {
   readonly mesh: THREE.Mesh;
   private pos: Float32Array;
   private uv: Float32Array;
-  private last: (THREE.Vector3 | null)[] = TRACK_WHEELS.map(() => null);
-  private lastL: THREE.Vector3[] = TRACK_WHEELS.map(() => new THREE.Vector3());
-  private lastR: THREE.Vector3[] = TRACK_WHEELS.map(() => new THREE.Vector3());
-  private dist = TRACK_WHEELS.map(() => 0);
-  private head = TRACK_WHEELS.map(() => 0);
+  private last: (THREE.Vector3 | null)[] = [];
+  private lastL: THREE.Vector3[] = [];
+  private lastR: THREE.Vector3[] = [];
+  private dist: number[] = [];
+  private head: number[] = [];
+  private wheels: number[] = [];
+  private halfW = 0.12;
+  private segLen = SEG_LEN;
+  private mat: THREE.MeshLambertMaterial;
 
-  constructor(private terrain: TerrainData) {
-    const quads = PER_TRACK * TRACK_WHEELS.length;
+  constructor(private terrain: TerrainData, spec: RoverSpec) {
+    const quads = PER_TRACK * 4;
     this.pos = new Float32Array(quads * 4 * 3);
     this.uv = new Float32Array(quads * 4 * 2);
     const idx = new Uint32Array(quads * 6);
@@ -67,7 +77,7 @@ export class Tracks {
     const mat = makeLunar(
       new THREE.MeshLambertMaterial({
         color: 0x000000,
-        alphaMap: chevronTexture(),
+        alphaMap: treadTexture(spec.tread),
         transparent: true,
         opacity: 0.55,
         depthWrite: false,
@@ -77,17 +87,35 @@ export class Tracks {
       }),
       'tracks',
     );
+    this.mat = mat;
     this.mesh = new THREE.Mesh(g, mat);
     this.mesh.frustumCulled = false;
     this.mesh.receiveShadow = true;
     this.mesh.renderOrder = 1;
+    this.setRover(spec);
+  }
+
+  /** New rover: new rut width and tread; old ruts stay on the ground. */
+  setRover(spec: RoverSpec): void {
+    this.wheels = spec.trackWheels.slice(0, 4);
+    this.halfW = (spec.wheelWidth / 2) * 1.05;
+    this.segLen = Math.min(SEG_LEN, spec.wheelRadius * 0.8);
+    this.last = this.wheels.map(() => null);
+    this.lastL = this.wheels.map(() => new THREE.Vector3());
+    this.lastR = this.wheels.map(() => new THREE.Vector3());
+    this.dist = this.wheels.map(() => 0);
+    if (this.head.length === 0) this.head = [0, 0, 0, 0];
+    this.mat.alphaMap?.dispose();
+    this.mat.alphaMap = treadTexture(spec.tread);
+    this.mat.alphaMap.wrapT = THREE.RepeatWrapping;
+    this.mat.needsUpdate = true;
   }
 
   update(rover: Rover): void {
     let dirty = false;
     const fwd = rover.forwardVector(new THREE.Vector3());
-    for (let t = 0; t < TRACK_WHEELS.length; t++) {
-      const w = TRACK_WHEELS[t];
+    for (let t = 0; t < this.wheels.length; t++) {
+      const w = this.wheels[t];
       if (!rover.wheelContact[w]) {
         this.last[t] = null;
         continue;
@@ -101,7 +129,7 @@ export class Tracks {
         continue;
       }
       const d = Math.hypot(p.x - prev.x, p.z - prev.z);
-      if (d < SEG_LEN) continue;
+      if (d < this.segLen) continue;
       if (d > 3) {
         this.last[t] = p;
         this.edges(p, fwd, this.lastL[t], this.lastR[t]);
@@ -112,7 +140,8 @@ export class Tracks {
       this.edges(p, dir, L, R);
       const q = t * PER_TRACK + this.head[t];
       this.head[t] = (this.head[t] + 1) % PER_TRACK;
-      const v0 = this.dist[t] / 0.5, v1 = (this.dist[t] + d) / 0.5;
+      const pitch = this.halfW * 4;
+      const v0 = this.dist[t] / pitch, v1 = (this.dist[t] + d) / pitch;
       this.dist[t] += d;
       const verts = [this.lastL[t], this.lastR[t], L, R];
       const uvs = [0, v0, 1, v0, 0, v1, 1, v1];
@@ -133,7 +162,7 @@ export class Tracks {
   }
 
   private edges(p: THREE.Vector3, dir: THREE.Vector3, L: THREE.Vector3, R: THREE.Vector3): void {
-    const sx = -dir.z * HALF_W, sz = dir.x * HALF_W;
+    const sx = -dir.z * this.halfW, sz = dir.x * this.halfW;
     L.set(p.x + sx, 0, p.z + sz);
     R.set(p.x - sx, 0, p.z - sz);
     L.y = this.terrain.height(L.x, L.z) + 0.01;

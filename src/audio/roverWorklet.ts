@@ -33,9 +33,16 @@ export interface RoverAudioParams {
   cabin: number;
   /** Rock density factor under the wheels. */
   rough: number;
+  /** Wheel radius, m. */
+  wheelR: number;
+  /** 1 = suited crew aboard (suit fan, breathing), 0 = robot (no life support). */
+  crew: number;
+  /** Wind loudness 0..1 (Mars). */
+  wind: number;
+  /** 1 = there is air (Mars): sound also travels through it, thin and quiet. */
+  air: number;
 }
 
-const WHEEL_R = 0.41;
 const GROUSERS = 18;
 const DRIVE_RATIO = 80; // LRV harmonic drive
 const COMMUTATOR = 11;
@@ -95,8 +102,16 @@ class Biquad {
 class RoverProcessor extends AudioWorkletProcessor {
   private p: RoverAudioParams = {
     rim: [0, 0, 0, 0, 0, 0], contact: [false, false, false, false, false, false], slip: [0, 0, 0, 0, 0, 0],
-    load: 0, susp: [0, 0, 0, 0, 0, 0], steerRate: 0, stress: 0, cabin: 1, rough: 1,
+    load: 0, susp: [0, 0, 0, 0, 0, 0], steerRate: 0, stress: 0, cabin: 1, rough: 1, wheelR: 0.41, crew: 1, wind: 0, air: 0,
   };
+  // Wind: low-passed rumble (CO₂ at 6 mbar carries only low frequencies far) with gusts.
+  private windLp = Biquad.lowpass(220, 0.7);
+  private windLp2 = Biquad.lowpass(500, 0.6);
+  private windBp = Biquad.bandpass(900, 3);
+  private windG = 0;
+  private gustPh = 0;
+  private windSm = 0;
+  private crew = 1;
   // Smoothed control values.
   private rim = new Float32Array(6);
   private load = 0;
@@ -171,6 +186,9 @@ class RoverProcessor extends AudioWorkletProcessor {
     this.cabin += (p.cabin - this.cabin) * (1 - Math.exp(-n / (fs * 0.2)));
     this.steer += (Math.min(Math.abs(p.steerRate), 2) - this.steer) * k;
     this.stress += (p.stress - this.stress) * (1 - Math.exp(-n / (fs * 3)));
+    this.windSm += (p.wind - this.windSm) * (1 - Math.exp(-n / (fs * 0.5)));
+    this.crew += (p.crew - this.crew) * k;
+    const WHEEL_R = p.wheelR;
 
     // Suspension shocks -> low thump envelope.
     let shock = 0;
@@ -298,9 +316,18 @@ class RoverProcessor extends AudioWorkletProcessor {
       const bn = this.breathHp.tick(this.rnd() * 2 - 1);
       const breath = (this.breathF1.tick(bn) * (exhale ? 1.2 : 0.6) + this.breathF2.tick(bn) * (exhale ? 0.4 : 0.9)) * env * 0.09;
 
-      const lifeSupport = (fan + pump + breath) * this.cabin;
-      L[i] = sl * 0.9 + lifeSupport;
-      R[i] = sr * 0.9 + lifeSupport;
+      const lifeSupport = (fan + pump + breath) * this.cabin * this.crew;
+      // Wind on the microphone: rumble with slow gusts and occasional whistle.
+      let wind = 0;
+      if (this.windSm > 0.005) {
+        this.gustPh += 1 / fs;
+        const gust = 0.55 + 0.3 * Math.sin(this.gustPh * 0.7) + 0.15 * Math.sin(this.gustPh * 2.3 + 1);
+        this.windG += (gust - this.windG) * 0.0005;
+        const nz = this.rnd() * 2 - 1;
+        wind = (this.windLp.tick(this.windLp2.tick(nz)) * 2.2 + this.windBp.tick(nz) * 0.05 * this.windG) * this.windSm * this.windG;
+      }
+      L[i] = sl * 0.9 + lifeSupport + wind;
+      R[i] = sr * 0.9 + lifeSupport + wind * 0.92;
     }
     return true;
   }

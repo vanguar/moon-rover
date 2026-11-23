@@ -1,3 +1,5 @@
+import { WORLD_STRINGS } from './i18nWorlds';
+
 export type Lang = 'ru' | 'uk' | 'en' | 'de' | 'ar' | 'zh';
 
 export const LANGS: { id: Lang; name: string }[] = [
@@ -12,8 +14,8 @@ export const LANGS: { id: Lang; name: string }[] = [
 type Dict = Record<string, string>;
 
 const ru: Dict = {
-  appTitle: 'Луноход: Хэдли',
-  title: 'ЛУНОХОД',
+  appTitle: 'Планетоход · Луна',
+  title: 'ПЛАНЕТОХОД',
   titleSub: 'Борозда Хэдли · Аполлон-15',
   lead: 'Реальный рельеф места посадки «Аполлона-15» (LROC NAC DTM) и окрестностей с горами Хэдли и Хэдли-Дельта (SLDEM2015). Солнце, Земля и звёзды — как в начале первого выхода, 31 июля 1971 года.',
   chipDtm: 'DTM 2 м · 4×4 км',
@@ -103,8 +105,8 @@ const ru: Dict = {
 
 const uk: Dict = {
   ...ru,
-  appTitle: 'Місяцехід: Хедлі',
-  title: 'МІСЯЦЕХІД',
+  appTitle: 'Планетохід · Місяць',
+  title: 'ПЛАНЕТОХІД',
   titleSub: 'Борозна Хедлі · Аполлон-15',
   lead: 'Реальний рельєф місця посадки «Аполлона-15» (LROC NAC DTM) та околиць із горами Хедлі й Хедлі-Дельта (SLDEM2015). Сонце, Земля й зорі — як на початку першого виходу, 31 липня 1971 року.',
   chipSun: 'Сонце 100° / 19°',
@@ -185,8 +187,8 @@ const uk: Dict = {
 };
 
 const en: Dict = {
-  appTitle: 'Lunar Rover: Hadley',
-  title: 'LUNAR ROVER',
+  appTitle: 'Planet Rover · Moon',
+  title: 'PLANET ROVER',
   titleSub: 'Hadley Rille · Apollo 15',
   lead: 'Real terrain of the Apollo 15 site (LROC NAC DTM) and its surroundings with Mons Hadley and Hadley Delta (SLDEM2015). Sun, Earth and stars as at the start of the first moonwalk, 31 July 1971.',
   chipDtm: 'DTM 2 m · 4×4 km',
@@ -276,8 +278,8 @@ const en: Dict = {
 
 const de: Dict = {
   ...en,
-  appTitle: 'Mondrover: Hadley',
-  title: 'MONDROVER',
+  appTitle: 'Planetenrover · Mond',
+  title: 'PLANETENROVER',
   titleSub: 'Hadley-Rille · Apollo 15',
   lead: 'Echtes Gelände der Apollo-15-Landestelle (LROC NAC DTM) und der Umgebung mit Mons Hadley und Hadley Delta (SLDEM2015). Sonne, Erde und Sterne wie zu Beginn des ersten Mondspaziergangs am 31. Juli 1971.',
   chipSun: 'Sonne 100° / 19°',
@@ -361,8 +363,8 @@ const de: Dict = {
 
 const ar: Dict = {
   ...en,
-  appTitle: 'المركبة القمرية: هادلي',
-  title: 'المركبة القمرية',
+  appTitle: 'مركبة الكواكب · القمر',
+  title: 'مركبة الكواكب',
   titleSub: 'أخدود هادلي · أبولو 15',
   lead: 'تضاريس حقيقية لموقع هبوط أبولو 15 (LROC NAC DTM) ومحيطه مع جبلي هادلي وهادلي دلتا (SLDEM2015). الشمس والأرض والنجوم كما كانت في بداية أول سير على القمر في 31 يوليو 1971.',
   chipDtm: 'DTM 2 م · 4×4 كم',
@@ -451,8 +453,8 @@ const ar: Dict = {
 
 const zh: Dict = {
   ...en,
-  appTitle: '月球车：哈德利',
-  title: '月球车',
+  appTitle: '行星车 · 月球',
+  title: '行星车',
   titleSub: '哈德利月溪 · 阿波罗15号',
   lead: '阿波罗15号着陆点（LROC NAC DTM）及周边哈德利山、哈德利三角山的真实地形（SLDEM2015）。太阳、地球和星空按1971年7月31日首次月面行走开始时刻还原。',
   chipDtm: 'DTM 2 米 · 4×4 公里',
@@ -540,7 +542,14 @@ const zh: Dict = {
 };
 
 const DICTS: Record<Lang, Dict> = { ru, uk, en, de, ar, zh };
+for (const l of Object.keys(DICTS) as Lang[]) Object.assign(DICTS[l], WORLD_STRINGS[l]);
 let current: Lang = 'ru';
+/** World variant: keys `<key>_mars` override `<key>` on Mars. */
+let variant = '';
+
+export function setVariant(v: 'moon' | 'mars'): void {
+  variant = v === 'mars' ? '_mars' : '';
+}
 
 export function detectLang(): Lang {
   const l = (navigator.language || 'en').toLowerCase();
@@ -553,6 +562,10 @@ export function detectLang(): Lang {
 }
 
 export function t(key: string): string {
+  if (variant) {
+    const v = DICTS[current][key + variant] ?? DICTS.en[key + variant];
+    if (v !== undefined) return v;
+  }
   return DICTS[current][key] ?? DICTS.en[key] ?? key;
 }
 

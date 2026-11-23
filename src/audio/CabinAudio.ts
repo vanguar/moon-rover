@@ -1,5 +1,18 @@
 import type { Rover } from '../rover/Rover';
+import { world } from '../world';
 import workletUrl from './roverWorklet.ts?worker&url';
+
+/** The synthesiser has six wheel channels (L/R × front/middle/rear): fold any wheel count into them. */
+function fold6<T>(a: T[]): T[] {
+  if (a.length === 6) return a.slice();
+  const rows = a.length / 2;
+  const out: T[] = [];
+  for (let k = 0; k < 3; k++) {
+    const r = Math.round((k * (rows - 1)) / 2);
+    out.push(a[r * 2], a[r * 2 + 1]);
+  }
+  return out;
+}
 
 /**
  * Cabin sound. There is no air on the Moon, so nothing reaches the ear through
@@ -19,6 +32,8 @@ export class CabinAudio {
   private lastSteer = 0;
   private stress = 0;
   private sendTimer = 0;
+  /** Wind loudness 0..1 (Mars weather), heard through the rover's microphone. */
+  wind = 0;
 
   async start(volume: number): Promise<void> {
     if (this.ctx) {
@@ -135,11 +150,15 @@ export class CabinAudio {
         this.node.port.postMessage({
           type: 'params',
           p: {
-            rim: rover.wheelRimSpeed.slice(),
-            contact: rover.wheelContact.slice(),
-            slip: rover.wheelSlip.slice(),
+            rim: fold6(rover.wheelRimSpeed),
+            contact: fold6(rover.wheelContact),
+            slip: fold6(rover.wheelSlip),
             load: rover.motorLoadFactor,
-            susp: rover.wheelImpact.slice(),
+            susp: fold6(rover.wheelImpact),
+            wheelR: rover.wheelRadius,
+            crew: rover.spec.crew ? 1 : 0,
+            wind: this.wind,
+            air: world().atmosphere ? 1 : 0,
             steerRate,
             stress: this.stress,
             cabin: this.cabin,

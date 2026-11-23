@@ -70,22 +70,27 @@ export function makeQuality(level: QualityLevel): QualitySettings {
   return { level, pixelRatio: Math.min(window.devicePixelRatio || 1, maxPixelRatio), ...rest };
 }
 
-/** Physical constants. */
-export const MOON_GRAVITY = 1.62;
-
 const STORE_KEY = 'moon-rover-settings';
 
 export interface UserSettings {
   quality: QualityLevel | 'auto';
+  world: 'moon' | 'mars';
+  rover: { moon: string; mars: string };
+  /** Mars weather: 'auto' cycles calm / dust devils / storms. */
+  weather: 'auto' | 'calm' | 'devils' | 'storm';
   tiltSteering: boolean;
   volume: number;
 }
 
 export function loadSettings(): UserSettings {
-  const def: UserSettings = { quality: 'auto', tiltSteering: false, volume: 0.8 };
+  const def: UserSettings = {
+    quality: 'auto', tiltSteering: false, volume: 0.8, world: 'moon', rover: { moon: 'lrv', mars: 'perseverance' }, weather: 'auto',
+  };
   try {
     const s = localStorage.getItem(STORE_KEY);
-    return s ? { ...def, ...JSON.parse(s) } : def;
+    if (!s) return def;
+    const v = JSON.parse(s) as Partial<UserSettings>;
+    return { ...def, ...v, rover: { ...def.rover, ...(v.rover ?? {}) } };
   } catch {
     return def;
   }

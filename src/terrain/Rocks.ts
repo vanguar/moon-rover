@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import type { QualitySettings } from '../config';
 import type { Physics } from '../physics/Physics';
@@ -14,6 +15,7 @@ const COLLIDER_RADIUS = 70;
 const COLLIDER_SMALL = 0.1;
 const BOULDER_GRID = 8;
 const BOULDER_CELL = 64;
+const BOULDER_VARIANTS = 4;
 
 interface Rock {
   x: number; y: number; z: number;
@@ -24,72 +26,124 @@ interface Rock {
   outcrop?: boolean;
 }
 
-function displaceNoise(rnd: () => number): (v: THREE.Vector3) => number {
-  const waves = Array.from({ length: 14 }, (_, i) => ({
-    d: new THREE.Vector3(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5).normalize(),
-    f: 1.5 * Math.pow(1.7, i % 7) * (0.8 + rnd() * 0.4),
-    p: rnd() * 6.28,
-  }));
-  return (v) => waves.reduce((s, w) => s + (Math.sin(v.dot(w.d) * w.f + w.p) * 0.12) / Math.pow(w.f, 0.85), 0);
+/** Seeded 3D value noise + fbm (for rock shapes). */
+function noise3(seed: number): (x: number, y: number, z: number) => number {
+  const h = (i: number, j: number, k: number) => hash2(i * 73856093 + k * 19349663, j * 83492791 + seed, seed);
+  const sm = (t: number) => t * t * (3 - 2 * t);
+  return (x, y, z) => {
+    const i = Math.floor(x), j = Math.floor(y), k = Math.floor(z);
+    const fx = sm(x - i), fy = sm(y - j), fz = sm(z - k);
+    const l = (a: number, b: number, t: number) => a + (b - a) * t;
+    return l(
+      l(l(h(i, j, k), h(i + 1, j, k), fx), l(h(i, j + 1, k), h(i + 1, j + 1, k), fx), fy),
+      l(l(h(i, j, k + 1), h(i + 1, j, k + 1), fx), l(h(i, j + 1, k + 1), h(i + 1, j + 1, k + 1), fx), fy),
+      fz,
+    ) * 2 - 1;
+  };
 }
 
+function fbm(n: (x: number, y: number, z: number) => number, v: THREE.Vector3, f: number, oct: number): number {
+  let s = 0, a = 0.5;
+  for (let o = 0; o < oct; o++) {
+    s += a * n(v.x * f + o * 7.1, v.y * f + o * 3.3, v.z * f + o * 5.7);
+    f *= 2.1;
+    a *= 0.5;
+  }
+  return s;
+}
+
+export type RockTint = { base: THREE.Color; dust: THREE.Color | null };
+
 /**
- * Fractured basalt block: rounded by micrometeorite erosion on top, sharp
- * fracture planes, multi-scale surface roughness and vesicle pits.
+ * Rock shape: an irregular, lumpy body (multi-octave noise on an ellipsoid)
+ * with a few softly bevelled fracture faces — subangular to subrounded, as
+ * real blocks are after impact fragmentation and erosion. Smooth normals; the
+ * vertex colour carries mineral mottling and (on Mars) dust settled on top.
  */
-function rockGeometry(seed: number, detail: number): THREE.BufferGeometry {
-  const g = new THREE.IcosahedronGeometry(1, detail);
+function rockGeometry(seed: number, detail: number, tint: RockTint): THREE.BufferGeometry {
+  let g: THREE.BufferGeometry = new THREE.IcosahedronGeometry(1, detail);
+  g.deleteAttribute('uv');
+  g.deleteAttribute('normal');
+  g = mergeVertices(g);
   const p = g.getAttribute('position') as THREE.BufferAttribute;
   const rnd = mulberry32(seed);
-  const noise = displaceNoise(rnd);
-  const nCuts = 5 + Math.floor(rnd() * 4);
-  const dirs = Array.from({ length: nCuts }, () => new THREE.Vector3(rnd() - 0.5, rnd() - 0.3, rnd() - 0.5).normalize());
-  const cuts = dirs.map(() => 0.5 + rnd() * 0.4);
-  const pits = Array.from({ length: 12 }, () => ({ c: new THREE.Vector3(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5).normalize(), r: 0.05 + rnd() * 0.12 }));
-  const elong = new THREE.Vector3(0.8 + rnd() * 0.5, 0.6 + rnd() * 0.5, 0.8 + rnd() * 0.5);
+  const n = noise3(seed);
+  const angular = rnd(); // 0 = weathered and rounded, 1 = fresh and blocky
+  const nCuts = 2 + Math.floor(rnd() * 3);
+  const cuts = Array.from({ length: nCuts }, () => ({
+    d: new THREE.Vector3(rnd() - 0.5, rnd() - 0.6, rnd() - 0.5).normalize(),
+    c: 0.62 + rnd() * 0.25,
+  }));
+  const elong = new THREE.Vector3(0.85 + rnd() * 0.45, 0.6 + rnd() * 0.35, 0.8 + rnd() * 0.4);
   const v = new THREE.Vector3();
   for (let i = 0; i < p.count; i++) {
     v.fromBufferAttribute(p, i).normalize();
-    let s = 1 + noise(v);
-    // Fracture planes: clamp to the plane, with a slightly bevelled edge.
-    for (let k = 0; k < dirs.length; k++) {
-      const d = v.dot(dirs[k]) * s;
-      if (d > cuts[k]) s *= (cuts[k] + (d - cuts[k]) * 0.08) / d;
+    let s = 1 + 0.3 * fbm(n, v, 1.1, 2) + 0.07 * fbm(n, v, 4.3, 2) + 0.025 * fbm(n, v, 11, 2);
+    // Fracture faces: pull the surface onto the plane with a rounded edge (no hard box corners).
+    for (const cut of cuts) {
+      const d = v.dot(cut.d) * s;
+      if (d > cut.c - 0.15) {
+        const t = THREE.MathUtils.smoothstep(d, cut.c - 0.15, cut.c + 0.2) * (0.35 + 0.5 * angular);
+        s *= 1 - t * (1 - cut.c / Math.max(d, cut.c));
+      }
     }
-    for (const pit of pits) {
-      const dd = v.distanceTo(pit.c);
-      if (dd < pit.r) s *= 1 - 0.06 * (1 - dd / pit.r) ** 2;
-    }
+    // Flatter underside: the rock rests on the regolith.
+    if (v.y < -0.3) s *= 1 - (-v.y - 0.3) * 0.35;
     v.multiplyScalar(s).multiply(elong);
     p.setXYZ(i, v.x, v.y, v.z);
   }
-  g.deleteAttribute('uv');
-  g.computeVertexNormals(); // non-indexed: crisp facets on fracture planes
-  return g;
+  g.computeVertexNormals();
+  return colorize(g, n, tint);
 }
 
-/** Layered basalt slab: lava-flow units exposed in the rille wall. */
-function outcropGeometry(seed: number): THREE.BufferGeometry {
-  const g = new THREE.BoxGeometry(1, 1, 1, 8, 5, 4);
+/** Layered sedimentary/lava-flow outcrop: a ledge of strata with recessed bedding planes. */
+function outcropGeometry(seed: number, tint: RockTint): THREE.BufferGeometry {
+  let g: THREE.BufferGeometry = new THREE.IcosahedronGeometry(1, 4);
+  g.deleteAttribute('uv');
+  g.deleteAttribute('normal');
+  g = mergeVertices(g);
   const p = g.getAttribute('position') as THREE.BufferAttribute;
   const rnd = mulberry32(seed);
-  const noise = displaceNoise(rnd);
-  const v = new THREE.Vector3(), n = new THREE.Vector3();
+  const n = noise3(seed);
+  const layers = 4 + Math.floor(rnd() * 4);
+  const v = new THREE.Vector3();
   for (let i = 0; i < p.count; i++) {
-    v.fromBufferAttribute(p, i);
-    const layer = Math.floor((v.y + 0.5) * 5);
-    const recess = (layer % 2) * 0.07 + Math.abs(noise(n.copy(v).normalize())) * 0.6;
-    const k = 1 - recess;
-    v.x *= k * (1 - Math.abs(v.y) * 0.25);
-    v.z *= k;
-    v.y += noise(n.set(v.z, v.x, v.y).normalize()) * 0.2;
+    v.fromBufferAttribute(p, i).normalize();
+    // Irregular outline in plan view, flat-ish top, steeper front.
+    const s = 1 + 0.35 * fbm(n, v, 0.9, 3);
+    v.multiplyScalar(s);
+    v.y *= 0.5;
+    // Bedding: each layer recessed by a different amount, with a soft step.
+    const ly = (v.y + 0.6) * layers;
+    const li = Math.floor(ly), lf = ly - li;
+    const recess = 0.08 * (0.5 + 0.5 * Math.sin(li * 12.9898 + seed)) * (1 - THREE.MathUtils.smoothstep(lf, 0.0, 0.25));
+    v.x *= 1 - recess;
+    v.z *= 1 - recess;
+    v.y += (Math.round(ly) - ly) * 0.06 / layers;
     p.setXYZ(i, v.x, v.y, v.z);
   }
-  const ni = g.toNonIndexed();
-  ni.deleteAttribute('uv');
-  ni.computeVertexNormals();
-  g.dispose();
-  return ni;
+  g.computeVertexNormals();
+  return colorize(g, n, tint);
+}
+
+/** Vertex colours: mottled albedo; on Mars a coat of bright dust on upward faces. */
+function colorize(g: THREE.BufferGeometry, n: (x: number, y: number, z: number) => number, tint: RockTint): THREE.BufferGeometry {
+  const p = g.getAttribute('position') as THREE.BufferAttribute;
+  const nr = g.getAttribute('normal') as THREE.BufferAttribute;
+  const col = new Float32Array(p.count * 3);
+  const v = new THREE.Vector3(), c = new THREE.Color();
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i);
+    const m = 0.85 + 0.2 * fbm(n, v, 6, 2) + 0.08 * n(v.x * 23, v.y * 23, v.z * 23);
+    c.copy(tint.base).multiplyScalar(m);
+    if (tint.dust) {
+      const up = THREE.MathUtils.smoothstep(nr.getY(i), 0.25, 0.85) * (0.55 + 0.35 * fbm(n, v, 3, 2));
+      c.lerp(tint.dust, THREE.MathUtils.clamp(up, 0, 0.85));
+    }
+    col.set([c.r, c.g, c.b], i * 3);
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return g;
 }
 
 /**
@@ -100,8 +154,8 @@ function outcropGeometry(seed: number): THREE.BufferGeometry {
 export class Rocks {
   readonly group = new THREE.Group();
   private meshes: THREE.InstancedMesh[] = [];
-  private boulderNear: THREE.InstancedMesh;
-  private boulderFar: THREE.InstancedMesh;
+  private boulderNear: THREE.InstancedMesh[] = [];
+  private boulderFar: THREE.InstancedMesh[] = [];
   private outcropMesh: THREE.InstancedMesh;
   private boulders: Rock[] = [];
   private boulderGrid = new Map<string, number[]>();
@@ -112,22 +166,32 @@ export class Rocks {
   private rockSize = new Map<number, number>();
   private q: QualitySettings;
   private tmpN = [0, 0, 0];
+  private abundance: number;
 
   constructor(private terrain: TerrainData, private physics: Physics, quality: QualitySettings) {
     this.q = quality;
-    const mat = makeLunar(new THREE.MeshLambertMaterial({ color: 0x8e8a83 }), 'rock');
+    this.abundance = terrain.meta.body === 'mars' ? 5 : 1;
+    // Moon: grey basalt/breccia; Mars: dark grey-brown basalt under a coat of ferric dust.
+    const mars = terrain.meta.body === 'mars';
+    const tint: RockTint = mars
+      ? { base: new THREE.Color(0.13, 0.095, 0.075), dust: new THREE.Color(0.42, 0.2, 0.1) }
+      : { base: new THREE.Color(0.27, 0.26, 0.245), dust: null };
+    const mat = makeLunar(new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }), 'rock');
     for (let v = 0; v < VARIANTS; v++) {
-      // Cobbles are small on screen: 80-triangle shapes are enough.
-      const m = new THREE.InstancedMesh(rockGeometry(100 + v * 7, 1), mat, this.capacity());
+      // Cobbles are small on screen: low-poly but smooth, lumpy shapes.
+      const m = new THREE.InstancedMesh(rockGeometry(100 + v * 7, 2, tint), mat, this.capacity());
       this.prep(m);
       this.meshes.push(m);
     }
-    this.boulderNear = new THREE.InstancedMesh(rockGeometry(311, 3), mat, 1500);
-    this.boulderFar = new THREE.InstancedMesh(rockGeometry(311, 1), mat, 6000);
-    this.outcropMesh = new THREE.InstancedMesh(outcropGeometry(5), mat, 800);
-    for (const m of [this.boulderNear, this.boulderFar, this.outcropMesh]) this.prep(m);
-    // Far boulders are not drawn into the real-time shadow map (instanced meshes are not culled).
-    this.boulderFar.castShadow = false;
+    for (let v = 0; v < BOULDER_VARIANTS; v++) {
+      this.boulderNear.push(new THREE.InstancedMesh(rockGeometry(311 + v * 13, 4, tint), mat, 600));
+      const far = new THREE.InstancedMesh(rockGeometry(311 + v * 13, 2, tint), mat, 2000);
+      // Far boulders are not drawn into the real-time shadow map (instanced meshes are not culled).
+      this.boulderFar.push(far);
+    }
+    this.outcropMesh = new THREE.InstancedMesh(outcropGeometry(5, tint), mat, 800);
+    for (const m of [...this.boulderNear, ...this.boulderFar, this.outcropMesh]) this.prep(m);
+    for (const m of this.boulderFar) m.castShadow = false;
     this.placeBoulders();
   }
 
@@ -191,7 +255,7 @@ export class Rocks {
         // Partially buried; large blocks sink deeper into the regolith.
         const y = t.height(px, pz) - sy * (outcrop ? 0.45 : 0.3);
         const idx = this.boulders.length;
-        this.boulders.push({ x: px, y, z: pz, r, sx, sy, sz, q, v: 0, albedo: 0.85 + rnd() * 0.5, outcrop });
+        this.boulders.push({ x: px, y, z: pz, r, sx, sy, sz, q, v: Math.floor(rnd() * BOULDER_VARIANTS), albedo: 0.85 + rnd() * 0.4, outcrop });
         const key = `${Math.floor(px / BOULDER_CELL)},${Math.floor(pz / BOULDER_CELL)}`;
         if (!this.boulderGrid.has(key)) this.boulderGrid.set(key, []);
         this.boulderGrid.get(key)!.push(idx);
@@ -205,7 +269,7 @@ export class Rocks {
     const x0 = cx * CELL, z0 = cz * CELL;
     t.normal(x0 + CELL / 2, z0 + CELL / 2, this.tmpN, 6);
     const slope = 1 - this.tmpN[1];
-    const density = this.q.rockDensity * (22 + slope * 400);
+    const density = this.q.rockDensity * this.abundance * (22 + slope * 400);
     const n = Math.floor(density * (0.5 + rnd()));
     const out: Rock[] = [];
     for (let i = 0; i < n; i++) {
@@ -286,7 +350,8 @@ export class Rocks {
     const range = Math.min(this.q.drawDistance, 2500);
     const rad = Math.ceil(range / BOULDER_CELL);
     const m4 = new THREE.Matrix4(), p = new THREE.Vector3(), s = new THREE.Vector3(), col = new THREE.Color();
-    let nNear = 0, nFar = 0, nOut = 0;
+    const nNear = new Array(BOULDER_VARIANTS).fill(0), nFar = new Array(BOULDER_VARIANTS).fill(0);
+    let nOut = 0;
     const keepCol = new Set<number>();
     for (let dz = -rad; dz <= rad; dz++)
       for (let dx = -rad; dx <= rad; dx++) {
@@ -303,12 +368,12 @@ export class Rocks {
               this.outcropMesh.setMatrixAt(nOut, m4);
               this.outcropMesh.setColorAt(nOut++, col);
             }
-          } else if (d < 160 && nNear < this.boulderNear.instanceMatrix.count) {
-            this.boulderNear.setMatrixAt(nNear, m4);
-            this.boulderNear.setColorAt(nNear++, col);
-          } else if (nFar < this.boulderFar.instanceMatrix.count) {
-            this.boulderFar.setMatrixAt(nFar, m4);
-            this.boulderFar.setColorAt(nFar++, col);
+          } else if (d < 160 && nNear[b.v] < this.boulderNear[b.v].instanceMatrix.count) {
+            this.boulderNear[b.v].setMatrixAt(nNear[b.v], m4);
+            this.boulderNear[b.v].setColorAt(nNear[b.v]++, col);
+          } else if (nFar[b.v] < this.boulderFar[b.v].instanceMatrix.count) {
+            this.boulderFar[b.v].setMatrixAt(nFar[b.v], m4);
+            this.boulderFar[b.v].setColorAt(nFar[b.v]++, col);
           }
           if (d < COLLIDER_RADIUS + b.r * 2) {
             keepCol.add(idx);
@@ -316,7 +381,9 @@ export class Rocks {
           }
         }
       }
-    for (const [m, n] of [[this.boulderNear, nNear], [this.boulderFar, nFar], [this.outcropMesh, nOut]] as const) {
+    const all: [THREE.InstancedMesh, number][] = [[this.outcropMesh, nOut]];
+    for (let v = 0; v < BOULDER_VARIANTS; v++) all.push([this.boulderNear[v], nNear[v]], [this.boulderFar[v], nFar[v]]);
+    for (const [m, n] of all) {
       m.count = n;
       m.instanceMatrix.needsUpdate = true;
       m.instanceColor!.needsUpdate = true;
@@ -356,6 +423,7 @@ export class Rocks {
   }
 
   count(): number {
-    return this.meshes.reduce((a, m) => a + m.count, 0) + this.boulderNear.count + this.boulderFar.count + this.outcropMesh.count;
+    const sum = (l: THREE.InstancedMesh[]) => l.reduce((a, m) => a + m.count, 0);
+    return sum(this.meshes) + sum(this.boulderNear) + sum(this.boulderFar) + this.outcropMesh.count;
   }
 }

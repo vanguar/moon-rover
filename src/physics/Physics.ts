@@ -1,5 +1,5 @@
 import RAPIER from '@dimforge/rapier3d-compat';
-import { MOON_GRAVITY } from '../config';
+import { world } from '../world';
 import type { TerrainData } from '../terrain/TerrainData';
 
 export type Rapier = typeof RAPIER;
@@ -18,7 +18,7 @@ export interface ContactForce {
 }
 
 /**
- * Rapier world in lunar gravity. No air: rigid bodies get zero linear damping
+ * Rapier world in the current body's gravity. Moon: no air: rigid bodies get zero linear damping
  * and only a tiny angular damping standing in for joint/suspension losses.
  */
 export class Physics {
@@ -36,7 +36,7 @@ export class Physics {
   constructor(R: Rapier, terrain: TerrainData) {
     this.R = R;
     this.terrain = terrain;
-    this.world = new R.World({ x: 0, y: -MOON_GRAVITY, z: 0 });
+    this.world = new R.World({ x: 0, y: -world().gravity, z: 0 });
     this.world.timestep = FIXED_DT;
     this.events = new R.EventQueue(true);
     this.world.numSolverIterations = 8;

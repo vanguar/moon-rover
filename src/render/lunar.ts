@@ -13,6 +13,7 @@ export const LUNAR_BRDF_GLSL = /* glsl */ `
 varying vec3 vViewPosition;
 uniform float uOppB0;
 uniform float uOppH;
+uniform float uLambertW;
 
 struct LambertMaterial {
 	vec3 diffuseColor;
@@ -27,6 +28,8 @@ float lunarReflectance( vec3 N, vec3 L, vec3 V ) {
 	float gd = degrees( g );
 	float Lw = clamp( 1.0 - 0.019 * gd + 2.42e-4 * gd * gd - 1.46e-6 * gd * gd * gd, 0.0, 1.0 );
 	float f = ( 1.0 - Lw ) * mu0 + Lw * 2.0 * mu0 / ( mu0 + mu + 1e-3 );
+	// Mars soils are close to Lambertian (dusty, multiple scattering).
+	f = mix( f, mu0, uLambertW );
 	float B = 1.0 + uOppB0 / ( 1.0 + tan( min( g, 3.0 ) * 0.5 ) / uOppH );
 	return min( f, 2.0 ) * B;
 }
@@ -78,7 +81,7 @@ vec4 mvPosition = vec4( transformed, 1.0 );
 #endif
 vec4 wpCurv = modelMatrix * mvPosition;
 vec2 dCurv = wpCurv.xz - cameraPosition.xz;
-wpCurv.y -= dot( dCurv, dCurv ) * ( 0.5 / 1737400.0 );
+wpCurv.y -= dot( dCurv, dCurv ) * uCurvK;
 mvPosition = viewMatrix * wpCurv;
 gl_Position = projectionMatrix * mvPosition;
 `;
@@ -86,7 +89,26 @@ gl_Position = projectionMatrix * mvPosition;
 export const oppositionUniforms = {
   uOppB0: { value: 0.9 },
   uOppH: { value: 0.06 },
+  /** 0 = lunar-Lambert (McEwen), 1 = Lambert. */
+  uLambertW: { value: 0 },
+  /** Curvature drop factor 1 / 2R. */
+  uCurvK: { value: 0.5 / 1737400 },
 };
+
+/** Configure photometry and curvature for the current body. */
+export function setSurfacePhotometry(body: 'moon' | 'mars', radius: number): void {
+  const u = oppositionUniforms;
+  u.uCurvK.value = 0.5 / radius;
+  if (body === 'mars') {
+    u.uOppB0.value = 0.35;
+    u.uOppH.value = 0.08;
+    u.uLambertW.value = 0.75;
+  } else {
+    u.uOppB0.value = 0.9;
+    u.uOppH.value = 0.06;
+    u.uLambertW.value = 0;
+  }
+}
 
 /** Patch a MeshLambertMaterial to use lunar photometry. */
 export function makeLunar(
@@ -98,8 +120,12 @@ export function makeLunar(
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uOppB0 = oppositionUniforms.uOppB0;
     shader.uniforms.uOppH = oppositionUniforms.uOppH;
+    shader.uniforms.uLambertW = oppositionUniforms.uLambertW;
+    shader.uniforms.uCurvK = oppositionUniforms.uCurvK;
     shader.fragmentShader = shader.fragmentShader.replace('#include <lights_lambert_pars_fragment>', LUNAR_BRDF_GLSL);
-    shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>', CURVATURE_PROJECT_VERTEX);
+    shader.vertexShader = shader.vertexShader
+      .replace('void main() {', 'uniform float uCurvK;\nvoid main() {')
+      .replace('#include <project_vertex>', CURVATURE_PROJECT_VERTEX);
     extra?.(shader);
   };
   return mat;

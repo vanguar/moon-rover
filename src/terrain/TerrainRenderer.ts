@@ -33,10 +33,20 @@ export class TerrainRenderer {
   private jobs = new Map<number, { chunk: Chunk; level: number; worker: number }>();
   private nextId = 1;
   private q: QualitySettings;
+  private mars: boolean;
 
-  constructor(terrain: TerrainData, ortho: THREE.Texture, baked: THREE.Texture, quality: QualitySettings, orthoHi?: THREE.Texture, farShadow?: THREE.Texture) {
+  constructor(
+    terrain: TerrainData,
+    ortho: THREE.Texture,
+    baked: THREE.Texture,
+    quality: QualitySettings,
+    orthoHi?: THREE.Texture,
+    farShadow?: THREE.Texture,
+    farAlbedo?: THREE.Texture,
+  ) {
     this.q = quality;
     const meta = terrain.meta;
+    this.mars = meta.body === 'mars';
     for (const t of [ortho, baked]) {
       t.wrapS = t.wrapT = THREE.MirroredRepeatWrapping;
       t.flipY = false;
@@ -64,7 +74,7 @@ export class TerrainRenderer {
     };
     const u = this.uniforms;
     this.material = makeLunar(new THREE.MeshLambertMaterial({ color: 0xffffff }), 'terrain', (shader) => {
-      shader.defines = { ...(shader.defines ?? {}), CRATERLETS: this.craterletLevel() };
+      shader.defines = { ...(shader.defines ?? {}), CRATERLETS: this.craterletLevel(), MARS: this.mars ? 1 : 0 };
       Object.assign(shader.uniforms, {
         uOrtho: { value: ortho },
         uBaked: { value: baked },
@@ -76,6 +86,8 @@ export class TerrainRenderer {
         uFarShadow: { value: farShadow ?? baked },
         uFarHalf: { value: terrain.far ? terrain.far.half : 1e6 },
         uHasFar: { value: farShadow && terrain.far ? 1 : 0 },
+        uFarAlb: { value: farAlbedo ?? ortho },
+        uHasFarAlb: { value: farAlbedo ? 1 : 0 },
         uRover: u.uRover,
         uRtRange: u.uRtRange,
       });
@@ -103,6 +115,8 @@ uniform float uNearN;
 uniform sampler2D uFarShadow;
 uniform float uFarHalf;
 uniform float uHasFar;
+uniform sampler2D uFarAlb;
+uniform float uHasFarAlb;
 ${NOISE_GLSL}
 // Sub-metre craters (below DTM and mesh resolution): one random crater per cell,
 // parabolic bowl + raised rim; returns (height, d/dx, d/dz).
@@ -142,7 +156,8 @@ vec2 edgeD = 0.5 * uMapSize - abs(vWorldP.xz);
 float wIn = uHasFar > 0.5 ? smoothstep(0.0, 150.0, min(edgeD.x, edgeD.y)) : 1.0;
 // Orthophoto is a high-sun image: its brightness is mostly albedo.
 // Outside the window use its mean (top mip) as a neutral mare albedo.
-float ortho = mix(textureLod(uOrtho, vec2(0.5), 12.0).r, texture2D(uOrtho, mapUv).r, wIn);
+float outside = uHasFarAlb > 0.5 ? texture2D(uFarAlb, (vWorldP.xz + uFarHalf) / (2.0 * uFarHalf)).r : textureLod(uOrtho, vec2(0.5), 12.0).r;
+float ortho = mix(outside, texture2D(uOrtho, mapUv).r, wIn);
 if (uHi.w > 0.5) {
   vec2 hu = (vWorldP.xz - uHi.xy) / uHi.z;
   vec2 e = smoothstep(vec2(0.0), vec2(0.03), hu) * smoothstep(vec2(0.0), vec2(0.03), 1.0 - hu);
@@ -170,8 +185,24 @@ if (wc1 > 0.0) grad += craterField(vWorldP.xz, 2.2, 11.0).yz * wc1;
 float wc2 = clamp(1.5 - fp * 5.0, 0.0, 1.0);
 if (wc2 > 0.0) grad += craterField(vWorldP.xz, 0.7, 29.0).yz * wc2;
 #endif
+#if MARS > 0
+// Mars: dark basaltic sand and rock vs. bright ferric dust (HiRISE RED is a panchromatic albedo).
+float alb = clamp(ortho * 0.9 + albedoVar * 0.3, 0.02, 1.0);
+// (linear) Stretch the contrast around the scene mean; Mars is about twice as bright as the lunar mare.
+alb = clamp(0.13 + (alb - 0.13) * 1.3, 0.015, 1.0);
+vec3 darkSoil = vec3(0.8, 0.6, 0.48), brightDust = vec3(1.3, 0.8, 0.5);
+diffuseColor.rgb = alb * mix(darkSoil, brightDust, smoothstep(0.05, 0.3, alb)) * 1.9;
+// Wind ripples (~12 cm wavelength) across the sand, faded with distance; they lie on the dark sand.
+float wr = clamp(1.5 - fp * 9.0, 0.0, 1.0) * smoothstep(0.2, 0.08, alb);
+if (wr > 0.0) {
+  vec2 rd = vec2(0.94, 0.34);
+  float ph = dot(vWorldP.xz, rd) * 52.0 + lnoised(vWorldP.xz * 0.9).x * 7.0;
+  grad += rd * cos(ph) * 0.06 * wr;
+}
+#else
 vec3 regolith = vec3(1.0, 0.965, 0.92);
 diffuseColor.rgb = regolith * clamp(ortho * 0.9 + albedoVar * 0.25, 0.02, 1.0);
+#endif
 // Baked far-field cast shadow of the DTM; faded out where the real-time shadow map is valid.
 float baked = texture2D(uBaked, mapUv).r;
 // Near the rover only large-scale DTM shadows come from the bake (soft, 2 m);
@@ -216,6 +247,7 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`,
   }
 
   private craterletLevel(): number {
+    if (this.mars) return this.q.level === 'low' || this.q.level === 'medium' ? 0 : 1;
     return this.q.level === 'low' ? 0 : this.q.level === 'medium' ? 1 : 2;
   }
 

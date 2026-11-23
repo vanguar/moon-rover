@@ -2,15 +2,20 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#05070a" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="description" content="Lunar rover on the real LROC NAC DTM terrain of the Apollo 15 landing site (Hadley Rille)." />
-    <link rel="icon" href="icons/icon-192.png" />
-    <link rel="apple-touch-icon" href="icons/icon-192.png" />
-    <title>Луноход: Хэдли</title>
+    <meta name="description" content="Planetokhod: drive lunar and Mars rovers on real terrain — the Apollo 15 site (LROC NAC DTM) and Jezero crater (HiRISE)." />
+    <meta name="apple-mobile-web-app-title" content="Планетоход" />
+    <meta name="application-name" content="Планетоход" />
+    <link rel="icon" type="image/png" href="icons/favicon-64.png" />
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+    <title>Планетоход</title>
   </head>
   <body>
     <div id="app"></div>
@@ -74,7 +79,10 @@
       <button class="tb" data-act="reset" data-i18n-title="bReset">
         <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7" /><path d="M4 4v5h5" /></svg>
       </button>
-      <button class="tb" data-act="const" id="tb-const" data-i18n-title="bConst">
+      <button class="tb mars-only" data-act="weather" id="tb-weather" data-i18n-title="bWeather">
+        <svg viewBox="0 0 24 24"><path d="M3 8h11a3 3 0 1 0-3-3" /><path d="M3 12h16a3 3 0 1 1-3 3" /><path d="M3 16h8" /></svg>
+      </button>
+      <button class="tb moon-only" data-act="const" id="tb-const" data-i18n-title="bConst">
         <svg viewBox="0 0 24 24"><path d="M4 18l5-6 5 3 6-9" /><circle cx="4" cy="18" r="1.6" class="fill" /><circle cx="9" cy="12" r="1.6" class="fill" /><circle cx="14" cy="15" r="1.6" class="fill" /><circle cx="20" cy="6" r="1.6" class="fill" /></svg>
       </button>
       <button class="tb desk" data-act="hud" data-i18n-title="bHud">
@@ -100,7 +108,7 @@
       <div class="m-wrap">
         <header class="m-head">
           <div class="mark">
-            <svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="30" class="ring" /><path d="M8 40c10-6 38-6 48 0" class="hz" /><circle cx="44" cy="20" r="6" class="earth" /><path d="M20 38h22l3-5H24z" class="rov" /><circle cx="24" cy="40" r="2.6" class="rov" /><circle cx="32" cy="40" r="2.6" class="rov" /><circle cx="40" cy="40" r="2.6" class="rov" /></svg>
+            <img src="icons/icon-192.png" alt="" />
           </div>
           <div>
             <div class="kicker" data-i18n="titleSub">Борозда Хэдли · Аполлон-15</div>
@@ -109,7 +117,7 @@
         </header>
         <p class="lead" data-i18n="lead"></p>
         <div class="chips">
-          <span class="chip"><i></i><b>26.13°N 3.63°E</b></span>
+          <span class="chip"><i></i><b data-i18n="chipCoords">26.13°N 3.63°E</b></span>
           <span class="chip"><i></i><b data-i18n="chipDtm">DTM 2 м · 4×4 км</b></span>
           <span class="chip"><i></i><b data-i18n="chipEpoch">30.07.1971 22:16 UTC</b></span>
           <span class="chip"><i></i><b data-i18n="chipSun">Солнце 96° / 12°</b></span>
@@ -127,8 +135,49 @@
             <button id="exit" class="ghost hidden" data-i18n="exit">Выйти</button>
           </div>
 
-          <div class="cards">
-            <section class="card">
+          <nav class="mtabs">
+            <button class="mtab" data-mt="garage"><svg viewBox="0 0 24 24"><circle cx="6" cy="17" r="2.4" /><circle cx="12" cy="17" r="2.4" /><circle cx="18" cy="17" r="2.4" /><path d="M4 13h16l-2-5H8z" /><path d="M14 8V4l3-1" /></svg><span data-i18n="tabRover">Ровер</span></button>
+            <button class="mtab" data-mt="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1" /></svg><span data-i18n="settings">Настройки</span></button>
+            <button class="mtab" data-mt="controls"><svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="11" rx="5" /><path d="M7 10v5M4.5 12.5h5" /><circle cx="16" cy="11" r="1.2" class="fill" /><circle cx="18" cy="14" r="1.2" class="fill" /></svg><span data-i18n="controls">Управление</span></button>
+          </nav>
+
+          <section class="mpane garage" data-mp="garage">
+            <div class="worlds">
+              <button class="world" data-world="moon">
+                <span class="planet moon"></span>
+                <span class="w-txt"><b data-i18n="worldMoon">Луна</b><small data-i18n="worldMoonSub">Борозда Хэдли · Аполлон-15</small></span>
+              </button>
+              <button class="world" data-world="mars">
+                <span class="planet mars"></span>
+                <span class="w-txt"><b data-i18n="worldMars">Марс</b><small data-i18n="worldMarsSub">Кратер Езеро · Perseverance</small></span>
+              </button>
+              <span id="world-note" class="world-note"></span>
+            </div>
+            <div class="g-grid">
+              <div class="rail" id="rail"></div>
+              <div class="detail">
+                <div class="viewport" id="viewport">
+                  <div id="d-photo" class="layer on"></div>
+                  <div id="d-3d" class="layer"></div>
+                  <i class="br tl"></i><i class="br tr"></i><i class="br bl"></i><i class="br brr"></i>
+                  <div class="vtabs">
+                    <button class="vtab on" data-v="photo" data-i18n="vPhoto">ФОТО</button>
+                    <button class="vtab" data-v="3d">3D</button>
+                  </div>
+                  <div class="v-tag" id="v-tag"></div>
+                </div>
+                <div class="d-info">
+                  <div class="d-head"><h3 id="d-name"></h3><span id="d-meta" class="d-meta"></span></div>
+                  <p id="d-desc" class="d-desc"></p>
+                  <dl id="d-specs" class="d-specs"></dl>
+                  <div id="d-credit" class="d-credit"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <div class="mpanes2">
+            <section class="card mpane" data-mp="settings">
               <h2 data-i18n="settings">Настройки</h2>
               <label class="field"><span data-i18n="language">Язык</span><select id="lang"></select></label>
               <label class="field"><span data-i18n="quality">Качество графики</span>
@@ -142,9 +191,19 @@
               </label>
               <label class="field"><span data-i18n="volume">Громкость</span><input id="volume" type="range" min="0" max="1" step="0.05" /></label>
               <label class="field check" id="tilt-row"><input id="tilt" type="checkbox" /><span data-i18n="tilt">Руль наклоном телефона</span></label>
+              <label class="field mars-only"><span data-i18n="weather">Погода на Марсе</span>
+                <select id="weather">
+                  <option value="auto" data-i18n="wxAuto">Авто</option>
+                  <option value="calm" data-i18n="wxCalm">Ясно</option>
+                  <option value="devils" data-i18n="wxDevils">Пылевые вихри</option>
+                  <option value="storm" data-i18n="wxStorm">Пылевая буря</option>
+                </select>
+              </label>
+              <div class="field"><span><span data-i18n="version">Версия</span> <b id="app-version" class="ver"></b></span>
+                <button id="hard-reset" class="ghost small" data-i18n="hardReset">Сбросить кэш</button></div>
             </section>
 
-            <section class="card">
+            <section class="card mpane" data-mp="controls">
               <h2 data-i18n="controls">Управление</h2>
               <div class="tabs">
                 <button class="tab" data-tab="kb" data-i18n="tabKeyboard">Клавиатура</button>
@@ -162,7 +221,8 @@
                 <div class="krow"><span class="keys"><kbd>H</kbd></span><span data-i18n="kLights"></span></div>
                 <div class="krow"><span class="keys"><kbd>R</kbd></span><span data-i18n="kReset"></span></div>
                 <div class="krow"><span class="keys"><kbd>I</kbd></span><span data-i18n="kHud"></span></div>
-                <div class="krow"><span class="keys"><kbd>K</kbd></span><span data-i18n="kConst"></span></div>
+                <div class="krow moon-only"><span class="keys"><kbd>K</kbd></span><span data-i18n="kConst"></span></div>
+                <div class="krow mars-only"><span class="keys"><kbd>B</kbd></span><span data-i18n="kWeather"></span></div>
                 <div class="krow"><span class="keys"><kbd class="wide">Esc</kbd></span><span data-i18n="kMenu"></span></div>
                 <div class="krow"><span class="keys"><kbd class="wide" data-i18n="mouseDrag">Мышь</kbd></span><span data-i18n="kLook"></span></div>
               </div>

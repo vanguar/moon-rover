@@ -1,0 +1,37 @@
+{
+  "body": "mars",
+  "source": "HiRISE DTM 1 m + ortho 25 cm, CTX DTM 20 m (Mars 2020 TRN maps; NASA/JPL/UArizona/USGS)",
+  "width": 3000,
+  "height": 3000,
+  "pixelSize": 2.0,
+  "sizeX": 5998.0,
+  "sizeZ": 5998.0,
+  "minHeight": -2609.823974609375,
+  "maxHeight": -2392.239990234375,
+  "centerLat": 18.453135302429057,
+  "centerLon": 77.41523162378495,
+  "landing": {
+    "x": 1999.901773442068,
+    "z": 499.9999999999304
+  },
+  "orthoHi": {
+    "x": 1200.0,
+    "z": 700.0,
+    "size": 2400.0
+  },
+  "epoch": "2021-02-18T22:10:00+00:00",
+  "sun": {
+    "azimuth": 265.8206445520425,
+    "elevation": 19.869510750593744
+  },
+  "ls": 5.674065329423684,
+  "far": {
+    "n": 501,
+    "spacing": 60.0,
+    "size": 30000.0,
+    "min": -100.920654296875,
+    "max": 1092.8988037109375,
+    "offset": -0.431884765625,
+    "source": "CTX DTM 20 m (Mars 2020 TRN)"
+  }
+}

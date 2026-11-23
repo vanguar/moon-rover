@@ -6,20 +6,35 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { CabinAudio } from './audio/CabinAudio';
 import { isMobile, makeQuality, type QualityLevel, type QualitySettings } from './config';
 import { Dust } from './fx/Dust';
+import { MarsSky } from './fx/MarsSky';
+import { MarsWeather, type WeatherMode } from './fx/MarsWeather';
 import { Sky } from './fx/Sky';
 import { Tracks } from './fx/Tracks';
 import { Hud } from './hud/Hud';
 import { Input } from './input/Input';
 import { Physics } from './physics/Physics';
+import { setSurfacePhotometry } from './render/lunar';
 import { Rover } from './rover/Rover';
+import type { RoverSpec } from './rover/specs';
 import { Rocks } from './terrain/Rocks';
 import type { TerrainData } from './terrain/TerrainData';
 import { FarTerrain } from './terrain/FarTerrain';
 import { TerrainRenderer } from './terrain/TerrainRenderer';
+import { world } from './world';
+
+export interface GameExtras {
+  stars?: Float32Array;
+  orthoHi?: THREE.Texture;
+  constellations?: Float32Array;
+  farShadow?: THREE.Texture;
+  farAlbedo?: THREE.Texture;
+}
 
 /** Sun irradiance in scene units; everything else is relative to it. */
 const SUN_INTENSITY = 9;
 const LEVELS: QualityLevel[] = ['low', 'medium', 'high', 'ultra'];
+/** Initial heading: west (toward Hadley Rille / the Jezero delta). */
+const START_YAW = Math.PI - THREE.MathUtils.degToRad(270);
 export type CameraMode = 'cabin' | 'chase' | 'top';
 const CAMERA_CYCLE: CameraMode[] = ['cabin', 'chase', 'top'];
 
@@ -30,10 +45,20 @@ export class Game {
   readonly input = new Input();
   readonly audio = new CabinAudio();
   private sun: THREE.DirectionalLight;
-  private sky: Sky;
+  /** Moon: black sky, stars, Earth. Mars: dusty daytime sky. */
+  private sky: Sky | null = null;
+  private marsSky: MarsSky | null = null;
+  readonly weather: MarsWeather | null = null;
+  private hemi: THREE.HemisphereLight;
+  readonly sunDir: THREE.Vector3;
+  private time = 0;
+  private envTau = -1;
+  private still = 0;
+  /** Rover size relative to the LRV (camera distances). */
+  private sizeK = 1;
   private terrainR: TerrainRenderer;
   private rocks: Rocks;
-  readonly rover: Rover;
+  rover: Rover;
   private dust: Dust;
   private tracks: Tracks;
   private hud: Hud;
@@ -68,8 +93,13 @@ export class Game {
     baked: THREE.Texture,
     quality: QualitySettings,
     auto: boolean,
-    extras: { stars?: Float32Array; orthoHi?: THREE.Texture; constellations?: Float32Array; farShadow?: THREE.Texture } = {},
+    extras: GameExtras,
+    spec: RoverSpec,
+    weatherMode: WeatherMode = 'auto',
   ) {
+    const W = world();
+    const mars = W.id === 'mars';
+    setSurfacePhotometry(W.id, W.radius);
     this.q = quality;
     this.autoQuality = auto;
     this.renderer = new THREE.WebGLRenderer({ antialias: !isMobile || window.devicePixelRatio < 2, powerPreference: 'high-performance', stencil: false });
@@ -85,14 +115,23 @@ export class Game {
     this.scene.background = new THREE.Color(0x000000);
     this.camera = new THREE.PerspectiveCamera(isMobile ? 75 : 68, container.clientWidth / container.clientHeight, 0.08, 60000);
 
-    // --- Lighting: one hard sun, no sky light. Shadows are filled only by light
-    // bounced off sunlit regolith (albedo ~0.12) — modelled as a hemisphere light
-    // that reaches surfaces facing down/sideways — and by faint earthshine.
-    this.sky = new Sky(terrain.meta.sun.azimuth, terrain.meta.sun.elevation, quality.stars, terrain.meta.earth, extras.stars, {
-      constellations: extras.constellations,
-      galaxy: terrain.meta.galaxy,
-    });
-    this.scene.add(this.sky.group);
+    if (mars) {
+      // Mars: dusty sky, haze, sunlight reduced to 38 % (1.63 AU) and attenuated by dust.
+      this.marsSky = new MarsSky(terrain.meta.sun.azimuth, terrain.meta.sun.elevation);
+      this.scene.add(this.marsSky.mesh);
+      this.sunDir = this.marsSky.sunDir;
+      this.scene.fog = new THREE.FogExp2(0x9a6a48, 6.5e-5);
+    } else {
+      // --- Moon: one hard sun, no sky light. Shadows are filled only by light
+      // bounced off sunlit regolith (albedo ~0.12) — modelled as a hemisphere light
+      // that reaches surfaces facing down/sideways — and by faint earthshine.
+      this.sky = new Sky(terrain.meta.sun.azimuth, terrain.meta.sun.elevation, quality.stars, terrain.meta.earth, extras.stars, {
+        constellations: extras.constellations,
+        galaxy: terrain.meta.galaxy,
+      });
+      this.scene.add(this.sky.group);
+      this.sunDir = this.sky.sunDir;
+    }
     this.sun = new THREE.DirectionalLight(0xfff8f0, SUN_INTENSITY);
     this.sun.castShadow = true;
     this.scene.add(this.sun, this.sun.target);
@@ -101,37 +140,46 @@ export class Game {
     // an upward-facing surface in shadow sees lit terrain only near its horizon
     // (~2 % of direct flat-ground irradiance), walls and undersides see much more.
     const lin = (v: number, warm = 1) => new THREE.Color().setRGB(v * warm, v, v * (2 - warm));
-    this.scene.add(new THREE.HemisphereLight(lin(0.05, 1.02), lin(0.16, 1.04), 1));
+    this.hemi = new THREE.HemisphereLight(lin(0.05, 1.02), lin(0.16, 1.04), 1);
+    this.scene.add(this.hemi);
     this.scene.environment = this.buildEnvironment();
-    const earthshine = new THREE.DirectionalLight(0xbcd4ff, SUN_INTENSITY * 0.0015);
-    earthshine.position.copy(this.sky.earthDir);
-    this.scene.add(earthshine);
+    if (this.sky) {
+      const earthshine = new THREE.DirectionalLight(0xbcd4ff, SUN_INTENSITY * 0.0015);
+      earthshine.position.copy(this.sky.earthDir);
+      this.scene.add(earthshine);
+    }
 
     this.shadowMask = this.readMask(baked);
-    this.terrainR = new TerrainRenderer(terrain, ortho, baked, quality, extras.orthoHi, extras.farShadow);
+    this.terrainR = new TerrainRenderer(terrain, ortho, baked, quality, extras.orthoHi, extras.farShadow, extras.farAlbedo);
     this.scene.add(this.terrainR.group);
     if (terrain.far) {
-      this.far = new FarTerrain(terrain, extras.farShadow, isMobile);
+      this.far = new FarTerrain(terrain, extras.farShadow, isMobile, extras.farAlbedo);
       this.far.setNearRadius(quality.drawDistance - 250);
       this.scene.add(this.far.mesh);
     }
     this.rocks = new Rocks(terrain, physics, quality);
     this.scene.add(this.rocks.group);
 
-    // Start ~45 m west of the LM, facing the rille (west).
-    const lm = terrain.meta.landing;
-    const startX = lm.x - 45, startZ = lm.z + 10;
-    this.addLunarModule(lm.x, lm.z);
+    // Moon: start ~45 m west of the LM, facing the rille (west).
+    // Mars: at Octavia E. Butler Landing, facing the delta front (west).
+    const [startX, startZ] = this.startPoint();
+    if (!mars) this.addLunarModule(terrain.meta.landing.x, terrain.meta.landing.z);
     physics.updatePatch(startX, startZ, true);
-    this.rover = new Rover(physics, terrain, this.sky.sunDir, startX, startZ, Math.PI - THREE.MathUtils.degToRad(270));
-    this.scene.add(this.rover.object);
-    this.rover.isRock = (c) => this.rocks.sizeOf(c);
+    this.rover = this.makeRover(spec, startX, startZ, START_YAW);
 
     this.dust = new Dust(terrain, quality.dustParticles);
     this.scene.add(this.dust.mesh);
-    this.tracks = new Tracks(terrain);
+    this.tracks = new Tracks(terrain, spec);
     this.scene.add(this.tracks.mesh);
     this.hud = new Hud(terrain);
+    this.hud.siteLabel = mars ? 'M2020' : 'LM';
+    if (mars) {
+      const lvl = quality.level === 'low' ? 0.35 : quality.level === 'medium' ? 0.6 : 1;
+      this.weather = new MarsWeather(terrain, this.sunDir, lvl);
+      this.weather.setMode(weatherMode);
+      this.scene.add(this.weather.group);
+      this.updateAtmosphere(0);
+    }
     if (ortho.image) this.hud.setMapImage(ortho.image as CanvasImageSource);
 
     this.input.onAction((a) => this.onAction(a));
@@ -155,13 +203,61 @@ export class Game {
     return this.terrainR.readyAt(this.rover.object.position.x, this.rover.object.position.z) && this.terrainR.pendingCount() < 3;
   }
 
+  private startPoint(): [number, number] {
+    const l = this.terrain.meta.landing;
+    return world().id === 'mars' ? [l.x - 6, l.z + 4] : [l.x - 45, l.z + 10];
+  }
+
+  private makeRover(spec: RoverSpec, x: number, z: number, yaw: number): Rover {
+    this.physics.updatePatch(x, z, true);
+    const r = new Rover(this.physics, this.terrain, this.sunDir, x, z, yaw, spec);
+    this.scene.add(r.object);
+    r.isRock = (c) => this.rocks.sizeOf(c);
+    r.setHeadlights(false);
+    // Camera distances scale with the rover (Sojourner is 65 cm long, Curiosity 3 m).
+    const len = Math.max(...spec.wheels.map((w) => Math.abs(w[1]))) * 2 + spec.wheelRadius * 2;
+    this.sizeK = THREE.MathUtils.clamp(len / 3.3, 0.18, 1.2);
+    this.orbit.dist = 9 * this.sizeK;
+    return r;
+  }
+
+  /** Swap the rover in place (menu selection), keeping position and heading. */
+  setRover(spec: RoverSpec): void {
+    const old = this.rover;
+    const p = old.object.position.clone();
+    const { heading } = old.attitude();
+    const lights = old.headlights;
+    old.dispose();
+    this.rover = this.makeRover(spec, p.x, p.z, -THREE.MathUtils.degToRad(heading) + Math.PI);
+    this.rover.setHeadlights(lights);
+    this.tracks.setRover(spec);
+    this.chasePos.set(0, 0, 0);
+    this.look.yaw = 0;
+    this.applyHudMode();
+    this.updateCamera(0);
+  }
+
   /**
-   * Reflection environment for metals: black sky above the horizon, the sunlit
-   * grey regolith below (brighter toward the antisolar point: opposition surge).
+   * Reflection environment for metals. Moon: black sky above the horizon, the
+   * sunlit grey regolith below (brighter toward the antisolar point: opposition
+   * surge). Mars: the dusty sky above, the ochre ground below.
    */
   private buildEnvironment(): THREE.Texture {
     const envScene = new THREE.Scene();
-    const anti = this.sky.sunDir.clone().negate();
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    if (this.marsSky) {
+      const skyMesh = new THREE.Mesh(new THREE.SphereGeometry(10, 48, 24), this.marsSky.mesh.material as THREE.Material);
+      envScene.add(skyMesh);
+      const ground = new THREE.Mesh(
+        new THREE.SphereGeometry(9, 48, 24, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
+        new THREE.MeshBasicMaterial({ color: new THREE.Color(0.11, 0.065, 0.04), side: THREE.BackSide }),
+      );
+      envScene.add(ground);
+      const rt = pmrem.fromScene(envScene, 0, 0.1, 100);
+      pmrem.dispose();
+      return rt.texture;
+    }
+    const anti = this.sunDir.clone().negate();
     anti.y = 0;
     anti.normalize();
     const mat = new THREE.ShaderMaterial({
@@ -178,7 +274,6 @@ export class Game {
         }`,
     });
     envScene.add(new THREE.Mesh(new THREE.SphereGeometry(10, 64, 32), mat));
-    const pmrem = new THREE.PMREMGenerator(this.renderer);
     const rt = pmrem.fromScene(envScene, 0, 0.1, 100);
     pmrem.dispose();
     return rt.texture;
@@ -302,7 +397,7 @@ export class Game {
 
   /** Zoom the chase/top camera: +1 = out, -1 = in. */
   zoom(dir: number): void {
-    if (this.cameraMode === 'chase') this.orbit.dist = THREE.MathUtils.clamp(this.orbit.dist * (1 + dir * 0.12), 4, 60);
+    if (this.cameraMode === 'chase') this.orbit.dist = THREE.MathUtils.clamp(this.orbit.dist * (1 + dir * 0.12), 4 * this.sizeK, 60 * this.sizeK);
     else if (this.cameraMode === 'top') this.topHeight = THREE.MathUtils.clamp(this.topHeight * (1 + dir * 0.15), 12, 1500);
   }
 
@@ -314,7 +409,8 @@ export class Game {
   }
 
   applyHudMode(): void {
-    document.body.classList.toggle('cab', this.cameraMode === 'cabin' && !this.hudOverlay && !isMobile);
+    // The 3D console replaces the HTML instruments only on the LRV (robots are driven through their cameras).
+    document.body.classList.toggle('cab', this.cameraMode === 'cabin' && !this.hudOverlay && !isMobile && !!this.rover?.model.panel);
   }
 
   onAction(a: string): void {
@@ -330,7 +426,13 @@ export class Game {
       this.rover.parkBrake = !this.rover.parkBrake;
       this.audio.click(700);
     } else if (a === 'const') {
-      this.constellationsOn = this.sky.toggleConstellations();
+      this.constellationsOn = this.sky?.toggleConstellations() ?? false;
+    } else if (a === 'weather') {
+      if (this.weather) {
+        this.weather.cycle();
+        this.onWeatherChange?.(this.weather.mode);
+        this.audio.click(1200);
+      }
     } else if (a === 'hud') {
       this.hudOverlay = !this.hudOverlay;
       this.applyHudMode();
@@ -380,6 +482,24 @@ export class Game {
     this.renderer.setAnimationLoop(() => this.frame());
   }
 
+  onWeatherChange?: (m: WeatherMode) => void;
+
+  setWeather(m: WeatherMode): void {
+    this.weather?.setMode(m);
+  }
+
+  /** Title screen / pause: keep the world alive (sky, weather, moving parts) without driving. */
+  idleFrame(): void {
+    this.clock.update();
+    const dt = Math.min(this.clock.getDelta(), 0.1);
+    this.time += dt;
+    this.rover.sync(0);
+    this.animateRover(dt, true);
+    this.updateCamera(dt);
+    this.updateEnvironment(dt);
+    this.render();
+  }
+
   setPaused(p: boolean): void {
     this.paused = p;
     if (p) this.audio.suspend();
@@ -393,14 +513,19 @@ export class Game {
     this.clock.update();
     const dt = Math.min(this.clock.getDelta(), 0.1);
     if (this.paused) {
+      this.time += dt;
+      this.animateRover(dt, true);
+      this.updateEnvironment(dt);
       this.render();
       return;
     }
+    this.time += dt;
     this.input.update(dt);
     const rover = this.rover;
     this.physics.step(dt, (h) => rover.step(h, this.input.drive));
     rover.onContacts(this.physics.takeContacts());
     rover.sync(dt);
+    this.animateRover(dt, false);
     this.updatePanel(dt);
     const p = rover.object.position;
     this.physics.updatePatch(p.x, p.z);
@@ -409,7 +534,7 @@ export class Game {
     this.terrainR.update(this.camera.position, p);
     this.dust.update(dt, rover, this.camera);
     this.tracks.update(rover);
-    this.sky.update(this.camera, this.terrain.height(this.camera.position.x, this.camera.position.z));
+    this.updateEnvironment(dt);
     this.updateSun(p);
     this.updateImpacts(dt);
 
@@ -419,6 +544,10 @@ export class Game {
       this.fpsAcc.fps = this.fpsAcc.n / this.fpsAcc.t;
       this.fpsAcc.t = 0;
       this.fpsAcc.n = 0;
+    }
+    if (this.weather) {
+      const w = this.weather;
+      this.hud.weather = { wind: Math.hypot(w.wind.x, w.wind.z), tau: w.tau, storm: w.storm, devilDist: w.devilDist, devils: w.devilList() };
     }
     this.hud.update(dt, rover, this.fpsAcc.fps);
     this.audio.update(dt, rover, this.input.drive.steer, this.hud.warningLevel);
@@ -434,13 +563,92 @@ export class Game {
     const pitch = Math.asin(THREE.MathUtils.clamp(fwd.y, -1, 1));
     const vfov = THREE.MathUtils.degToRad(this.camera.fov);
     const groundFrac = THREE.MathUtils.clamp(0.5 - pitch / vfov, 0, 1);
-    this.sky.setAdaptation(1 - 0.85 * THREE.MathUtils.smoothstep(groundFrac, 0.1, 0.65));
+    this.sky?.setAdaptation(1 - 0.85 * THREE.MathUtils.smoothstep(groundFrac, 0.1, 0.65));
     if (this.composer) this.composer.render();
     else this.renderer.render(this.scene, this.camera);
   }
 
+  /** Moving parts: masts follow the camera, arms deploy when parked, suspension links follow the wheels. */
+  private animateRover(dt: number, idle: boolean): void {
+    const r = this.rover;
+    const moving = Math.abs(r.speed) > 0.03 || this.input.drive.throttle > 0.02 || this.input.drive.brake > 0.02;
+    this.still = moving ? 0 : this.still + dt;
+    const mast = this.cameraMode === 'cabin' && !r.spec.crew;
+    r.model.animate({
+      dt, time: this.time, speed: r.speed, steer: r.steerAngle,
+      lookYaw: mast ? this.look.yaw : idle ? Math.sin(this.time * 0.2) * 0.8 : 0,
+      lookPitch: mast ? this.look.pitch + 0.12 : idle ? -0.1 : 0,
+      parked: idle || r.parkBrake || this.still > 3,
+      wheelLocal: r.wheelLocal, preview: false,
+    });
+  }
+
+  /** Sky, haze, sunlight and weather of the current body. */
+  private updateEnvironment(dt: number): void {
+    if (this.sky) {
+      this.sky.update(this.camera, this.terrain.height(this.camera.position.x, this.camera.position.z));
+      return;
+    }
+    this.updateAtmosphere(dt);
+  }
+
+  private updateAtmosphere(dt: number): void {
+    const ms = this.marsSky, w = this.weather;
+    if (!ms || !w) return;
+    w.update(dt, this.camera, this.rover.object.position);
+    ms.update(this.camera, this.time, w.tau);
+    const W = world();
+    const sunTop = SUN_INTENSITY * W.solarFactor;
+    const trans = ms.directTransmission();
+    const reddening = 1 - trans;
+    this.sun.intensity = sunTop * trans;
+    this.sun.color.setRGB(1, 0.93 - 0.12 * reddening, 0.84 - 0.25 * reddening);
+    // Sky light: irradiance = π · (mean sky radiance); the sky dome is drawn with the same model.
+    const bright = sunTop * 0.3;
+    ms.uniforms.uBright.value = bright;
+    const c1 = ms.colorAt(new THREE.Vector3(0, 1, 0), new THREE.Color());
+    const c2 = ms.colorAt(new THREE.Vector3(this.sunDir.x, 0.15, this.sunDir.z).normalize(), new THREE.Color());
+    const c3 = ms.colorAt(new THREE.Vector3(-this.sunDir.x, 0.15, -this.sunDir.z).normalize(), new THREE.Color());
+    const skyL = c1.multiplyScalar(0.5).add(c2.multiplyScalar(0.25)).add(c3.multiplyScalar(0.25)).multiplyScalar(bright);
+    const sinEl = Math.max(0.05, this.sunDir.y);
+    const eTot = this.sun.intensity * sinEl + Math.PI * (skyL.r + skyL.g + skyL.b) / 3;
+    this.hemi.color.copy(skyL).multiplyScalar(Math.PI);
+    this.hemi.groundColor.setRGB(0.3, 0.19, 0.12).multiplyScalar(eTot * 0.5);
+    this.hemi.intensity = 1;
+    // Aerial perspective: fog colour = sky near the horizon in the view direction.
+    const fwd = this.camera.getWorldDirection(new THREE.Vector3());
+    fwd.y = 0.04;
+    const fogC = ms.colorAt(fwd.normalize(), new THREE.Color()).multiplyScalar(bright * 0.92);
+    const fog = this.scene.fog as THREE.FogExp2;
+    fog.color.copy(fogC);
+    fog.density = 6.5e-5 * Math.pow(w.tau / 0.62, 1.6);
+    this.far?.setNearRadius(this.q.drawDistance - 250);
+    // Camera auto-exposure (partial: storms still look dark).
+    const target = THREE.MathUtils.clamp(1.45 * Math.pow(1.6 / Math.max(eTot, 0.05), 0.55), 0.8, 4.5);
+    this.renderer.toneMappingExposure += (target - this.renderer.toneMappingExposure) * (dt > 0 ? 1 - Math.exp(-dt * 0.8) : 1);
+    w.setLighting(this.sun.color.clone().multiplyScalar(this.sun.intensity * 0.12), skyL.clone().multiplyScalar(0.35), fogC, fog.density);
+    // Reflections follow the sky only when it changes a lot (PMREM is not free).
+    if (Math.abs(w.tau - this.envTau) > 0.4) {
+      this.envTau = w.tau;
+      const old = this.scene.environment;
+      this.scene.environment = this.buildEnvironment();
+      old?.dispose();
+    }
+    // Rover: sunlight on the panels, dust settling (storms) and devils sweeping it off.
+    const r = this.rover;
+    r.solarScale = Math.min(1, trans * 1.15 + 0.3 * Math.exp(-w.tau * 0.3));
+    r.panelDust = THREE.MathUtils.clamp(r.panelDust + dt * (2e-5 + w.storm * 1.2e-3) - dt * w.devilNear * 0.08 * r.panelDust, 0, 0.9);
+    const wv = Math.hypot(w.wind.x, w.wind.z) + w.devilNear * 18;
+    const area = r.spec.body.half[0] * 2 * (r.spec.body.half[1] * 2 + 0.3) + 0.2;
+    const f = 0.5 * W.airDensity * wv * wv * 1.1 * area;
+    r.windForce.set(w.wind.x, 0, w.wind.z).normalize().multiplyScalar(f);
+    this.dust.wind.copy(w.wind);
+    this.audio.wind = Math.min(1, wv / 22) * 0.9;
+  }
+
   private updatePanel(dt: number): void {
     const r = this.rover;
+    if (!r.model.panel) return;
     const p = r.object.position;
     const t = this.terrain;
     const { roll, pitch, heading } = r.attitude();
@@ -450,7 +658,7 @@ export class Game {
     if (bearing < 0) bearing += 360;
     const n = [0, 1, 0];
     t.normal(p.x, p.z, n, 1.5);
-    r.model.panel.update(dt, {
+    r.model.panel?.update(dt, {
       speedKmh: Math.abs(r.speed) * 3.6, pitch, roll, heading, bearing,
       range: Math.hypot(dx, dz) / 1000, distance: r.odometer / 1000, battery: r.battery,
       volts: r.volts, battTempC: r.battTemp, motorTempC: r.motorTemp,
@@ -469,7 +677,7 @@ export class Game {
     fwd.y = 0;
     fwd.normalize().multiplyScalar(this.q.shadowRange * 0.4);
     const c = new THREE.Vector3(p.x + fwd.x, p.y, p.z + fwd.z);
-    const dir = this.sky.sunDir;
+    const dir = this.sunDir;
     const lightRot = new THREE.Matrix4().lookAt(dir, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 1, 0));
     const inv = lightRot.clone().invert();
     c.applyMatrix4(inv);
@@ -490,7 +698,7 @@ export class Game {
       const q = rover.object.quaternion.clone();
       const look = new THREE.Quaternion().setFromEuler(new THREE.Euler(this.look.pitch, Math.PI + this.look.yaw, 0, 'YXZ'));
       this.camera.quaternion.copy(q).multiply(look);
-      this.camera.near = 0.08;
+      this.camera.near = Math.min(0.08, 0.1 * this.sizeK);
     } else if (this.cameraMode === 'top') {
       // Bird's-eye view, north up (drag rotates), zoom with the wheel or buttons.
       const p = rover.object.position;
@@ -508,17 +716,17 @@ export class Game {
       const d = this.orbit.dist;
       const target = new THREE.Vector3(
         p.x - Math.sin(yaw) * Math.cos(this.orbit.pitch) * d,
-        p.y + Math.sin(this.orbit.pitch) * d + 1.2,
+        p.y + Math.sin(this.orbit.pitch) * d + 1.2 * this.sizeK,
         p.z - Math.cos(yaw) * Math.cos(this.orbit.pitch) * d,
       );
       if (this.chasePos.lengthSq() === 0 || dt === 0) this.chasePos.copy(target);
       else this.chasePos.lerp(target, 1 - Math.exp(-dt * 5));
-      const gy = this.terrain.height(this.chasePos.x, this.chasePos.z) + 0.6;
+      const gy = this.terrain.height(this.chasePos.x, this.chasePos.z) + 0.6 * this.sizeK;
       if (this.chasePos.y < gy) this.chasePos.y = gy;
       this.camera.position.copy(this.chasePos);
       this.camera.up.set(0, 1, 0);
-      this.camera.lookAt(p.x, p.y + 0.8, p.z);
-      this.camera.near = 0.2;
+      this.camera.lookAt(p.x, p.y + 0.8 * this.sizeK, p.z);
+      this.camera.near = 0.2 * this.sizeK;
     }
     this.camera.updateProjectionMatrix();
     this.camera.updateMatrixWorld();
@@ -567,6 +775,7 @@ export class Game {
 
   /** Occasional meteoroid impact flash somewhere in shadow, in front of the camera. */
   private updateImpacts(dt: number): void {
+    if (!this.sky) return;
     this.sky.updateFlashes(dt, this.scene);
     this.flashTimer -= dt;
     if (this.flashTimer > 0 || !this.shadowMask) return;
@@ -590,11 +799,12 @@ export class Game {
 
   /** Restart at the landing site. */
   restart(): void {
-    const lm = this.terrain.meta.landing;
-    this.rover.placeAt(lm.x - 45, lm.z + 10, Math.PI - THREE.MathUtils.degToRad(270));
+    const [x, z] = this.startPoint();
+    this.physics.updatePatch(x, z, true);
+    this.rover.placeAt(x, z, START_YAW);
     this.rover.battery = 1;
+    this.rover.panelDust = 0;
     this.rover.parkBrake = false;
-    this.physics.updatePatch(lm.x - 45, lm.z + 10, true);
     this.chasePos.set(0, 0, 0);
   }
 

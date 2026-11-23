@@ -9,6 +9,7 @@
  * Kaguya, resampled to 112 m), blended into the DTM over the window's edge.
  */
 export interface TerrainMeta {
+  body?: 'moon' | 'mars';
   source: string;
   width: number;
   height: number;
@@ -82,14 +83,18 @@ export class TerrainData {
     this.halfZ = meta.sizeZ / 2;
 
     const rnd = mulberry32(CRATER_SEED);
-    this.craters = new Float32Array(CRATER_COUNT * 5);
-    for (let i = 0; i < CRATER_COUNT; i++) {
+    // Mars: wind has filled and planed most small craters; fewer and shallower, sand-filled bowls.
+    const mars = meta.body === 'mars';
+    const count = mars ? Math.round(CRATER_COUNT * 0.35 * (meta.sizeX * meta.sizeZ) / 16e6) : CRATER_COUNT;
+    const depthK = mars ? 0.45 : 1;
+    this.craters = new Float32Array(count * 5);
+    for (let i = 0; i < count; i++) {
       // Cumulative size-frequency N(>R) ~ R^-2 (Pareto, truncated).
       let R = CRATER_RMIN * Math.pow(1 - rnd(), -0.5);
       if (R > CRATER_RMAX) R = CRATER_RMIN + rnd() * 3;
       const fresh = rnd();
       // Most small craters on an old mare surface are degraded (shallow, soft rims).
-      const depth = 2 * R * (0.03 + 0.15 * fresh * fresh * fresh);
+      const depth = 2 * R * (0.03 + 0.15 * fresh * fresh * fresh) * depthK;
       const rim = depth * (0.1 + 0.25 * fresh);
       const o = i * 5;
       this.craters[o] = (rnd() - 0.5) * meta.sizeX;
@@ -112,12 +117,12 @@ export class TerrainData {
       const z1 = Math.min(this.cellsX - 1, Math.floor((this.craters[o + 1] + r + this.halfZ) / HASH_CELL));
       for (let cz = z0; cz <= z1; cz++) for (let cx = x0; cx <= x1; cx++) fn(cz * this.cellsX + cx);
     };
-    for (let i = 0; i < CRATER_COUNT; i++) forCells(i, (c) => counts[c + 1]++);
+    for (let i = 0; i < count; i++) forCells(i, (c) => counts[c + 1]++);
     for (let c = 0; c < nCells; c++) counts[c + 1] += counts[c];
     this.cellStart = counts;
     this.cellItems = new Int32Array(counts[nCells]);
     const fill = new Int32Array(nCells);
-    for (let i = 0; i < CRATER_COUNT; i++) {
+    for (let i = 0; i < count; i++) {
       forCells(i, (c) => {
         this.cellItems[counts[c] + fill[c]++] = i;
       });
@@ -253,8 +258,8 @@ export class TerrainData {
 
 export async function loadTerrainData(base: string, onProgress?: (f: number) => void): Promise<TerrainData> {
   const { decodePng16 } = await import('./png16');
-  const meta: TerrainMeta = await (await fetch(`${base}data/terrain.json`)).json();
-  const res = await fetch(`${base}data/heightmap.png`);
+  const meta: TerrainMeta = await (await fetch(`${base}terrain.json`)).json();
+  const res = await fetch(`${base}heightmap.png`);
   const total = Number(res.headers.get('content-length')) || 4.6e6;
   const reader = res.body!.getReader();
   const parts: Uint8Array[] = [];
@@ -274,7 +279,7 @@ export async function loadTerrainData(base: string, onProgress?: (f: number) => 
   let far: FarGrid | null = null;
   if (meta.far) {
     try {
-      const fr = await fetch(`${base}data/far_height.png`);
+      const fr = await fetch(`${base}far_height.png`);
       if (fr.ok) {
         const fp = await decodePng16(await fr.arrayBuffer());
         const fs = (meta.far.max - meta.far.min) / 65535;

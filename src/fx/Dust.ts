@@ -1,8 +1,7 @@
 import * as THREE from 'three';
-import { MOON_GRAVITY } from '../config';
 import type { Rover } from '../rover/Rover';
-import { WHEEL_RADIUS } from '../rover/Rover';
 import type { TerrainData } from '../terrain/TerrainData';
+import { world } from '../world';
 
 /** Release angle above which the fender intercepts thrown regolith (as on the LRV). */
 const FENDER_START_DEG = 38;
@@ -29,7 +28,9 @@ export class Dust {
   private size: Float32Array;
   private alive: Uint8Array;
   private cursor = 0;
-  private carry = new Array(6).fill(0);
+  private carry = new Array(8).fill(0);
+  /** Wind at the surface (Mars), m/s; grains relax toward it by aerodynamic drag. */
+  readonly wind = new THREE.Vector3();
   private max: number;
 
   constructor(private terrain: TerrainData, max: number) {
@@ -53,7 +54,7 @@ export class Dust {
     g.fillRect(0, 0, 32, 32);
     const alpha = new THREE.CanvasTexture(c);
 
-    const mat = new THREE.MeshLambertMaterial({ color: 0x9a948b, alphaMap: alpha, transparent: true, depthWrite: false, side: THREE.DoubleSide });
+    const mat = new THREE.MeshLambertMaterial({ color: world().id === 'mars' ? 0xb48a66 : 0x9a948b, alphaMap: alpha, transparent: true, depthWrite: false, side: THREE.DoubleSide });
     mat.onBeforeCompile = (shader) => {
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <lights_lambert_pars_fragment>',
@@ -101,20 +102,23 @@ void RE_IndirectDiffuse_Lambert( const in vec3 irradiance, const in vec3 geometr
     const fwd = rover.forwardVector(new THREE.Vector3());
     const up = rover.upVector(new THREE.Vector3());
     const side = new THREE.Vector3().crossVectors(up, fwd).normalize();
-    for (let w = 0; w < 6; w++) {
+    const WHEEL_RADIUS = rover.wheelRadius;
+    // Small rovers kick up proportionally less material.
+    const scale = Math.min(1, rover.wheelRadius / 0.3) * (6 / rover.n);
+    for (let w = 0; w < rover.n; w++) {
       if (!rover.wheelContact[w]) continue;
       const rim = rover.wheelRimSpeed[w];
       if (Math.abs(rim) < 0.05) continue;
       const slip = Math.abs(rover.wheelSlip[w]);
       // Grains entrained per second scale with rim speed and with slip (shearing).
-      this.carry[w] += (Math.abs(rim) * 110 + slip * 300) * dt;
+      this.carry[w] += (Math.abs(rim) * 110 + slip * 300) * dt * scale;
       const c = rover.wheelWorld[w];
       const gy = this.terrain.height(c.x, c.z);
       while (this.carry[w] >= 1) {
         this.carry[w] -= 1;
         // Release angle behind the contact patch (0 = contact point, 90° = rear at hub height).
         const thDeg = 5 + Math.random() * 85;
-        if (thDeg > FENDER_START_DEG) continue;
+        if (rover.spec.crew && thDeg > FENDER_START_DEG) continue;
         const th = THREE.MathUtils.degToRad(thDeg);
         const dir = Math.sign(rim) || 1;
         const s = Math.sin(th), co = Math.cos(th);
@@ -134,13 +138,23 @@ void RE_IndirectDiffuse_Lambert( const in vec3 irradiance, const in vec3 geometr
     }
 
     // Exact ballistic integration (constant gravity, no drag) + streak instances.
-    const g = MOON_GRAVITY;
+    const g = world().gravity;
+    // Mars: Stokes-like drag; fines (small clumps) follow the wind, coarse grains fly ballistic.
+    const air = world().atmosphere;
+    const wx = this.wind.x, wz = this.wind.z;
     const cam = camera.position;
     const m = this.mesh.instanceMatrix.array as Float32Array;
     let n = 0;
     for (let i = 0; i < this.max; i++) {
       if (!this.alive[i]) continue;
       const k = i * 3;
+      if (air) {
+        // Relaxation time ~ size: 2 mm clumps settle in ~0.3 s, 12 mm in ~2 s.
+        const kd = Math.min(1, dt / (this.size[i] * 160));
+        this.vel[k] += (wx - this.vel[k]) * kd;
+        this.vel[k + 2] += (wz - this.vel[k + 2]) * kd;
+        this.vel[k + 1] += (-this.vel[k + 1] * 0.3) * kd;
+      }
       this.pos[k] += this.vel[k] * dt;
       this.pos[k + 1] += this.vel[k + 1] * dt - 0.5 * g * dt * dt;
       this.pos[k + 2] += this.vel[k + 2] * dt;

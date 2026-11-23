@@ -1,37 +1,11 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { InstrumentPanel } from './InstrumentPanel';
+import { approach, bakeByMaterial, canvasTex, type RoverAnimState, type RoverModel, type WheelVisual } from './models/kit';
 
 export const WHEEL_VIS_R = 0.409;
-
-export interface WheelVisual {
-  steer: THREE.Group;
-  spin: THREE.Group;
-  /** Shared uniforms of this wheel's deforming materials. */
-  uniforms: { uCenter: { value: THREE.Vector3 }; uDown: { value: THREE.Vector3 }; uDefl: { value: number } };
-  blurMat: THREE.MeshBasicMaterial;
-  chevronMat: THREE.MeshStandardMaterial;
-}
-
-export interface RoverModel {
-  root: THREE.Group;
-  wheels: WheelVisual[];
-  cockpitAnchor: THREE.Object3D;
-  lights: THREE.SpotLight[];
-  panel: InstrumentPanel;
-  setHeadlights(on: boolean): void;
-  setSteering(a: number): void;
-}
-
-function canvasTex(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void): THREE.CanvasTexture {
-  const c = document.createElement('canvas');
-  c.width = w;
-  c.height = h;
-  draw(c.getContext('2d')!);
-  const t = new THREE.CanvasTexture(c);
-  t.anisotropy = 4;
-  return t;
-}
+/** LRV: four wheels, wheelbase 2.29 m, track 1.83 m. */
+export const LRV_WHEELS: [number, number][] = [[0.915, 1.145], [-0.915, 1.145], [0.915, -1.145], [-0.915, -1.145]];
 
 /** Woven piano-wire mesh (LRV tyre, HGA reflector). alphaMap reads the green channel. */
 function weaveTexture(cells: number): THREE.CanvasTexture {
@@ -60,7 +34,7 @@ function weaveTexture(cells: number): THREE.CanvasTexture {
  * Deforming wheel material: the wire-mesh tyre flattens against the ground
  * under load (vertices past the contact plane are projected onto it).
  */
-function deformable<T extends THREE.Material>(mat: T, u: WheelVisual['uniforms']): T {
+function deformable<T extends THREE.Material>(mat: T, u: NonNullable<WheelVisual['uniforms']>): T {
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, u);
     shader.vertexShader = shader.vertexShader
@@ -80,7 +54,7 @@ gl_Position = projectionMatrix * mvPosition;`,
 }
 
 /** Lunar Roving Vehicle-style rover. Local frame: +z forward, +x left, +y up. */
-export function buildRoverModel(): RoverModel {
+export function buildLrvModel(): RoverModel {
   const root = new THREE.Group();
 
   // PBR metals; they reflect the sunlit regolith via the scene environment map.
@@ -122,11 +96,11 @@ export function buildRoverModel(): RoverModel {
   for (const z of [-1.55, -0.75, 0, 0.75, 1.55]) tube(V(-0.66, -0.08, z), V(0.66, -0.08, z), 0.02, alu);
   add(new THREE.BoxGeometry(1.2, 0.012, 1.4), anod, 0, -0.1, -0.05);
   // Suspension wishbones and dampers to each wheel.
-  for (const [x, z] of [[1, 1.25], [-1, 1.25], [1, 0], [-1, 0], [1, -1.25], [-1, -1.25]] as const) {
+  for (const [x, z] of LRV_WHEELS) {
     const sx = Math.sign(x);
-    tube(V(sx * 0.62, -0.06, z + 0.18), V(sx * 0.86, -0.2, z), 0.018, alu);
-    tube(V(sx * 0.62, -0.06, z - 0.18), V(sx * 0.86, -0.2, z), 0.018, alu);
-    tube(V(sx * 0.62, 0.06, z), V(sx * 0.84, -0.12, z), 0.014, anod);
+    tube(V(sx * 0.62, -0.06, z + 0.18), V(sx * 0.78, -0.2, z), 0.018, alu);
+    tube(V(sx * 0.62, -0.06, z - 0.18), V(sx * 0.78, -0.2, z), 0.018, alu);
+    tube(V(sx * 0.62, 0.06, z), V(sx * 0.76, -0.12, z), 0.014, anod);
   }
 
   // ---- Forward chassis: batteries & signal processor in MLI, LCRU on the front.
@@ -219,7 +193,7 @@ export function buildRoverModel(): RoverModel {
 
   // ---- Wheels: woven wire-mesh tyre, titanium chevrons, inner bump-stop frame,
   // spun-aluminium hub disc, traction drive; a fender above each.
-  const wheelPos: [number, number][] = [[1.0, 1.25], [-1.0, 1.25], [1.0, 0], [-1.0, 0], [1.0, -1.25], [-1.0, -1.25]];
+  const wheelPos = LRV_WHEELS;
   const weave = weaveTexture(8);
   weave.repeat.set(26, 2);
   const tireGeo = new THREE.CylinderGeometry(WHEEL_VIS_R, WHEEL_VIS_R, 0.23, 72, 3, true);
@@ -309,7 +283,7 @@ export function buildRoverModel(): RoverModel {
   }
 
   // Merge static parts per material (hundreds of meshes -> a handful of draw calls).
-  bakeByMaterial(root, new Set<THREE.Object3D>([stick, panel.group, ...wheels.map((w) => w.steer)]));
+  bakeByMaterial(root, new Set<THREE.Object3D>([stick, panel.group, tvHead, ...wheels.map((w) => w.steer)]));
   for (const w of wheels) bakeByMaterial(w.spin, new Set());
 
   const cockpitAnchor = new THREE.Object3D();
@@ -328,6 +302,12 @@ export function buildRoverModel(): RoverModel {
     },
     setSteering(a: number) {
       stick.rotation.z = -a * 0.6;
+    },
+    animate(st: RoverAnimState) {
+      // GCTA TV camera: slow survey pan when parked (it was driven from Houston), forward while driving.
+      const pan = st.parked || st.preview ? Math.sin(st.time * 0.25) * 1.1 : 0;
+      tvHead.rotation.y = approach(tvHead.rotation.y, pan, 1.5, st.dt);
+      tvBody.rotation.x = approach(tvBody.rotation.x, st.parked || st.preview ? 0.1 + Math.sin(st.time * 0.17) * 0.15 : 0.1, 1.5, st.dt);
     },
   };
 }
@@ -365,49 +345,5 @@ function buildAstronaut(x: number, y: number, z: number): THREE.Group {
     m(new THREE.SphereGeometry(0.065, 10, 8), dark, s * 0.26, 0.28, 0.36);
   }
   g.position.set(x, y, z);
-  return g;
-}
-
-/** Replace mesh descendants of `group` (outside `skip` subtrees) by one merged mesh per material. */
-function bakeByMaterial(group: THREE.Object3D, skip: Set<THREE.Object3D>): void {
-  group.updateMatrixWorld(true);
-  const inv = group.matrixWorld.clone().invert();
-  const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
-  const victims: THREE.Mesh[] = [];
-  const visit = (o: THREE.Object3D) => {
-    if (skip.has(o)) return;
-    const mesh = o as THREE.Mesh;
-    if (mesh.isMesh && mesh !== group) {
-      let geo = mesh.geometry.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, mesh.matrixWorld));
-      if (!geo.index) geo = indexed(geo);
-      const mat = mesh.material as THREE.Material;
-      if (!byMat.has(mat)) byMat.set(mat, []);
-      byMat.get(mat)!.push(normalizeAttrs(geo));
-      victims.push(mesh);
-    }
-    for (const c of o.children) visit(c);
-  };
-  for (const c of group.children) visit(c);
-  for (const v of victims) v.parent?.remove(v);
-  for (const [mat, geos] of byMat) {
-    const merged = mergeGeometries(geos, false);
-    if (!merged) continue;
-    const mesh = new THREE.Mesh(merged, mat);
-    mesh.castShadow = mesh.receiveShadow = true;
-    group.add(mesh);
-  }
-}
-
-function indexed(g: THREE.BufferGeometry): THREE.BufferGeometry {
-  const n = g.getAttribute('position').count;
-  g.setIndex(Array.from({ length: n }, (_, i) => i));
-  return g;
-}
-
-/** Keep only position/normal/uv so differently built geometries can merge. */
-function normalizeAttrs(g: THREE.BufferGeometry): THREE.BufferGeometry {
-  for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(name)) g.deleteAttribute(name);
-  if (!g.getAttribute('uv')) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.getAttribute('position').count * 2), 2));
-  if (!g.getAttribute('normal')) g.computeVertexNormals();
   return g;
 }

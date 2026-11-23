@@ -1,3 +1,4 @@
+import { world } from '../world';
 import { t } from '../i18n';
 import type { Rover } from '../rover/Rover';
 import type { TerrainData } from '../terrain/TerrainData';
@@ -39,6 +40,11 @@ export class Hud {
     this.map = $('#h-map');
   }
 
+  /** Mars weather for warnings and the minimap (null on the Moon). */
+  weather: { wind: number; tau: number; storm: number; devilDist: number; devils: { x: number; z: number; r: number; s: number }[] } | null = null;
+  /** Label of the landing-site marker on the minimap. */
+  siteLabel = 'LM';
+
   setMapImage(img: CanvasImageSource): void {
     // Pre-scale the ortho to a small canvas for cheap minimap drawing.
     const c = document.createElement('canvas');
@@ -71,8 +77,9 @@ export class Hud {
     e.pitch.textContent = `${pitch.toFixed(0)}°`;
     e.lights.classList.toggle('on', rover.headlights);
     e.fps.textContent = fps.toFixed(0);
-    const lat = ter.meta.centerLat - (p.z / 1737400) * (180 / Math.PI);
-    const lon = ter.meta.centerLon + (p.x / (1737400 * Math.cos((lat * Math.PI) / 180))) * (180 / Math.PI);
+    const Rb = world().radius;
+    const lat = ter.meta.centerLat - (p.z / Rb) * (180 / Math.PI);
+    const lon = ter.meta.centerLon + (p.x / (Rb * Math.cos((lat * Math.PI) / 180))) * (180 / Math.PI);
     e.coords.textContent = `${lat.toFixed(4)}°N ${lon.toFixed(4)}°E`;
 
     // Warnings.
@@ -86,6 +93,12 @@ export class Hud {
     if (!ter.inside(p.x, p.z)) { warns.push(t('wOutside')); level = Math.max(level, 1); }
     if (Math.abs(roll) > 100) warns.push(t('wReset'));
     if (rover.parkBrake && rover.motorLoadFactor === 0 && Math.abs(rover.speed) < 0.05) warns.push(t('wPark'));
+    const wx = this.weather;
+    if (wx) {
+      if (wx.storm > 0.5) { warns.push(`${t('wStorm')} τ ${wx.tau.toFixed(1)} · ${wx.wind.toFixed(0)} ${t('hMs')}`); level = Math.max(level, 1); }
+      if (wx.devilDist < 150) { warns.push(`${t('wDevil')} ${Math.max(0, wx.devilDist).toFixed(0)} ${t('hM')}`); level = Math.max(level, 1); }
+      if (rover.panelDust > 0.3) warns.push(`${t('wPanelDust')} ${(rover.panelDust * 100).toFixed(0)} %`);
+    }
     this.warningLevel = level;
     e.warn.textContent = warns.join(' · ');
     e.warn.className = level === 2 ? 'danger' : level === 1 ? 'caution' : '';
@@ -247,8 +260,19 @@ export class Hud {
     const lx = toX(t.meta.landing.x), lz = toY(t.meta.landing.z);
     g.fillStyle = '#ffcc33';
     g.font = '10px sans-serif';
-    g.fillText('LM', lx + 5, lz + 3);
+    g.fillText(this.siteLabel, lx + 5, lz + 3);
     g.fillRect(lx - 2, lz - 2, 4, 4);
+    // Dust devils.
+    if (this.weather) {
+      for (const d of this.weather.devils) {
+        if (d.s < 0.1) continue;
+        g.strokeStyle = `rgba(255,190,120,${0.4 + 0.5 * d.s})`;
+        g.lineWidth = 1.5;
+        g.beginPath();
+        g.arc(toX(d.x), toY(d.z), Math.max(3, d.r * s), 0, Math.PI * 2);
+        g.stroke();
+      }
+    }
     // Trail.
     if (this.trail.length >= 4) {
       g.strokeStyle = '#4fc3f7';

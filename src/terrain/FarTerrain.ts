@@ -12,7 +12,7 @@ export class FarTerrain {
   readonly mesh: THREE.Mesh;
   private uniforms = { uNearR: { value: 3000 } };
 
-  constructor(terrain: TerrainData, farShadow: THREE.Texture | undefined, mobile: boolean) {
+  constructor(terrain: TerrainData, farShadow: THREE.Texture | undefined, mobile: boolean, farAlbedo?: THREE.Texture) {
     const f = terrain.far!;
     const stride = mobile ? 2 : 1;
     const n = Math.floor((f.n - 1) / stride) + 1;
@@ -60,8 +60,16 @@ export class FarTerrain {
       farShadow.needsUpdate = true;
     }
     const u = this.uniforms;
-    const mat = makeLunar(new THREE.MeshLambertMaterial({ color: 0x9a948c, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4 }), 'far', (shader) => {
-      Object.assign(shader.uniforms, { uFarShadow: { value: farShadow ?? null }, uNearR: u.uNearR, uHasShadow: { value: farShadow ? 1 : 0 } });
+    const mars = terrain.meta.body === 'mars';
+    if (farAlbedo) {
+      farAlbedo.flipY = false;
+      farAlbedo.colorSpace = THREE.SRGBColorSpace;
+      farAlbedo.wrapS = farAlbedo.wrapT = THREE.ClampToEdgeWrapping;
+      farAlbedo.needsUpdate = true;
+    }
+    const mat = makeLunar(new THREE.MeshLambertMaterial({ color: mars ? 0xffffff : 0x9a948c, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4 }), 'far', (shader) => {
+      Object.assign(shader.uniforms, { uFarShadow: { value: farShadow ?? null }, uNearR: u.uNearR, uHasShadow: { value: farShadow ? 1 : 0 }, uFarAlb: { value: farAlbedo ?? null } });
+      shader.defines = { ...(shader.defines ?? {}), FAR_ALB: farAlbedo ? 1 : 0 };
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nvarying vec3 vWP;\nvarying vec2 vFarUv;')
         .replace('#include <uv_vertex>', '#include <uv_vertex>\nvFarUv = uv;')
@@ -71,6 +79,7 @@ export class FarTerrain {
 varying vec3 vWP;
 varying vec2 vFarUv;
 uniform sampler2D uFarShadow;
+uniform sampler2D uFarAlb;
 uniform float uHasShadow;
 uniform float uNearR;
 ${NOISE_GLSL}`)
@@ -80,7 +89,14 @@ if (length(vWP.xz - cameraPosition.xz) < uNearR) discard;`)
 vec3 nA = lnoised(vWP.xz * 0.0016);
 vec3 nB = lnoised(vWP.xz * 0.011 + 5.0);
 float alt = smoothstep(150.0, 1800.0, vWP.y);
+#if FAR_ALB > 0
+// Mars: CTX 6 m albedo mosaic, tinted like the near terrain.
+float fa = texture2D(uFarAlb, vFarUv).r * (0.92 + 0.12 * nB.x);
+fa = clamp(0.13 + (fa - 0.13) * 1.3, 0.015, 1.0);
+diffuseColor.rgb = fa * mix(vec3(0.8, 0.6, 0.48), vec3(1.3, 0.8, 0.5), smoothstep(0.05, 0.3, fa)) * 1.9;
+#else
 diffuseColor.rgb *= (0.8 + 0.12 * alt) * (0.88 + 0.18 * nA.x + 0.1 * nB.x);
+#endif
 vec2 fgrad = nA.yz * 0.0016 * 120.0 + nB.yz * 0.011 * 25.0;
 float farSun = uHasShadow > 0.5 ? smoothstep(0.2, 0.8, texture2D(uFarShadow, vFarUv).r) : 1.0;`)
         .replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
