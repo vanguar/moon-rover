@@ -3,6 +3,7 @@ import type RAPIER from '@dimforge/rapier3d-compat';
 import type { ContactForce, Physics } from '../physics/Physics';
 import type { TerrainData } from '../terrain/TerrainData';
 import { world } from '../world';
+import { applyWear } from './models/wear';
 import type { RoverModel } from './models/kit';
 import type { RoverSpec } from './specs';
 
@@ -94,6 +95,8 @@ export class Rover {
   private mechPower = 0;
   /** Pose of the chassis and wheels before the last physics step: [x y z qx qy qz qw] per body. */
   private prevPose: Float32Array;
+  /** World → chassis matrix for the wear shader (dust on the lower body). */
+  private wearInv = { value: new THREE.Matrix4() };
   private hasPrev = false;
   private tq = new THREE.Quaternion();
   private tv = new THREE.Vector3();
@@ -223,6 +226,14 @@ export class Rover {
     }
 
     this.model = spec.build();
+    // Field wear: waviness, dents, scratches, regolith dust (more on Mars, ochre).
+    const mars = world().id === 'mars';
+    applyWear(this.model.root, {
+      dust: mars ? 0.75 : 0.5,
+      dustColor: mars ? new THREE.Color(0.32, 0.17, 0.09) : new THREE.Color(0.2, 0.195, 0.188),
+      lowY: spec.axleY + spec.wheelRadius * 0.6,
+      rootInv: this.wearInv,
+    });
     this.object.add(this.model.root);
     this.prevPos.set(x, y, z);
   }
@@ -401,6 +412,7 @@ export class Rover {
     this.object.position.set(t.x, t.y, t.z);
     this.object.quaternion.copy(cq);
     this.object.updateMatrixWorld();
+    this.wearInv.value.copy(this.object.matrixWorld).invert();
 
     const pos = this.object.position;
     const d = Math.hypot(pos.x - this.prevPos.x, pos.z - this.prevPos.z);

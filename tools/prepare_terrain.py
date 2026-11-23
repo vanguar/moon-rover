@@ -289,12 +289,12 @@ def main():
     ortho = read_ortho(transform, (SIZE, SIZE))
     ortho = synth_albedo(ortho, valid)
     img = Image.fromarray(np.clip(ortho, 0, 255).astype(np.uint8)).resize((ORTHO_OUT, ORTHO_OUT), Image.LANCZOS)
-    img.save(os.path.join(OUT, "ortho.jpg"), quality=80, optimize=True, progressive=True)
+    img.save(os.path.join(OUT, "ortho.jpg"), quality=93, optimize=True, progressive=True)  # q80 showed 8×8 JPEG blocks on the ground
 
     lm_x, lm_z = to_game(LANDING_LAT, LANDING_LON, lat_c, lon_c)
     hi_c = (lm_x + HI_FROM_LM[0], lm_z + HI_FROM_LM[1])
     hi = read_ortho_hi(transform, hi_c)
-    Image.fromarray(hi).save(os.path.join(OUT, "ortho_hi.jpg"), quality=80, optimize=True, progressive=True)
+    Image.fromarray(hi).save(os.path.join(OUT, "ortho_hi.jpg"), quality=93, optimize=True, progressive=True)
 
     sky = LunarSky(GAME_EPOCH, LANDING_LAT, LANDING_LON)
     sun_az, sun_el = sky.az_el(sky.sun())

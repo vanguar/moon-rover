@@ -66,6 +66,41 @@ function earthTexture(): THREE.CanvasTexture {
   return t;
 }
 
+/** Sky sphere textured with the all-sky Milky Way map (celestial coordinates). */
+function buildMilkyWayMap(tex: THREE.Texture, icrfToGame0: THREE.Matrix4): THREE.Mesh {
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.anisotropy = 4;
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { uMap: { value: tex }, uAdapt: { value: 1 } },
+    vertexShader: `varying vec3 vDir;
+      void main() { vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `uniform sampler2D uMap; uniform float uAdapt; varying vec3 vDir;
+      void main() {
+        vec3 d = normalize(vDir); // ICRF: x → RA 0h, z → north celestial pole
+        float ra = atan(d.y, d.x);
+        float dec = asin(clamp(d.z, -1.0, 1.0));
+        // Map centred on RA 0h, RA increasing to the left.
+        vec2 uv = vec2(fract(0.5 - ra / 6.2831853), 0.5 + dec / 3.1415927);
+        vec3 c = texture2D(uMap, uv).rgb;
+        // Faint: seen only by a dark-adapted eye (no sunlit ground in view).
+        gl_FragColor = vec4(c * 0.55 * uAdapt * uAdapt, 1.0);
+        #include <colorspace_fragment>
+      }`,
+    side: THREE.BackSide,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    transparent: true,
+  });
+  const m = new THREE.Mesh(new THREE.SphereGeometry(9200, 96, 48), mat);
+  // Vertices are ICRF directions; the mesh rotation brings them into the epoch game frame.
+  m.quaternion.setFromRotationMatrix(icrfToGame0);
+  m.renderOrder = -11;
+  m.frustumCulled = false;
+  return m;
+}
+
 export class Sky {
   readonly group = new THREE.Group();
   readonly sunDir: THREE.Vector3;
@@ -88,7 +123,7 @@ export class Sky {
     starCount: number,
     earthPos?: { azimuth: number; elevation: number },
     stars?: Float32Array,
-    extras: { constellations?: Float32Array; galaxy?: { pole: number[]; center: number[] } } = {},
+    extras: { constellations?: Float32Array; galaxy?: { pole: number[]; center: number[] }; milkyWay?: THREE.Texture; icrfToGame0?: THREE.Matrix4 } = {},
   ) {
     this.sunDir = azElToDir(sunAz, sunEl);
     // Earth from Hadley Rille (26.1 N, 3.6 E): az ≈ 188°, el ≈ 64° (librations ignored).
@@ -154,7 +189,12 @@ export class Sky {
     this.group.add(earth);
     this.earth = earth;
 
-    if (extras.galaxy) {
+    if (extras.milkyWay && extras.icrfToGame0) {
+      // The real sky: NASA SVS Deep Star Maps 2020 (Gaia DR2), Milky Way without the
+      // bright stars (those are drawn from the catalogue), plate carrée in RA/Dec.
+      this.milkyWay = buildMilkyWayMap(extras.milkyWay, extras.icrfToGame0);
+      this.celestial.add(this.milkyWay);
+    } else if (extras.galaxy) {
       this.milkyWay = buildMilkyWay(new THREE.Vector3(...extras.galaxy.pole), new THREE.Vector3(...extras.galaxy.center));
       this.celestial.add(this.milkyWay);
     }

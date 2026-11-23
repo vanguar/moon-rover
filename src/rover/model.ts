@@ -188,14 +188,13 @@ export function buildLrvModel(): RoverModel {
   tube(V(0.55, 0.25, -1.5), V(0.62, 1.2, -1.6), 0.01, alu);
   tube(V(-0.5, 0.25, -1.55), V(-0.55, 0.95, -1.6), 0.008, alu);
 
-  // ---- Second crew member in the right seat.
-  root.add(buildAstronaut(-0.4, 0.22, -0.36));
+  // (The second seat stays empty: a stand-in figure looked worse than none.)
 
   // ---- Wheels: woven wire-mesh tyre, titanium chevrons, inner bump-stop frame,
   // spun-aluminium hub disc, traction drive; a fender above each.
   const wheelPos = LRV_WHEELS;
   const weave = weaveTexture(8);
-  weave.repeat.set(26, 2);
+  weave.repeat.set(40, 3); // 0.83 mm zinc-coated piano wire, woven in a fine diamond pattern
   const tireGeo = new THREE.CylinderGeometry(WHEEL_VIS_R, WHEEL_VIS_R, 0.23, 72, 3, true);
   tireGeo.rotateZ(Math.PI / 2);
   const bumpGeo = new THREE.CylinderGeometry(0.31, 0.31, 0.18, 32, 1, true);
@@ -213,9 +212,10 @@ export function buildLrvModel(): RoverModel {
   const chevGeo = (() => {
     const parts: THREE.BufferGeometry[] = [];
     for (const s of [-1, 1]) {
-      const b = new THREE.BoxGeometry(0.125, 0.012, 0.022);
+      // Titanium chevrons cover ~50 % of the tread (LRV Operations Handbook): wide strips.
+      const b = new THREE.BoxGeometry(0.125, 0.008, 0.055, 4, 1, 2);
       b.rotateY(s * 0.5);
-      b.translate(s * 0.052, WHEEL_VIS_R + 0.006, s * -0.018);
+      b.translate(s * 0.052, WHEEL_VIS_R + 0.004, s * -0.018);
       parts.push(b);
     }
     return mergeGeometries(parts)!;
@@ -242,7 +242,7 @@ export function buildLrvModel(): RoverModel {
     steer.add(spin);
     const uniforms = { uCenter: { value: new THREE.Vector3() }, uDown: { value: new THREE.Vector3(0, -1, 0) }, uDefl: { value: 0.02 } };
     const tireMat = deformable(
-      new THREE.MeshStandardMaterial({ color: 0xa9a59c, metalness: 0.85, roughness: 0.42, alphaMap: weave, alphaTest: 0.45, side: THREE.DoubleSide }),
+      new THREE.MeshStandardMaterial({ color: 0xb3b0a8, metalness: 0.8, roughness: 0.5, alphaMap: weave, alphaTest: 0.45, side: THREE.DoubleSide }),
       uniforms,
     );
     const chevronMat = deformable(new THREE.MeshStandardMaterial({ color: 0x9c9da1, metalness: 0.8, roughness: 0.35, transparent: true }), uniforms);
@@ -310,40 +310,4 @@ export function buildLrvModel(): RoverModel {
       tvBody.rotation.x = approach(tvBody.rotation.x, st.parked || st.preview ? 0.1 + Math.sin(st.time * 0.17) * 0.15 : 0.1, 1.5, st.dt);
     },
   };
-}
-
-/** Seated suited astronaut (A7LB suit, PLSS backpack, gold visor down). */
-function buildAstronaut(x: number, y: number, z: number): THREE.Group {
-  const g = new THREE.Group();
-  const suit = new THREE.MeshStandardMaterial({ color: 0xe6e3dc, roughness: 0.85, metalness: 0 });
-  const joints = new THREE.MeshStandardMaterial({ color: 0xcfcbc2, roughness: 0.9 });
-  const visor = new THREE.MeshStandardMaterial({ color: 0xd9a441, metalness: 1, roughness: 0.05 });
-  const dark = new THREE.MeshStandardMaterial({ color: 0x2b2d30, roughness: 0.6, metalness: 0.3 });
-  const red = new THREE.MeshStandardMaterial({ color: 0xa8322a, roughness: 0.6 });
-  const m = (geo: THREE.BufferGeometry, mat: THREE.Material, px: number, py: number, pz: number, rx = 0, ry = 0, rz = 0) => {
-    const o = new THREE.Mesh(geo, mat);
-    o.position.set(px, py, pz);
-    o.rotation.set(rx, ry, rz);
-    o.castShadow = o.receiveShadow = true;
-    g.add(o);
-    return o;
-  };
-  m(new THREE.CapsuleGeometry(0.2, 0.3, 4, 12), suit, 0, 0.42, -0.08, -0.2);
-  m(new THREE.BoxGeometry(0.46, 0.6, 0.2), suit, 0, 0.5, -0.32, -0.2);
-  m(new THREE.BoxGeometry(0.3, 0.12, 0.14), dark, 0, 0.86, -0.3, -0.2);
-  m(new THREE.SphereGeometry(0.17, 20, 14), suit, 0, 0.88, 0.0);
-  m(new THREE.SphereGeometry(0.172, 20, 12, -Math.PI * 0.42, Math.PI * 0.84, Math.PI * 0.18, Math.PI * 0.45), visor, 0, 0.88, 0.005);
-  m(new THREE.BoxGeometry(0.2, 0.12, 0.08), dark, 0, 0.55, 0.15, -0.2);
-  m(new THREE.BoxGeometry(0.06, 0.03, 0.02), red, 0.05, 0.59, 0.195, -0.2);
-  for (const s of [-1, 1]) {
-    m(new THREE.CapsuleGeometry(0.085, 0.32, 4, 10), suit, s * 0.11, 0.08, 0.15, Math.PI / 2 - 0.15);
-    m(new THREE.SphereGeometry(0.09, 10, 8), joints, s * 0.11, 0.06, 0.36);
-    m(new THREE.CapsuleGeometry(0.075, 0.3, 4, 10), suit, s * 0.11, -0.12, 0.47, 0.45);
-    m(new THREE.BoxGeometry(0.13, 0.1, 0.25), joints, s * 0.11, -0.3, 0.58, -0.3);
-    m(new THREE.CapsuleGeometry(0.07, 0.24, 4, 10), suit, s * 0.25, 0.48, 0.02, 0.6, 0, s * 0.15);
-    m(new THREE.CapsuleGeometry(0.06, 0.22, 4, 10), suit, s * 0.26, 0.32, 0.2, 1.3);
-    m(new THREE.SphereGeometry(0.065, 10, 8), dark, s * 0.26, 0.28, 0.36);
-  }
-  g.position.set(x, y, z);
-  return g;
 }

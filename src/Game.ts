@@ -33,6 +33,7 @@ export interface GameExtras {
   constellations?: Float32Array;
   farShadow?: THREE.Texture;
   farAlbedo?: THREE.Texture;
+  milkyWay?: THREE.Texture;
 }
 
 /** Sun irradiance in scene units; everything else is relative to it. */
@@ -95,6 +96,7 @@ export class Game {
   private look = { yaw: 0, pitch: -0.12 };
   private orbit = { yaw: 0, pitch: 0.28, dist: 9 };
   private chasePos = new THREE.Vector3();
+  private cabQ = new THREE.Quaternion(0, 0, 0, 0);
   private clock = new THREE.Timer();
   private fpsAcc = { t: 0, n: 0, fps: 60 };
   private perf = { t: 0, frames: 0, cooldown: 10, strikes: 0 };
@@ -143,9 +145,14 @@ export class Game {
       // --- Moon: one hard sun, no sky light. Shadows are filled only by light
       // bounced off sunlit regolith (albedo ~0.12) — modelled as a hemisphere light
       // that reaches surfaces facing down/sideways — and by faint earthshine.
+      const l0 = terrain.meta.sites?.lm ?? { lat: 26.13224, lon: 3.634 };
+      const m0 = lunarSky(APOLLO15_EVA1, l0.lat, l0.lon).icrfToGame;
+      const icrfToGame0 = new THREE.Matrix4().set(m0[0][0], m0[0][1], m0[0][2], 0, m0[1][0], m0[1][1], m0[1][2], 0, m0[2][0], m0[2][1], m0[2][2], 0, 0, 0, 0, 1);
       this.sky = new Sky(terrain.meta.sun.azimuth, terrain.meta.sun.elevation, quality.stars, terrain.meta.earth, extras.stars, {
         constellations: extras.constellations,
         galaxy: terrain.meta.galaxy,
+        milkyWay: extras.milkyWay,
+        icrfToGame0,
       });
       this.scene.add(this.sky.group);
       this.sunDir = this.sky.sunDir;
@@ -940,7 +947,13 @@ export class Game {
       const a = rover.model.cockpitAnchor;
       a.updateMatrixWorld();
       a.getWorldPosition(this.camera.position);
-      const q = rover.object.quaternion.clone();
+      // Head stabilisation: the view follows the chassis attitude with a short lag
+      // (~80 ms), so suspension buzz over pebbles does not shake the picture, while
+      // real pitch and roll on slopes and bumps come through.
+      const qT = rover.object.quaternion;
+      if (dt <= 0 || this.cabQ.lengthSq() === 0) this.cabQ.copy(qT);
+      else this.cabQ.slerp(qT, 1 - Math.exp(-dt / 0.08));
+      const q = this.cabQ.clone();
       const look = new THREE.Quaternion().setFromEuler(new THREE.Euler(this.look.pitch, Math.PI + this.look.yaw, 0, 'YXZ'));
       this.camera.quaternion.copy(q).multiply(look);
       this.camera.near = Math.min(0.08, 0.1 * this.sizeK);

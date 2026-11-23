@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { InstrumentPanel } from '../InstrumentPanel';
+import { dentGeometry } from './wear';
 
 /** Per-frame state the models animate from (mast, arms, suspension links, solar wings). */
 export interface RoverAnimState {
@@ -115,8 +116,15 @@ export class Kit {
     return m;
   }
 
+  private dents = 0;
+
   box(w: number, h: number, d: number, mat: THREE.Material, x = 0, y = 0, z = 0, parent?: THREE.Object3D): THREE.Mesh {
-    return this.add(new THREE.BoxGeometry(w, h, d), mat, x, y, z, parent);
+    // Larger panels are subdivided and get a few dings (real hardware is never pristine).
+    const big = Math.max(w, h, d) > 0.22;
+    const seg = (v: number) => (big ? Math.min(14, Math.max(1, Math.round(v / 0.04))) : 1);
+    let g: THREE.BufferGeometry = new THREE.BoxGeometry(w, h, d, seg(w), seg(h), seg(d));
+    if (big) g = dentGeometry(g, 977 + this.dents++ * 131, 2 + (this.dents % 3), Math.min(0.006, Math.min(w, h, d) * 0.15), Math.min(0.08, Math.max(w, h, d) * 0.2));
+    return this.add(g, mat, x, y, z, parent);
   }
 
   tube(a: THREE.Vector3, b: THREE.Vector3, r: number, mat: THREE.Material, parent?: THREE.Object3D, seg = 8): THREE.Mesh {

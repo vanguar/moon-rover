@@ -33,6 +33,23 @@ interface DustP {
   p: THREE.Vector3;
   v: THREE.Vector3;
   life: number;
+  age: number;
+  size: number;
+}
+
+/** Soft dust puffs: round, growing and fading (not square sprites). */
+function dustMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    uniforms: { uColor: { value: new THREE.Color(0.42, 0.27, 0.17) }, uScale: { value: 600 } },
+    vertexShader: `attribute float aSize; attribute float aAlpha; varying float vA; uniform float uScale;
+      void main() { vA = aAlpha; vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        gl_PointSize = aSize * uScale / max(-mv.z, 0.1); gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: `uniform vec3 uColor; varying float vA;
+      void main() { vec2 d = gl_PointCoord - 0.5; float r = dot(d, d) * 4.0; if (r > 1.0) discard;
+        gl_FragColor = vec4(uColor, vA * (1.0 - r) * (1.0 - r)); }`,
+    transparent: true,
+    depthWrite: false,
+  });
 }
 
 export class Helicopter {
@@ -90,7 +107,9 @@ export class Helicopter {
     this.object.add(this.camAnchor);
     this.dustGeo = new THREE.BufferGeometry();
     this.dustGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(600 * 3), 3));
-    this.dustMesh = new THREE.Points(this.dustGeo, new THREE.PointsMaterial({ color: 0xb38a64, size: 0.05, transparent: true, opacity: 0.55, depthWrite: false }));
+    this.dustGeo.setAttribute('aSize', new THREE.BufferAttribute(new Float32Array(600), 1));
+    this.dustGeo.setAttribute('aAlpha', new THREE.BufferAttribute(new Float32Array(600), 1));
+    this.dustMesh = new THREE.Points(this.dustGeo, dustMaterial());
     this.dustMesh.frustumCulled = false;
     this.object.updateMatrixWorld();
   }
@@ -285,7 +304,12 @@ export class Helicopter {
 
     // Visual pose.
     this.object.position.copy(this.pos);
-    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(this.tilt.y, this.yaw, -this.tilt.x, 'YXZ'));
+    // The tilt vector is in world axes: express it as pitch about the body's lateral
+    // axis and roll about its longitudinal axis (heading = yaw, nose along +z).
+    const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
+    const tFwd = this.tilt.x * sy + this.tilt.y * cy;
+    const tSide = this.tilt.x * cy - this.tilt.y * sy;
+    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(tFwd, this.yaw, -tSide, 'YXZ'));
     if (this.phase === 'crashed') q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), 1.3));
     this.object.quaternion.copy(q);
     if (this.rotors) {
@@ -307,43 +331,60 @@ export class Helicopter {
     if (this.audio) this.audio.gain.gain.value *= 1 / (1 + (dist / 8) ** 2);
   }
 
-  /** Rotor downwash raises dust near the ground; in thin CO₂ it drifts and settles. */
+  /**
+   * Rotor downwash raises dust near the ground. The jet turns outward along the
+   * surface (a wall jet): dust leaves in a ring, spreading and slowing, then the thin
+   * CO2 wind carries it and the fine fraction (~10 µm) settles slowly.
+   */
   private updateDust(dt: number, ground: number, spin: number): void {
     const h = this.pos.y - ground;
-    if (spin > 0.6 && h < 2.5 && this.dust.length < 600) {
-      const n = Math.floor((2.5 - h) * 60 * dt * spin) + (Math.random() < 0.5 ? 1 : 0);
+    if (spin > 0.6 && h < 3 && this.dust.length < 600) {
+      const rate = (3 - h) * 40 * spin * spin;
+      const n = Math.floor(rate * dt) + (Math.random() < (rate * dt) % 1 ? 1 : 0);
       for (let i = 0; i < n; i++) {
         const a = Math.random() * Math.PI * 2;
-        const r = 0.4 + Math.random() * 1.2;
+        const r = 0.3 + Math.random() * 0.6;
         const x = this.pos.x + Math.cos(a) * r, z = this.pos.z + Math.sin(a) * r;
-        const sp = (2 + Math.random() * 4) * (1 - h / 2.5);
+        const sp = (1.5 + Math.random() * 3) * (1 - h / 3);
         this.dust.push({
-          p: new THREE.Vector3(x, this.terrain.height(x, z) + 0.03, z),
-          v: new THREE.Vector3(Math.cos(a) * sp, 0.3 + Math.random() * 0.8, Math.sin(a) * sp),
-          life: 2 + Math.random() * 2,
+          p: new THREE.Vector3(x, this.terrain.height(x, z) + 0.05, z),
+          v: new THREE.Vector3(Math.cos(a) * sp, 0.15 + Math.random() * 0.5, Math.sin(a) * sp),
+          life: 2.5 + Math.random() * 2.5,
+          age: 0,
+          size: 0.15 + Math.random() * 0.2,
         });
       }
     }
     const g = world().gravity;
     const w = this.wind();
-    const arr = this.dustGeo.getAttribute('position') as THREE.BufferAttribute;
+    const pos = this.dustGeo.getAttribute('position') as THREE.BufferAttribute;
+    const sz = this.dustGeo.getAttribute('aSize') as THREE.BufferAttribute;
+    const al = this.dustGeo.getAttribute('aAlpha') as THREE.BufferAttribute;
     let k = 0;
     for (let i = this.dust.length - 1; i >= 0; i--) {
       const d = this.dust[i];
-      d.life -= dt;
-      // Fine dust (~10 µm) relaxes to the wind within ~0.5 s and settles slowly.
-      d.v.x += (w.x - d.v.x) * Math.min(1, dt * 2);
-      d.v.z += (w.z - d.v.z) * Math.min(1, dt * 2);
-      d.v.y += (-g * 0.08 - d.v.y * 2) * dt;
+      d.age += dt;
+      // Drag toward the wind (Stokes time ~0.6 s for fine dust in Mars air), slow settling.
+      const kd = Math.min(1, dt * 1.6);
+      d.v.x += (w.x - d.v.x) * kd;
+      d.v.z += (w.z - d.v.z) * kd;
+      d.v.y += (-g * 0.05 - d.v.y * 1.5) * dt;
       d.p.addScaledVector(d.v, dt);
       const gy = this.terrain.height(d.p.x, d.p.z);
-      if (d.life <= 0 || d.p.y < gy) {
+      if (d.p.y < gy + 0.02) d.p.y = gy + 0.02;
+      if (d.age >= d.life) {
         this.dust.splice(i, 1);
         continue;
       }
-      arr.setXYZ(k++, d.p.x, d.p.y, d.p.z);
+      const t = d.age / d.life;
+      pos.setXYZ(k, d.p.x, d.p.y, d.p.z);
+      sz.setX(k, d.size * (1 + t * 5)); // the puff spreads as it mixes
+      al.setX(k, 0.22 * Math.min(1, d.age * 4) * (1 - t));
+      k++;
     }
-    arr.needsUpdate = true;
+    pos.needsUpdate = true;
+    sz.needsUpdate = true;
+    al.needsUpdate = true;
     this.dustGeo.setDrawRange(0, k);
   }
 }

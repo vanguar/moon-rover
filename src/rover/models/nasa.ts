@@ -214,8 +214,18 @@ export function buildIngenuity(): { root: THREE.Object3D; rotors: [THREE.Object3
   if (!g) return null;
   const root = g.scene.clone(true);
   prepare(root);
-  const r1 = root.getObjectByName('rotors_01')!, r2 = root.getObjectByName('rotors_02')!;
-  return { root, rotors: [r1, r2] };
+  // The rotor nodes carry their own tilted local frames: spin each one inside a pivot
+  // aligned with the mast (the model's vertical axis through x = z = 0).
+  root.updateMatrixWorld(true);
+  const pivot = (name: string) => {
+    const node = root.getObjectByName(name)!;
+    const p = new THREE.Group();
+    root.add(p);
+    p.updateMatrixWorld(true);
+    p.attach(node);
+    return p;
+  };
+  return { root, rotors: [pivot('rotors_01'), pivot('rotors_02')] };
 }
 
 /** Ingenuity as a garage model (preview: the rotors turn slowly). */

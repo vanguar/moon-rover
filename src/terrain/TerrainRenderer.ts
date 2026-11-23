@@ -258,8 +258,11 @@ vec4 texBicubic(sampler2D t, vec2 uv) {
   vec2 w3 = f3 / 6.0;
   vec2 g0 = w0 + w1, g1 = w2 + w3;
   vec2 h0 = (w1 / g0 - 1.0 + i + 0.5) / sz, h1 = (w3 / g1 + 1.0 + i + 0.5) / sz;
-  return g0.y * (g0.x * texture2D(t, vec2(h0.x, h0.y)) + g1.x * texture2D(t, vec2(h1.x, h0.y)))
-       + g1.y * (g0.x * texture2D(t, vec2(h0.x, h1.y)) + g1.x * texture2D(t, vec2(h1.x, h1.y)));
+  // Mip selection from the smooth uv, not from the tap coordinates: those jump at
+  // texel borders and would pick a blurry mip there (a grid of squares on the ground).
+  vec2 gx = dFdx(uv), gy = dFdy(uv);
+  return g0.y * (g0.x * textureGrad(t, vec2(h0.x, h0.y), gx, gy) + g1.x * textureGrad(t, vec2(h1.x, h0.y), gx, gy))
+       + g1.y * (g0.x * textureGrad(t, vec2(h0.x, h1.y), gx, gy) + g1.x * textureGrad(t, vec2(h1.x, h1.y), gx, gy));
 }
 // Pebbles and gravel (Mars): one rounded clast per cell with a random size,
 // elongation and orientation; returns (height, d/dx, d/dz, coverage).
@@ -317,7 +320,12 @@ float albedoVar = 0.0;
 float freq = 0.3, amp = 0.16;
 for (int o = 0; o < 6; o++) {
   float w = clamp(1.6 - fp * freq * 2.5, 0.0, 1.0);
-  vec3 nd = lnoised(vWorldP.xz * freq + float(o) * 17.13);
+  // Each octave in its own rotated frame: value noise on an axis-aligned lattice
+  // otherwise shows up as squares.
+  float ra = float(o) * 1.13 + 0.4;
+  mat2 rot = mat2(cos(ra), sin(ra), -sin(ra), cos(ra));
+  vec3 nd = lnoised(rot * vWorldP.xz * freq + float(o) * 17.13);
+  nd.yz = nd.yz * rot;
   grad += nd.yz * amp * freq * w;
   albedoVar += (nd.x - 0.5) * w * (o < 3 ? 0.10 : 0.05);
   freq *= 2.6; amp *= 0.33;
@@ -378,7 +386,9 @@ diffuseColor.rgb = mix(diffuseColor.rgb, mix(basalt, diffuseColor.rgb, 0.3), peb
 // Lunar regolith: a nearly neutral, faintly warm grey (reflectance rises slowly toward the red).
 // Calibrated on Apollo 15 Hasselblad frames (docs/REALISM.md): ground/massif brightness ratio ≈ 1 : 1.6.
 vec3 regolith = vec3(1.0, 0.985, 0.965) * 1.5;
-float alb = clamp(ortho * 0.9 + albedoVar * 0.25, 0.02, 1.0);
+// Albedo variation is relative (±~18 %), not added: in dark areas an additive term
+// dominated the photo and drew the noise lattice.
+float alb = clamp(ortho * 0.9 * (1.0 + albedoVar * 1.2), 0.005, 1.0);
 // Soft shoulder above ~1.35× the local mean: the brightest photo patches (fresh ejecta,
 // the LM's blast zone) are only 10–40 % brighter in true albedo than the mature soil.
 float aMean = textureLod(uOrtho, mapUv, 7.0).r * 0.9;
@@ -429,7 +439,8 @@ float baked = texBicubic(uBaked, mapUv).r;
 // fine shadows come from the real-time map.
 float rtW = 1.0 - smoothstep(uRtRange * 0.5, uRtRange * 0.8, length(vWorldP.xz - uRover));
 // The mask already carries the physical penumbra of the solar disc.
-float bakedSun = mix(smoothstep(0.02, 0.98, baked), smoothstep(0.02, 0.6, baked), rtW);
+float bakedSun = smoothstep(0.02, 0.98, baked);
+rtW *= 0.0; // the same mask everywhere: no edge where the real-time shadow map ends
 if (wIn < 1.0) {
   float farS = smoothstep(0.02, 0.98, texture2D(uFarShadow, (vWorldP.xz + uFarHalf) / (2.0 * uFarHalf)).r);
   bakedSun = mix(farS, bakedSun, wIn);
@@ -627,8 +638,9 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`,
       this.group.add(m);
     }
     c.level = job.level;
-    // Only near chunks render into the real-time shadow map; far terrain shadows are baked.
-    c.mesh!.castShadow = job.level <= 1;
+    // Terrain shadows come from the GPU mask (2 m) and the shader's micro-shadows; the
+    // real-time map holds only the rover, rocks and hardware, so its square edge never shows.
+    c.mesh!.castShadow = false;
   }
 
   private dispose(c: Chunk): void {
