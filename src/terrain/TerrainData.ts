@@ -289,7 +289,9 @@ export async function loadTerrainData(base: string, onProgress?: (f: number) => 
     onProgress?.(Math.min(1, got / total));
   }
   const buf = await new Blob(parts as BlobPart[]).arrayBuffer();
+  const t0 = performance.now();
   const png = await decodePng16(buf);
+  console.info(`[load] heightmap decode ${((performance.now() - t0) / 1000).toFixed(2)} s`);
   const heights = png.data;
   let far: FarGrid | null = null;
   if (meta.far) {

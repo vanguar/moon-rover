@@ -17,6 +17,7 @@ import { APOLLO15_EVA1, lunarSky } from './astro/ephemeris';
 import { setSurfacePhotometry } from './render/lunar';
 import { ShadowBaker } from './render/ShadowBaker';
 import { Rover } from './rover/Rover';
+import { buildLunarModule } from './rover/models/nasa';
 import type { RoverSpec } from './rover/specs';
 import { Rocks } from './terrain/Rocks';
 import type { TerrainData } from './terrain/TerrainData';
@@ -345,7 +346,22 @@ export class Game {
   }
 
   private addLunarModule(x: number, z: number): void {
-    // Falcon descent stage (ascent stage left in 1971).
+    // Falcon: the official NASA LM model, real size; a simple stand-in if it failed to load.
+    const nasa = buildLunarModule();
+    if (nasa) {
+      nasa.position.set(x, this.terrain.height(x, z) - 0.1, z);
+      // Falcon landed facing roughly west; the +Z hatch side of the model faces the rille.
+      nasa.rotation.y = -Math.PI / 2;
+      this.scene.add(nasa);
+      this.addFlag(x, z);
+      const R = this.physics.R;
+      this.physics.world.createCollider(R.ColliderDesc.cylinder(1.8, 2.2).setTranslation(x, nasa.position.y + 3.2, z));
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+        this.physics.world.createCollider(R.ColliderDesc.ball(0.5).setTranslation(x + Math.cos(a) * 4.4, this.terrain.height(x + Math.cos(a) * 4.4, z + Math.sin(a) * 4.4) + 0.3, z + Math.sin(a) * 4.4));
+      }
+      return;
+    }
     const g = new THREE.Group();
     const gold = new THREE.MeshStandardMaterial({ color: 0xc89a3a, metalness: 1, roughness: 0.28 });
     const black = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.4, roughness: 0.5 });
@@ -387,6 +403,47 @@ export class Game {
     this.scene.add(g);
     const R = this.physics.R;
     this.physics.world.createCollider(R.ColliderDesc.cylinder(1.3, 2.2).setTranslation(x, g.position.y + 1.6, z));
+  }
+
+  /** The flag planted ~10 m north-east of the LM (aluminium pole, nylon flag on a top bar). */
+  private addFlag(lmX: number, lmZ: number): void {
+    const x = lmX + 8, z = lmZ - 6;
+    const g = new THREE.Group();
+    const pole = new THREE.MeshStandardMaterial({ color: 0xd6d8da, metalness: 0.9, roughness: 0.3 });
+    const c = document.createElement('canvas');
+    c.width = 380;
+    c.height = 200;
+    const k = c.getContext('2d')!;
+    for (let i = 0; i < 13; i++) {
+      k.fillStyle = i % 2 ? '#f3f1ea' : '#b2263a';
+      k.fillRect(0, (i * 200) / 13, 380, 200 / 13 + 1);
+    }
+    k.fillStyle = '#2b3a6b';
+    k.fillRect(0, 0, 152, 108);
+    k.fillStyle = '#f3f1ea';
+    for (let r = 0; r < 9; r++) for (let q = 0; q < (r % 2 ? 5 : 6); q++) k.fillRect(10 + q * 25 + (r % 2 ? 12 : 0), 8 + r * 11, 3, 3);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const flagGeo = new THREE.PlaneGeometry(1.5, 0.9, 16, 4);
+    // Permanent ripples: the flag was never fully unfurled (no air to straighten it).
+    const pa = flagGeo.getAttribute('position') as THREE.BufferAttribute;
+    for (let i = 0; i < pa.count; i++) pa.setZ(i, Math.sin(pa.getX(i) * 6) * 0.04 * (pa.getX(i) + 0.75));
+    flagGeo.computeVertexNormals();
+    const flag = new THREE.Mesh(flagGeo, new THREE.MeshStandardMaterial({ map: tex, side: THREE.DoubleSide, roughness: 0.85 }));
+    flag.position.set(0.76, 2.0, 0);
+    g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 2.55), pole).translateY(1.2));
+    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 1.55), pole);
+    bar.rotation.z = Math.PI / 2;
+    bar.position.set(0.76, 2.45, 0);
+    g.add(bar);
+    g.add(flag);
+    g.traverse((o) => {
+      o.castShadow = true;
+      o.receiveShadow = true;
+    });
+    g.position.set(x, this.terrain.height(x, z) - 0.15, z);
+    g.rotation.y = 0.5;
+    this.scene.add(g);
   }
 
   private bindLook(el: HTMLElement): void {

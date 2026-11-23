@@ -128,6 +128,11 @@ uniform float uFarHalf;
 uniform float uHasFar;
 uniform sampler2D uFarAlb;
 uniform float uHasFarAlb;
+// Loop bounds come from uniforms (always 1 / 5): the D3D shader compiler (ANGLE on
+// Windows) would otherwise unroll the nested loops into a huge program that takes
+// seconds to compile at start-up.
+uniform int uOne;
+uniform int uFive;
 uniform vec3 uSunShadow; // (horizontal direction to the Sun, cot(elevation))
 ${NOISE_GLSL}
 // Cast shadows of sub-metre craters (low Sun: the up-Sun inner wall is in shadow).
@@ -135,8 +140,8 @@ ${NOISE_GLSL}
 float craterShadow(vec2 p, float cell, float seed, vec2 s2, float tanEl) {
   vec2 c = floor(p / cell);
   float lit = 1.0;
-  for (int j = -1; j <= 1; j++) {
-    for (int i = -1; i <= 1; i++) {
+  for (int j = -uOne; j <= uOne; j++) {
+    for (int i = -uOne; i <= uOne; i++) {
       vec2 id = mod(c + vec2(float(i), float(j)), 4096.0);
       if (lhash12(id + seed) > 0.32) continue;
       vec2 ctr = (c + vec2(float(i), float(j)) + vec2(lhash12(id + seed + 17.3), lhash12(id + seed + 41.7))) * cell;
@@ -148,7 +153,7 @@ float craterShadow(vec2 p, float cell, float seed, vec2 s2, float tanEl) {
       float rim = depth * (0.12 + 0.25 * fresh);
       float q0 = length(d) / R, b0 = 1.0 - q0 * q0;
       float h0 = -depth * b0 * b0;
-      for (int k = 1; k <= 5; k++) {
+      for (int k = 1; k <= uFive; k++) {
         float sk = float(k) * 0.4 * R;
         float q = length(d + s2 * sk) / R;
         float b = max(1.0 - q * q, 0.0);
@@ -167,8 +172,8 @@ vec4 clastField(vec2 p, float cell, float seed, float density, vec2 s2, float co
   vec4 acc = vec4(0.0, 0.0, 0.0, 1.0);
   float best = 0.0;
   tone = 1.0;
-  for (int j = -1; j <= 1; j++) {
-    for (int i = -1; i <= 1; i++) {
+  for (int j = -uOne; j <= uOne; j++) {
+    for (int i = -uOne; i <= uOne; i++) {
       vec2 id = mod(c + vec2(float(i), float(j)), 4096.0);
       if (lhash12(id + seed) > density) continue;
       vec2 ctr = (c + vec2(float(i), float(j)) + vec2(lhash12(id + seed + 5.1), lhash12(id + seed + 9.7))) * cell;
@@ -215,8 +220,8 @@ vec4 clastField(vec2 p, float cell, float seed, float density, vec2 s2, float co
 vec3 craterField(vec2 p, float cell, float seed) {
   vec2 c = floor(p / cell);
   vec3 acc = vec3(0.0);
-  for (int j = -1; j <= 1; j++) {
-    for (int i = -1; i <= 1; i++) {
+  for (int j = -uOne; j <= uOne; j++) {
+    for (int i = -uOne; i <= uOne; i++) {
       vec2 id = mod(c + vec2(float(i), float(j)), 4096.0);
       if (lhash12(id + seed) > 0.32) continue;
       vec2 ctr = (c + vec2(float(i), float(j)) + vec2(lhash12(id + seed + 17.3), lhash12(id + seed + 41.7))) * cell;
@@ -260,8 +265,8 @@ vec4 texBicubic(sampler2D t, vec2 uv) {
 vec4 pebbleField(vec2 p, float cell, float seed, float density) {
   vec2 c = floor(p / cell);
   vec4 acc = vec4(0.0);
-  for (int j = -1; j <= 1; j++) {
-    for (int i = -1; i <= 1; i++) {
+  for (int j = -uOne; j <= uOne; j++) {
+    for (int i = -uOne; i <= uOne; i++) {
       vec2 id = mod(c + vec2(float(i), float(j)), 4096.0);
       if (lhash12(id + seed) > density) continue;
       vec2 ctr = (c + vec2(float(i), float(j)) + vec2(lhash12(id + seed + 5.1), lhash12(id + seed + 9.7))) * cell;

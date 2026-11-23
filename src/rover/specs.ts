@@ -3,6 +3,7 @@ import { buildLrvModel, LRV_WHEELS } from './model';
 import type { RoverModel } from './models/kit';
 import { buildLunokhodModel, LUNOKHOD_AXLE, LUNOKHOD_R, LUNOKHOD_WHEELS } from './models/lunokhod';
 import { buildMslModel, MSL_AXLE, MSL_WHEELS } from './models/msl';
+import { buildPerseveranceGlb, PERSE_GLB_AXLE, PERSE_GLB_WHEELS } from './models/nasa';
 import { buildSojournerModel, SOJOURNER_AXLE, SOJOURNER_R, SOJOURNER_WHEELS } from './models/sojourner';
 import { buildYutuModel, YUTU_AXLE, YUTU_R, YUTU_WHEELS } from './models/yutu';
 import { buildZhurongModel, ZHURONG_AXLE, ZHURONG_R, ZHURONG_WHEELS } from './models/zhurong';
@@ -160,12 +161,13 @@ export const ROVERS: Record<RoverId, RoverSpec> = {
   },
   perseverance: {
     id: 'perseverance', world: 'mars', country: 'usa', year: 2021,
-    wheels: MSL_WHEELS, wheelRadius: 0.2625, wheelWidth: 0.4, axleY: MSL_AXLE, travel: 0.12, mass: 1025,
+    // Geometry of the official NASA model (wheel centres measured on it).
+    wheels: PERSE_GLB_WHEELS, wheelRadius: 0.2625, wheelWidth: 0.4, axleY: PERSE_GLB_AXLE, travel: 0.12, mass: 1025,
     body: { half: [0.56, 0.26, 0.93], offset: [0, 0.26, 0] },
     top: { half: [0.4, 0.4, 0.3], offset: [0, 0.9, 0.6] },
     steer: [1, 1, 0, 0, -1, -1], maxSteer: 0.55, maxSpeed: 2.2,
     batteryWh: 2600, idleW: 180, solarW: 110, lightsW: 40,
-    trackWheels: [0, 1, 4, 5], tread: 'grouser', crew: false, build: () => buildMslModel('perseverance'),
+    trackWheels: [0, 1, 4, 5], tread: 'grouser', crew: false, build: () => buildPerseveranceGlb() ?? buildMslModel('perseverance'),
     photo: {
       file: 'perseverance.jpg', credit: 'NASA / JPL-Caltech / MSSS', license: 'Public domain',
       url: 'https://commons.wikimedia.org/wiki/File:Perseverance_Stuns_in_New_Selfie.png', parts: [

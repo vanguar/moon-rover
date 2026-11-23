@@ -7,6 +7,7 @@ import type { WeatherMode } from './fx/MarsWeather';
 import { detectLang, LANGS, setLang, setVariant, t, type Lang } from './i18n';
 import type { Action } from './input/Input';
 import { Physics } from './physics/Physics';
+import { loadNasaModel } from './rover/models/nasa';
 import { roversFor } from './rover/specs';
 import { loadTerrainData } from './terrain/TerrainData';
 import { Garage } from './ui/Garage';
@@ -120,6 +121,9 @@ function loadTexture(url: string, key: 'ortho' | 'other'): Promise<THREE.Texture
   });
 }
 
+const T0 = performance.now();
+const mark = (what: string) => console.info(`[load] ${what} ${((performance.now() - T0) / 1000).toFixed(2)} s`);
+
 async function boot(): Promise<void> {
   loadText.textContent = t('loading');
   const D = `${BASE}${W.dataDir}`;
@@ -139,14 +143,19 @@ async function boot(): Promise<void> {
     loadTexture(dataUrl(`${D}far_shadow.png`), 'other').catch(() => undefined),
     moon ? Promise.resolve(undefined) : loadTexture(dataUrl(`${D}far_albedo.jpg`), 'other').catch(() => undefined),
   ]);
+  mark('data');
+  // Official NASA models (LM at the Apollo site; Perseverance and Ingenuity on Mars).
+  await Promise.all((moon ? (['lm'] as const) : (['perseverance', 'ingenuity'] as const)).map((m) => loadNasaModel(m).catch((e) => console.warn('[models]', m, e))));
   loadText.textContent = t('loadPhysics');
   const physics = await Physics.create(terrain);
+  mark('physics');
 
   const level: QualityLevel = settings.quality === 'auto' ? autoQuality() : settings.quality;
   const list = roversFor(W.id);
   const spec = list.find((r) => r.id === settings.rover[W.id]) ?? list[0];
   const game = new Game($('#app'), terrain, physics, ortho, baked, makeQuality(level), settings.quality === 'auto', { stars, orthoHi, constellations, farShadow, farAlbedo }, spec, settings.weather);
   (window as unknown as { game: Game }).game = game;
+  mark('game');
 
   loadText.textContent = t('loadBuild');
   await new Promise<void>((resolve) => {
@@ -157,8 +166,13 @@ async function boot(): Promise<void> {
     };
     tick();
   });
+  mark('terrain built');
+  // Compile all shaders in parallel (KHR_parallel_shader_compile) without freezing the page.
+  await game.renderer.compileAsync(game.scene, game.camera).catch(() => undefined);
+  mark('shaders');
   // Live scene behind the title screen (sky, weather and the rover's moving parts keep going).
   game.render();
+  mark('first frame');
   game.renderer.setAnimationLoop(() => game.idleFrame());
   setupMenu(game);
 }
