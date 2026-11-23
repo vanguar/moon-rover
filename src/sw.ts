@@ -10,8 +10,12 @@
  *    max-age=600), the cached copy is only the offline fallback;
  *  - code in /assets/ has content-hashed names: cache-first is safe — a fresh
  *    page references new files, which simply are not in the cache yet;
- *  - data, photos and icons: served from the cache at once and revalidated in
- *    the background (stale-while-revalidate);
+ *  - game data and models (data/, models/, draco/) carry a content-hash query
+ *    (?v=…, src/version.ts): cache-first on the exact URL, so a new release always
+ *    downloads changed data and can never mix it with stale files; older versions
+ *    of the same file are deleted from the cache; offline, any cached copy is used;
+ *  - photos and icons: served from the cache at once and revalidated in the
+ *    background (stale-while-revalidate);
  *  - skipWaiting() first, before precaching; files are precached one by one so
  *    one failed request cannot abort the installation of a new version;
  *  - activate deletes every cache that is not ours (including old Workbox ones).
@@ -55,7 +59,13 @@ sw.addEventListener('activate', (e) => {
   e.waitUntil(
     (async () => {
       for (const key of await caches.keys()) {
-        if (key !== CACHE && key !== RUNTIME) await caches.delete(key);
+        if (key !== CACHE && key !== RUNTIME && key !== DATA) await caches.delete(key);
+      }
+      // Unversioned copies of game data from older releases (now served from DATA).
+      const rt = await caches.open(RUNTIME);
+      for (const k of await rt.keys()) {
+        const p = new URL(k.url).pathname.slice(SCOPE.pathname.length);
+        if (p.startsWith('data/') || p.startsWith('models/')) await rt.delete(k);
       }
       await sw.clients.claim();
     })(),
@@ -96,6 +106,28 @@ async function cacheFirst(req: Request): Promise<Response> {
   return res;
 }
 
+const DATA = `${PREFIX}data`;
+
+/** Versioned game data: exact-URL cache-first; one cached version per file. */
+async function versionedData(req: Request): Promise<Response> {
+  const c = await caches.open(DATA);
+  const hit = await c.match(req);
+  if (hit) return hit;
+  try {
+    const res = await fetch(req, { cache: 'no-cache' });
+    if (res.ok && res.type !== 'opaque') {
+      const path = new URL(req.url).pathname;
+      for (const k of await c.keys()) if (new URL(k.url).pathname === path) await c.delete(k);
+      await c.put(req, res.clone());
+    }
+    return res;
+  } catch (err) {
+    const old = await c.match(req, { ignoreSearch: true });
+    if (old) return old;
+    throw err;
+  }
+}
+
 async function staleWhileRevalidate(req: Request, event: FetchEvent): Promise<Response> {
   const hit = await fromCache(req);
   const net = fetch(req, { cache: 'no-cache' }).then((res) => {
@@ -117,6 +149,8 @@ sw.addEventListener('fetch', (e) => {
   const path = url.pathname.slice(SCOPE.pathname.length);
   if (req.mode === 'navigate' || path === '' || path.endsWith('.html') || path.endsWith('.webmanifest')) {
     e.respondWith(networkFirst(req, new URL('index.html', SCOPE).href));
+  } else if (path.startsWith('data/') || path.startsWith('models/') || path.startsWith('draco/')) {
+    e.respondWith(versionedData(req));
   } else if (path.startsWith('assets/')) {
     e.respondWith(cacheFirst(req));
   } else {

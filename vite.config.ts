@@ -1,4 +1,27 @@
+import { createHash } from 'node:crypto';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { defineConfig } from 'vite';
+
+/** Content hash of the game data (public/data, public/models): part of every data URL. */
+function dataVersion(): string {
+  const h = createHash('sha1');
+  const walk = (dir: string) => {
+    for (const name of readdirSync(dir).sort()) {
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) walk(p);
+      else h.update(name).update(readFileSync(p));
+    }
+  };
+  for (const d of ['public/data', 'public/models']) {
+    try {
+      walk(d);
+    } catch {
+      /* missing directory */
+    }
+  }
+  return h.digest('hex').slice(0, 10);
+}
 import { VitePWA } from 'vite-plugin-pwa';
 
 // GitHub Pages serves the site from /<repo>/; override with BASE_PATH for other hosts.
@@ -8,6 +31,7 @@ export default defineConfig({
   base,
   define: {
     // Build stamp shown on the title screen (which version is really running).
+    __DATA_VERSION__: JSON.stringify(dataVersion()),
     __APP_BUILD__: JSON.stringify(new Date().toISOString().slice(0, 16).replace('T', ' ')),
   },
   build: {
@@ -42,9 +66,11 @@ export default defineConfig({
         ],
       },
       injectManifest: {
-        // Moon data and the app shell are precached for offline play; Mars data (~17 MB) is cached on first visit.
-        globPatterns: ['**/*.{js,css,html,png,jpg,json,wasm,bin,webmanifest}'],
-        globIgnores: ['**/data/mars/**', 'sw.js'],
+        // The app shell is precached. Game data and models are cached by the worker on first
+        // use under their versioned URLs (src/version.ts), so a release never mixes old and
+        // new data and phones never download the 25 MB twice.
+        globPatterns: ['**/*.{js,css,html,png,jpg,json,wasm,webmanifest}'],
+        globIgnores: ['**/data/**', '**/models/**', '**/draco/**', 'sw.js'],
         maximumFileSizeToCacheInBytes: 16 * 1024 * 1024, // heightmap.png of the 8 × 8 km site is ~14 MB
       },
     }),

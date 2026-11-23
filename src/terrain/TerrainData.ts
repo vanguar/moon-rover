@@ -1,3 +1,5 @@
+import { dataUrl } from '../version';
+
 /**
  * Height field of the playable area: real LROC NAC DTM (2 m/px) + procedural
  * small craters that are below the DTM resolution. Shared by the main thread
@@ -273,8 +275,8 @@ export class TerrainData {
 
 export async function loadTerrainData(base: string, onProgress?: (f: number) => void): Promise<TerrainData> {
   const { decodePng16 } = await import('./png16');
-  const meta: TerrainMeta = await (await fetch(`${base}terrain.json`)).json();
-  const res = await fetch(`${base}heightmap.png`);
+  const meta: TerrainMeta = await (await fetch(dataUrl(`${base}terrain.json`))).json();
+  const res = await fetch(dataUrl(`${base}heightmap.png`));
   const total = Number(res.headers.get('content-length')) || 4.6e6;
   const reader = res.body!.getReader();
   const parts: Uint8Array[] = [];
@@ -292,7 +294,7 @@ export async function loadTerrainData(base: string, onProgress?: (f: number) => 
   let far: FarGrid | null = null;
   if (meta.far) {
     try {
-      const fr = await fetch(`${base}far_height.png`);
+      const fr = await fetch(dataUrl(`${base}far_height.png`));
       if (fr.ok) {
         const fp = await decodePng16(await fr.arrayBuffer());
         const fs = (meta.far.max - meta.far.min) / 65535;

@@ -10,6 +10,7 @@ import { Physics } from './physics/Physics';
 import { roversFor } from './rover/specs';
 import { loadTerrainData } from './terrain/TerrainData';
 import { Garage } from './ui/Garage';
+import { dataUrl } from './version';
 import { setWorld, type WorldId } from './world';
 
 const BASE = import.meta.env.BASE_URL;
@@ -124,19 +125,19 @@ async function boot(): Promise<void> {
   const D = `${BASE}${W.dataDir}`;
   const moon = W.id === 'moon';
   const bin = (name: string) =>
-    fetch(`${D}${name}`).then((r) => (r.ok ? r.arrayBuffer() : null)).then((b) => (b ? new Float32Array(b) : undefined)).catch(() => undefined);
+    fetch(dataUrl(`${D}${name}`)).then((r) => (r.ok ? r.arrayBuffer() : null)).then((b) => (b ? new Float32Array(b) : undefined)).catch(() => undefined);
   const [terrain, ortho, baked, orthoHi, stars, constellations, farShadow, farAlbedo] = await Promise.all([
     loadTerrainData(D, (f) => {
       progress.height = f;
       showProgress();
     }),
-    loadTexture(`${D}ortho.jpg`, 'ortho'),
-    loadTexture(`${D}shadow.png`, 'other'),
-    loadTexture(`${D}ortho_hi.jpg`, 'other').catch(() => undefined),
+    loadTexture(dataUrl(`${D}ortho.jpg`), 'ortho'),
+    loadTexture(dataUrl(`${D}shadow.png`), 'other'),
+    loadTexture(dataUrl(`${D}ortho_hi.jpg`), 'other').catch(() => undefined),
     moon ? bin('stars.bin') : Promise.resolve(undefined),
     moon ? bin('constellations.bin') : Promise.resolve(undefined),
-    loadTexture(`${D}far_shadow.png`, 'other').catch(() => undefined),
-    moon ? Promise.resolve(undefined) : loadTexture(`${D}far_albedo.jpg`, 'other').catch(() => undefined),
+    loadTexture(dataUrl(`${D}far_shadow.png`), 'other').catch(() => undefined),
+    moon ? Promise.resolve(undefined) : loadTexture(dataUrl(`${D}far_albedo.jpg`), 'other').catch(() => undefined),
   ]);
   loadText.textContent = t('loadPhysics');
   const physics = await Physics.create(terrain);
