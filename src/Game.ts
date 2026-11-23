@@ -376,12 +376,13 @@ export class Game {
     s.camera.top = r;
     s.camera.bottom = -r;
     s.camera.near = 10;
-    s.camera.far = 4000;
+    s.camera.far = 4200;
     // Sun's angular diameter 0.53° gives a penumbra of ~1 cm per metre of
     // occluder distance: keep PCF filtering tight for hard lunar shadows.
-    s.radius = 1;
-    s.bias = -0.0004;
-    s.normalBias = 0.03;
+    // Hard but anti-aliased: the solar disc's penumbra is ~1 cm per metre to the occluder.
+    s.radius = 1.5;
+    s.bias = -0.0002;
+    s.normalBias = 0.015;
     s.camera.updateProjectionMatrix();
     if (s.map) {
       s.map.dispose();

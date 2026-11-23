@@ -110,6 +110,7 @@ export class Tracks {
         uSun: { value: sunDir }, // shared: follows the moving Sun
         uAmb: { value: world().atmosphere ? 0.55 : 0.06 },
         uHalfW: { value: 0.12 },
+        uPitch: { value: 0.29 },
         uFresh: { value: world().atmosphere ? 0.84 : 0.9 },
         uCurvK: { value: 0.5 / world().radius },
       },
@@ -136,6 +137,7 @@ export class Tracks {
         uniform vec3 uSun;
         uniform float uAmb;
         uniform float uHalfW;
+        uniform float uPitch;
         uniform float uFresh;
         varying vec2 vUv;
         varying vec3 vSide;
@@ -147,10 +149,13 @@ export class Tracks {
         float profile(float u, float v) {
           float a = abs(u + (vn(v * 0.9) - 0.5) * 0.12);
           float edge = 1.0 + (vn(v * 2.7 + 7.0) - 0.5) * 0.18; // ragged walls
-          float trough = 1.0 - smoothstep(edge - 0.22, edge + 0.04, a);
+          // The tyre is as wide as the rut: a flat floor to the shoulders, then a short wall.
+          float trough = 1.0 - smoothstep(edge - 0.08, edge + 0.1, a);
           float berm = exp(-pow((a - edge - 0.12) / (0.11 + 0.05 * vn(v * 1.3)), 2.0)) * (0.3 + 0.25 * vn(v * 0.7 + 2.0));
-          float imprint = texture2D(uTread, vec2(clamp(a * 0.5 + 0.5, 0.0, 1.0), v)).g * trough;
-          return -trough - 0.45 * imprint + berm;
+          // Shallow grouser/chevron imprints, crumbling at the edges (dry regolith).
+          float imprint = texture2D(uTread, vec2(clamp(u * 0.5 / ${BERM.toFixed(2)} + 0.5, 0.0, 1.0), v)).g * trough;
+          imprint *= 0.6 + 0.4 * vn(v * 5.0 + u * 3.0);
+          return -trough - 0.22 * imprint + berm;
         }
         void main() {
           float u = (vUv.x * 2.0 - 1.0) * ${BERM.toFixed(2)};
@@ -161,7 +166,7 @@ export class Tracks {
           float e = 0.03;
           // Slopes across (per metre) and along the rut (tread pitch = 4 half-widths).
           float sA = (profile(u + e, v) - profile(u - e, v)) / (2.0 * e) * d / uHalfW;
-          float sF = (profile(u, v + e) - profile(u, v - e)) / (2.0 * e) * d / (uHalfW * 4.0);
+          float sF = (profile(u, v + e) - profile(u, v - e)) / (2.0 * e) * d / uPitch;
           vec3 side = normalize(vSide);
           vec3 fwd = normalize(cross(side, vec3(0.0, 1.0, 0.0)));
           vec3 n = normalize(vec3(0.0, 1.0, 0.0) - side * sA - fwd * sF);
@@ -205,6 +210,7 @@ export class Tracks {
     this.wheels = spec.trackWheels.slice(0, 4);
     this.halfW = (spec.wheelWidth / 2) * BERM;
     this.mat.uniforms.uHalfW.value = spec.wheelWidth / 2;
+    this.mat.uniforms.uPitch.value = this.treadPitch();
     this.segLen = Math.min(SEG_LEN, spec.wheelRadius * 0.6);
     this.last = this.wheels.map(() => null);
     this.lastL = this.wheels.map(() => new THREE.Vector3());
@@ -216,6 +222,13 @@ export class Tracks {
     const old = this.mat.uniforms.uTread.value as THREE.Texture;
     old.dispose();
     this.mat.uniforms.uTread.value = treadTexture(spec.tread);
+  }
+
+  /** Rut length covered by one repeat of the tread texture (two grousers / chevrons). */
+  private treadPitch(): number {
+    const s = this.spec;
+    const n = s.tread === 'chevron' ? 18 : s.tread === 'grouser' ? 24 : 14; // LRV: 18 titanium chevrons
+    return ((2 * Math.PI * s.wheelRadius) / n) * 2;
   }
 
   /** Bekker sinkage of a rigid wheel (n = 1) for load W [N], with local soil variability and slip. */
@@ -248,7 +261,7 @@ export class Tracks {
       const speed = Math.abs(rover.speed) + 1e-3;
       const slip = (Math.abs(rover.wheelRimSpeed[w]) - Math.abs(rover.speed)) / Math.max(speed, Math.abs(rover.wheelRimSpeed[w]), 0.05);
       const d = this.sinkage(rover.wheelLoad[w], c.x, c.z, slip);
-      const pitch = (this.spec.wheelWidth / 2) * 4;
+      const pitch = this.treadPitch();
       if (!prev) {
         this.last[t] = p;
         this.edges(p, fwd, this.lastL[t], this.lastR[t], this.lastSide[t]);

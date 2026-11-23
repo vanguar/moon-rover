@@ -20,22 +20,22 @@ export interface QualitySettings {
 
 const PRESETS: Record<QualityLevel, Omit<QualitySettings, 'level' | 'pixelRatio'> & { maxPixelRatio: number }> = {
   low: {
-    maxPixelRatio: 1, shadowMapSize: 1024, shadowRange: 60, drawDistance: 1600,
+    maxPixelRatio: 1, shadowMapSize: 2048, shadowRange: 30, drawDistance: 1600,
     lodSegments: [128, 64, 32, 16, 8], lodDistances: [70, 260, 600, 1100],
     rockRadius: 110, rockDensity: 0.45, maxRocks: 2500, dustParticles: 1200, stars: 2500,
   },
   medium: {
-    maxPixelRatio: 1.25, shadowMapSize: 2048, shadowRange: 70, drawDistance: 2600,
+    maxPixelRatio: 1.25, shadowMapSize: 2048, shadowRange: 40, drawDistance: 2600,
     lodSegments: [128, 64, 32, 16, 8], lodDistances: [110, 360, 800, 1600],
     rockRadius: 170, rockDensity: 0.7, maxRocks: 6000, dustParticles: 2500, stars: 4500,
   },
   high: {
-    maxPixelRatio: 1.5, shadowMapSize: 2048, shadowRange: 100, drawDistance: 3800,
+    maxPixelRatio: 1.5, shadowMapSize: 4096, shadowRange: 50, drawDistance: 3800,
     lodSegments: [256, 128, 64, 32, 16], lodDistances: [90, 380, 900, 1900],
     rockRadius: 240, rockDensity: 1.0, maxRocks: 12000, dustParticles: 5000, stars: 7000,
   },
   ultra: {
-    maxPixelRatio: 3, shadowMapSize: 4096, shadowRange: 150, drawDistance: 5000,
+    maxPixelRatio: 3, shadowMapSize: 4096, shadowRange: 70, drawDistance: 5000,
     lodSegments: [256, 128, 64, 32, 16], lodDistances: [140, 500, 1200, 2500],
     rockRadius: 320, rockDensity: 1.2, maxRocks: 20000, dustParticles: 8000, stars: 9000,
   },

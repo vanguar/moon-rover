@@ -135,7 +135,8 @@ export class ShadowBaker {
       this.farTex.needsUpdate = true;
     }
     const opts = { type: THREE.UnsignedByteType, format: THREE.RedFormat, depthBuffer: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter } as const;
-    const size = mobile ? 1000 : 2000;
+    // Output mask: 2 m per texel on desktop (4 m on phones); bicubic sampling in the terrain shader.
+    const size = mobile ? 2048 : 4096;
     this.near = new THREE.WebGLRenderTarget(size, size, opts);
     this.near.texture.wrapS = this.near.texture.wrapT = THREE.ClampToEdgeWrapping;
     this.far = f ? new THREE.WebGLRenderTarget(mobile ? 512 : 1024, mobile ? 512 : 1024, opts) : null;

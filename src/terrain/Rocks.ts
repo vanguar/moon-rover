@@ -3,7 +3,7 @@ import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import type { QualitySettings } from '../config';
 import type { Physics } from '../physics/Physics';
-import { makeLunar } from '../render/lunar';
+import { makeLunar, NOISE_GLSL } from '../render/lunar';
 import { hash2, mulberry32, type TerrainData } from './TerrainData';
 
 const CELL = 32;
@@ -177,7 +177,84 @@ export class Rocks {
     const tint: RockTint = mars
       ? { base: new THREE.Color(0.075, 0.064, 0.058), dust: new THREE.Color(0.3, 0.17, 0.1) }
       : { base: new THREE.Color(0.27, 0.26, 0.245), dust: null };
-    const mat = makeLunar(new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }), 'rock');
+    const mat = makeLunar(new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }), 'rock', (shader) => {
+      shader.defines = { ...(shader.defines ?? {}), ROCK_MARS: mars ? 1 : 0 };
+      // Rock surface detail in the rock's own frame (it stays on the rock): chips and
+      // vesicles as a bump map, mineral grains, darker pits, and (Moon) a fine dust
+      // coat on the upper faces; (Mars) the ochre dust is handled by the vertex colour.
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vRockP;\nvarying vec3 vRockN;')
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+float rScale = 1.0;
+#ifdef USE_INSTANCING
+rScale = length(instanceMatrix[0].xyz);
+vRockN = normalize(mat3(modelMatrix) * mat3(instanceMatrix) * objectNormal);
+#else
+vRockN = normalize(mat3(modelMatrix) * objectNormal);
+#endif
+vRockP = position * rScale;`,
+        );
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+varying vec3 vRockP;
+varying vec3 vRockN;
+${NOISE_GLSL}
+// Triplanar value noise in rock-local metres.
+float tri(vec3 p, vec3 w) {
+  return lnoised(p.yz).x * w.x + lnoised(p.xz + 13.1).x * w.y + lnoised(p.xy + 27.7).x * w.z;
+}
+float rockH(vec3 p, vec3 w) {
+  float h = tri(p * 9.0, w) * 0.5 + tri(p * 23.0, w) * 0.3 + tri(p * 61.0, w) * 0.15;
+  // Vesicles / pits: sharp small dents.
+  float pit = smoothstep(0.78, 0.92, tri(p * 38.0 + 5.0, w));
+  return h - pit * 0.6;
+}`,
+        )
+        .replace(
+          '#include <normal_fragment_maps>',
+          `#include <normal_fragment_maps>
+{
+  vec3 wN = abs(normalize(vRockN));
+  vec3 w = wN / (wN.x + wN.y + wN.z);
+  float fw = length(fwidth(vRockP));
+  float detail = 1.0 - smoothstep(0.01, 0.05, fw);
+  float H = rockH(vRockP, w) * 0.004 * detail;
+  // Bump from screen-space derivatives (Mikkelsen).
+  vec3 sx = dFdx(-vViewPosition), sy = dFdy(-vViewPosition);
+  vec3 r1 = cross(sy, normal), r2 = cross(normal, sx);
+  float det = dot(sx, r1);
+  vec2 dH = vec2(dFdx(H), dFdy(H));
+  vec3 grad = sign(det) * (dH.x * r1 + dH.y * r2);
+  normal = normalize(abs(det) * normal - grad);
+}`,
+        )
+        .replace(
+          '#include <color_fragment>',
+          `#include <color_fragment>
+{
+  vec3 wN = abs(normalize(vRockN));
+  vec3 w = wN / (wN.x + wN.y + wN.z);
+  float fw = length(fwidth(vRockP));
+  float detail = 1.0 - smoothstep(0.01, 0.05, fw);
+  // Mineral grains: bright plagioclase laths, dark pyroxene/ilmenite, 1–4 mm.
+  float g1 = lhash12(floor(vRockP.xz * 260.0 + vRockP.y * 31.0));
+  float grains = (g1 > 0.86 ? 0.35 : g1 < 0.12 ? -0.3 : 0.0) * detail;
+  // Breccia clasts and mottling at cm scale; dark pits (vesicles).
+  float mott = (tri(vRockP * 14.0 + 3.0, w) - 0.5) * 0.35;
+  float pit = smoothstep(0.78, 0.92, tri(vRockP * 38.0 + 5.0, w));
+  diffuseColor.rgb *= (1.0 + grains + mott) * (1.0 - 0.55 * pit * detail);
+#if ROCK_MARS == 0
+  // Lunar rocks carry a thin coat of fine soil on their upper faces (zap pits, dust).
+  float up = smoothstep(0.35, 0.9, normalize(vRockN).y) * (0.5 + 0.5 * tri(vRockP * 4.0, w));
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.2, 0.196, 0.19), up * 0.5);
+#endif
+}`,
+        );
+    });
     for (let v = 0; v < VARIANTS; v++) {
       // Cobbles are small on screen: low-poly but smooth, lumpy shapes.
       const m = new THREE.InstancedMesh(rockGeometry(100 + v * 7, 2, tint), mat, this.capacity());

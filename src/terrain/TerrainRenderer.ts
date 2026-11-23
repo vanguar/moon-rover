@@ -201,7 +201,8 @@ vec4 clastField(vec2 p, float cell, float seed, float density, vec2 s2, float co
           acc.xy = (r > 1e-5 ? d / length(d) : vec2(0.0)) * sl + fn.yz * 0.35;
           acc.z = smoothstep(1.0, 0.86, q);
           // Breccias and anorthosite are brighter than the soil, basalts darker; dust-coated tops.
-          tone = (0.65 + 0.9 * lhash12(id + seed + 6.6)) * (0.85 + 0.3 * fn.x);
+          // Basalt (darker) to breccia/anorthosite (brighter) than the soil; mottled grain.
+          tone = (0.55 + 0.75 * lhash12(id + seed + 6.6)) * (0.8 + 0.4 * fn.x) * (0.85 + 0.3 * lhash12(floor(p * 90.0)));
         }
       } else {
         // Shadow of the clast on the soil, swept down-Sun (length H·cot(elevation)).
@@ -378,6 +379,11 @@ diffuseColor.rgb = mix(diffuseColor.rgb, mix(basalt, diffuseColor.rgb, 0.3), peb
 // Calibrated on Apollo 15 Hasselblad frames (docs/REALISM.md): ground/massif brightness ratio ≈ 1 : 1.6.
 vec3 regolith = vec3(1.0, 0.985, 0.965) * 1.5;
 float alb = clamp(ortho * 0.9 + albedoVar * 0.25, 0.02, 1.0);
+// Soft shoulder above ~1.35× the local mean: the brightest photo patches (fresh ejecta,
+// the LM's blast zone) are only 10–40 % brighter in true albedo than the mature soil.
+float aMean = textureLod(uOrtho, mapUv, 7.0).r * 0.9;
+float aRel = alb / max(aMean, 0.01);
+alb = aMean * (aRel < 1.35 ? aRel : 1.35 + (aRel - 1.35) * 0.35);
 diffuseColor.rgb = regolith * alb;
 // Sun geometry for sub-pixel cast shadows.
 vec2 s2 = uSunShadow.xy;
@@ -408,7 +414,7 @@ if (wl2 > 0.0) {
   if (cg.z * wl2 > clastMask) { clastMask = cg.z * wl2 * 0.9; clastTone = tn; }
   microLit = min(microLit, mix(1.0, cg.w, wl2 * 0.9));
 }
-diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * clastTone * 1.3, clastMask);
+diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * clastTone * 1.15, clastMask);
 // Granular speckle of the soil itself (cm-sized aggregates).
 float wsp = clamp(1.5 - fp * 25.0, 0.0, 1.0);
 if (wsp > 0.0) {
@@ -418,11 +424,12 @@ if (wsp > 0.0) {
 }
 #endif
 // Baked far-field cast shadow of the DTM; faded out where the real-time shadow map is valid.
-float baked = texture2D(uBaked, mapUv).r;
+float baked = texBicubic(uBaked, mapUv).r;
 // Near the rover only large-scale DTM shadows come from the bake (soft, 2 m);
 // fine shadows come from the real-time map.
 float rtW = 1.0 - smoothstep(uRtRange * 0.5, uRtRange * 0.8, length(vWorldP.xz - uRover));
-float bakedSun = mix(smoothstep(0.2, 0.8, baked), smoothstep(0.05, 0.5, baked), rtW);
+// The mask already carries the physical penumbra of the solar disc.
+float bakedSun = mix(smoothstep(0.02, 0.98, baked), smoothstep(0.02, 0.6, baked), rtW);
 if (wIn < 1.0) {
   float farS = smoothstep(0.02, 0.98, texture2D(uFarShadow, (vWorldP.xz + uFarHalf) / (2.0 * uFarHalf)).r);
   bakedSun = mix(farS, bakedSun, wIn);
