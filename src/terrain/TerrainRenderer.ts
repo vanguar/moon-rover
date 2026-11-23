@@ -32,6 +32,9 @@ export class TerrainRenderer {
     uSunShadow: { value: THREE.Vector3 };
     uBaked: { value: THREE.Texture };
     uFarShadow: { value: THREE.Texture };
+    uOne: { value: number };
+    /** Mars: share of diffuse light (1 − direct transmission); fades photographed shading. */
+    uDiffuse: { value: number };
   };
   private chunks = new Map<string, Chunk>();
   private workers: Worker[] = [];
@@ -82,6 +85,8 @@ export class TerrainRenderer {
       uSunShadow: { value: new THREE.Vector3(1, 0, 0) },
       uBaked: { value: baked },
       uFarShadow: { value: farShadow ?? baked },
+      uOne: { value: 1 },
+      uDiffuse: { value: 0 },
     };
     const u = this.uniforms;
     this.material = makeLunar(new THREE.MeshLambertMaterial({ color: 0xffffff }), 'terrain', (shader) => {
@@ -101,9 +106,26 @@ export class TerrainRenderer {
         uHasFarAlb: { value: farAlbedo ? 1 : 0 },
         uRover: u.uRover,
         uRtRange: u.uRtRange,
+        uLodD: u.uLodD,
+        uSunShadow: u.uSunShadow,
+        uOne: u.uOne,
+        uFive: { value: 5 },
+        uDiffuse: u.uDiffuse,
       });
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vWorldP;\nvarying vec3 vNormalW;')
+        .replace('#include <common>', '#include <common>\nvarying vec3 vWorldP;\nvarying vec3 vNormalW;\nattribute vec2 aMorph;\nuniform vec4 uLodD;')
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+// Geomorphing: toward the far end of its LOD range a vertex slides onto the next
+// coarser surface, so the switch to the coarser mesh is invisible (no popping).
+{
+  vec2 wxz = (modelMatrix * vec4(transformed, 1.0)).xz;
+  float lodT = aMorph.y < 0.5 ? uLodD.x : aMorph.y < 1.5 ? uLodD.y : aMorph.y < 2.5 ? uLodD.z : uLodD.w;
+  float dCam = length(wxz - cameraPosition.xz);
+  transformed.y += aMorph.x * smoothstep(0.62 * lodT, 0.94 * lodT, dCam);
+}`,
+        )
         .replace(
           '#include <fog_vertex>',
           '#include <fog_vertex>\nvWorldP = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvNormalW = normalize(mat3(modelMatrix) * objectNormal);',
@@ -134,6 +156,7 @@ uniform float uHasFarAlb;
 uniform int uOne;
 uniform int uFive;
 uniform vec3 uSunShadow; // (horizontal direction to the Sun, cot(elevation))
+uniform float uDiffuse;
 ${NOISE_GLSL}
 // Cast shadows of sub-metre craters (low Sun: the up-Sun inner wall is in shadow).
 // Marches the bowl profile toward the Sun; returns 1 lit .. 0 shadowed.
@@ -202,7 +225,7 @@ vec4 clastField(vec2 p, float cell, float seed, float density, vec2 s2, float co
           acc.z = smoothstep(1.0, 0.86, q);
           // Breccias and anorthosite are brighter than the soil, basalts darker; dust-coated tops.
           // Basalt (darker) to breccia/anorthosite (brighter) than the soil; mottled grain.
-          tone = (0.55 + 0.75 * lhash12(id + seed + 6.6)) * (0.8 + 0.4 * fn.x) * (0.85 + 0.3 * lhash12(floor(p * 90.0)));
+          tone = (0.55 + 0.75 * lhash12(id + seed + 6.6)) * (0.8 + 0.4 * fn.x) * (0.85 + 0.3 * lnoised(p * 90.0 + id).x);
         }
       } else {
         // Shadow of the clast on the soil, swept down-Sun (length H·cot(elevation)).
@@ -346,6 +369,9 @@ float wc2 = clamp(1.5 - fp * 5.0, 0.0, 1.0);
 if (wc2 > 0.0) grad += craterField(vWorldP.xz, 0.7, 29.0).yz * wc2;
 #endif
 #if MARS > 0
+// In a dust storm the light is diffuse: shading still left in the HiRISE photograph
+// (ripples below the DTM resolution) must not read as shadows — fade it to the local mean.
+ortho = mix(ortho, textureLod(uOrthoHi, clamp((vWorldP.xz - uHi.xy) / uHi.z, 0.0, 1.0), 4.0).r, uDiffuse * 0.75 * step(0.5, uHi.w));
 // Mars: dark basaltic sand and rock vs. bright ferric dust (HiRISE RED is a panchromatic albedo).
 // The broad noise octaves are muted here: the HiRISE albedo already carries the large-scale pattern.
 float alb = clamp(ortho * 0.9 + albedoVar * 0.08, 0.02, 1.0);
@@ -384,9 +410,10 @@ if (wp2 > 0.0) {
 }
 // Fine granule speckle below the pebbles.
 float wsp = clamp(1.5 - fp * 25.0, 0.0, 1.0);
-if (wsp > 0.0) diffuseColor.rgb *= 1.0 + (lhash12(floor(vWorldP.xz * 55.0)) - 0.5) * 0.22 * wsp;
+// Granule speckle: smooth noise (cell hashes drew visible squares from a low camera).
+if (wsp > 0.0) diffuseColor.rgb *= 1.0 + (lnoised(mat2(0.8, 0.6, -0.6, 0.8) * vWorldP.xz * 55.0).x - 0.5) * 0.22 * wsp;
 // Clasts: dark grey basalt, partly dust-coated (varies clast to clast).
-vec3 basalt = vec3(0.075, 0.062, 0.055) * (0.8 + 0.5 * lhash12(floor(vWorldP.xz * 9.0)));
+vec3 basalt = vec3(0.075, 0.062, 0.055) * (0.8 + 0.5 * lnoised(vWorldP.xz * 9.0 + 3.7).x);
 diffuseColor.rgb = mix(diffuseColor.rgb, mix(basalt, diffuseColor.rgb, 0.3), pebbleMask * 0.8);
 #else
 // Lunar regolith: a nearly neutral, faintly warm grey (reflectance rises slowly toward the red).
@@ -436,7 +463,7 @@ float wsp = clamp(1.5 - fp * 25.0, 0.0, 1.0);
 if (wsp > 0.0) {
   vec3 gn = lnoised(vWorldP.xz * 38.0);
   grad += gn.yz * 0.012 * wsp;
-  diffuseColor.rgb *= 1.0 + (lhash12(floor(vWorldP.xz * 70.0)) - 0.5) * 0.16 * wsp;
+  diffuseColor.rgb *= 1.0 + (lnoised(mat2(0.8, 0.6, -0.6, 0.8) * vWorldP.xz * 70.0).x - 0.5) * 0.16 * wsp;
 }
 #endif
 // Baked far-field cast shadow of the DTM; faded out where the real-time shadow map is valid.

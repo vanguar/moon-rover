@@ -8,7 +8,7 @@ import { detectLang, LANGS, setLang, setVariant, t, type Lang } from './i18n';
 import type { Action } from './input/Input';
 import { Physics } from './physics/Physics';
 import { loadNasaModel } from './rover/models/nasa';
-import { roversFor } from './rover/specs';
+import { ROVERS, roversFor } from './rover/specs';
 import { loadTerrainData } from './terrain/TerrainData';
 import { Garage } from './ui/Garage';
 import { dataUrl } from './version';
@@ -155,7 +155,8 @@ async function boot(): Promise<void> {
   const list = roversFor(W.id);
   const spec = list.find((r) => r.id === settings.rover[W.id]) ?? list[0];
   const game = new Game($('#app'), terrain, physics, ortho, baked, makeQuality(level), settings.quality === 'auto', { stars, orthoHi, constellations, farShadow, farAlbedo, milkyWay }, spec, settings.weather);
-  (window as unknown as { game: Game }).game = game;
+  (window as unknown as { game: Game; ROVERS_: unknown }).game = game;
+  (window as unknown as { ROVERS_: unknown }).ROVERS_ = ROVERS;
   mark('game');
 
   loadText.textContent = t('loadBuild');

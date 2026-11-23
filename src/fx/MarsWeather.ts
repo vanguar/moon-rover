@@ -311,9 +311,14 @@ export class MarsWeather {
           return mix(mix(h2(i), h2(i + vec2(1, 0)), f.x), mix(h2(i + vec2(0, 1)), h2(i + vec2(1, 1)), f.x), f.y); }
         void main() {
           vec2 p = vUv * vec2(3.0, 2.0) + vec2(-uTime * 0.05, -uTime * 0.02) + vSeed * 10.0;
-          float n = n2(p) * 0.5 + n2(p * 2.1) * 0.3 + n2(p * 4.3) * 0.2;
-          float edge = smoothstep(0.0, 0.25, vUv.x) * smoothstep(1.0, 0.75, vUv.x) * smoothstep(1.0, 0.2, vUv.y);
-          float a = smoothstep(0.35, 0.8, n) * edge * uAmount * smoothstep(15.0, 60.0, vD);
+          // Rotated octaves (no grid-aligned blobs).
+          mat2 R = mat2(0.8, 0.6, -0.6, 0.8);
+          float n = n2(p) * 0.5 + n2(R * p * 2.1 + 3.1) * 0.3 + n2(R * R * p * 4.3 + 7.7) * 0.2;
+          // Soft on every side; the base fades out well above where the sheet meets the
+          // ground, so no hard line where it cuts the terrain.
+          float edge = smoothstep(0.0, 0.35, vUv.x) * smoothstep(1.0, 0.65, vUv.x)
+                     * smoothstep(1.0, 0.3, vUv.y) * smoothstep(0.0, 0.35, vUv.y);
+          float a = smoothstep(0.3, 0.85, n) * edge * uAmount * smoothstep(25.0, 90.0, vD);
           if (a < 0.003) discard;
           gl_FragColor = vec4(uColor, a * 0.55);
           #include <tonemapping_fragment>
@@ -488,7 +493,7 @@ export class MarsWeather {
           this.sheetPos[k + 2] = cam.z + (ux * Math.sin(a) + uz * Math.cos(a)) * d;
         }
         const w = 120 + (i % 5) * 60, h = 40 + (i % 3) * 35;
-        const gy = this.terrain.height(this.sheetPos[k], this.sheetPos[k + 2]) - 5;
+        const gy = this.terrain.height(this.sheetPos[k], this.sheetPos[k + 2]) - 2;
         m4.compose(p.set(this.sheetPos[k], gy, this.sheetPos[k + 2]), q, sc.set(w, h, 1));
         this.sheets.setMatrixAt(i, m4);
       }

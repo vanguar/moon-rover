@@ -820,6 +820,7 @@ export class Game {
     const W = world();
     const sunTop = SUN_INTENSITY * W.solarFactor;
     const trans = ms.directTransmission();
+    this.terrainR.uniforms.uDiffuse.value = THREE.MathUtils.clamp(1 - trans / 0.6, 0, 1);
     const reddening = 1 - trans;
     this.sun.intensity = sunTop * trans;
     this.sun.color.setRGB(1, 0.93 - 0.12 * reddening, 0.84 - 0.25 * reddening);

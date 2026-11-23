@@ -67,6 +67,12 @@ HI_OUT = 4096
 # SLDEM2015 tile 00N-30N, 000-045E at 512 px/deg; rows 1470..2499 were downloaded.
 SL_ROW0, SL_NROWS, SL_NCOLS, SL_PPD = 1470, 1030, 23040, 512
 
+# The LM is visible in the orthophoto (LROC NAC, 2009) 19.2 m west and 5.4 m north of
+# its catalogue position: hardware is registered to the photo (so the 3D model sits
+# in its own blast zone), craters keep their catalogue centres.
+HW_REG = (-19.2, -5.4)
+HARDWARE = ("lm", "lrv", "alsep")
+
 # Mission sites (lat, lon). Hardware: LROC NAC (Wagner et al. 2017, "Coordinates of
 # anthropogenic features on the Moon", Icarus 283). Craters: IAU / LTO 41B4 names,
 # centres from the Gazetteer of Planetary Nomenclature (rounded 0.01 deg), refined on
@@ -198,6 +204,18 @@ def synth_albedo(ortho, valid):
     return out
 
 
+def remove_hardware(img, lm_rel, px):
+    """Paint out the LM descent stage and its shadow (LROC imaged the site in 2009):
+    the game places the 3D model there."""
+    import cv2
+    h, w = img.shape
+    cx = int(round((lm_rel[0] + HI_SIZE / 2) / px))
+    cy = int(round((lm_rel[1] + HI_SIZE / 2) / px))
+    mask = np.zeros_like(img, dtype=np.uint8)
+    cv2.circle(mask, (cx, cy), int(round(13 / px)), 255, -1)
+    return cv2.inpaint(img, mask, 9, cv2.INPAINT_TELEA)
+
+
 def read_ortho_hi(transform, centre):
     left, top = transform.c, transform.f
     half = SIZE * PX / 2
@@ -292,8 +310,10 @@ def main():
     img.save(os.path.join(OUT, "ortho.jpg"), quality=93, optimize=True, progressive=True)  # q80 showed 8×8 JPEG blocks on the ground
 
     lm_x, lm_z = to_game(LANDING_LAT, LANDING_LON, lat_c, lon_c)
-    hi_c = (lm_x + HI_FROM_LM[0], lm_z + HI_FROM_LM[1])
+    lm_x, lm_z = lm_x + HW_REG[0], lm_z + HW_REG[1]
+    hi_c = (lm_x - HW_REG[0] + HI_FROM_LM[0], lm_z - HW_REG[1] + HI_FROM_LM[1])
     hi = read_ortho_hi(transform, hi_c)
+    hi = remove_hardware(hi, (lm_x - hi_c[0], lm_z - hi_c[1]), HI_SIZE / HI_OUT)
     Image.fromarray(hi).save(os.path.join(OUT, "ortho_hi.jpg"), quality=93, optimize=True, progressive=True)
 
     sky = LunarSky(GAME_EPOCH, LANDING_LAT, LANDING_LON)
@@ -308,6 +328,8 @@ def main():
     sites = {}
     for k, (la, lo) in SITES.items():
         x, z = to_game(la, lo, lat_c, lon_c)
+        if k in HARDWARE:
+            x, z = x + HW_REG[0], z + HW_REG[1]
         sites[k] = {"lat": la, "lon": lo, "x": round(x, 2), "z": round(z, 2)}
     meta = {
         "source": "LROC NAC DTM NAC_DTM_APOLLO15 + orthophoto M111571816 (NASA/GSFC/Arizona State University); "

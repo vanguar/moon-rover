@@ -191,14 +191,18 @@ export class Helicopter {
     const ground = this.terrain.height(this.pos.x, this.pos.z);
     const manualInput = active && (Math.abs(cmd.fwd) > 0.05 || Math.abs(cmd.lift) > 0.05 || Math.abs(cmd.yaw) > 0.05);
     if (manualInput && this.phase === 'auto') this.status = 'heliManual';
-    if (manualInput && (this.phase === 'auto' || this.phase === 'landed')) {
-      if (this.phase === 'landed' && cmd.lift <= 0.05) {
-        /* on the ground: only climbing starts a flight */
-      } else {
-        if (this.phase === 'landed') this.flights++;
-        this.phase = this.rpm < RPM * 0.95 ? 'spinup' : 'manual';
-        this.route = [];
-      }
+    if (manualInput && this.phase === 'auto' && this.route.length > 1) {
+      this.phase = 'manual';
+      this.route = [];
+    }
+    if (manualInput && this.phase === 'landed' && cmd.lift >= -0.05) {
+      // Any command on the ground: spin up and climb to 3 m, then hover and wait.
+      this.flights++;
+      this.route = [new THREE.Vector3(this.pos.x, 3, this.pos.z)];
+      this.wp = 0;
+      this.hold = 0;
+      this.phase = 'spinup';
+      this.status = 'heliTakeoff';
     }
 
     // Rotor spin-up / spin-down (~10 s, as before each real flight).
@@ -212,6 +216,10 @@ export class Helicopter {
     let yawRate = 0;
     if (this.phase === 'manual') {
       vzT = cmd.lift * 2.5;
+      // Like the flight software: below 2 m the descent is limited to ~0.7 m/s, so
+      // holding "down" always ends in a soft touch-down, never a fall.
+      const aglNow = this.pos.y - ground;
+      if (vzT < 0) vzT = Math.max(vzT, -THREE.MathUtils.lerp(0.7, 2.5, THREE.MathUtils.clamp((aglNow - 2) / 4, 0, 1)));
       const f = new THREE.Vector2(Math.sin(this.yaw), Math.cos(this.yaw));
       vT.copy(f).multiplyScalar(cmd.fwd * VMAX);
       yawRate = -cmd.yaw * 1.2;
@@ -230,17 +238,18 @@ export class Helicopter {
       }
       if (dh < 0.6 && Math.abs(d.y) < 0.4) {
         this.hold += dt;
-        if (this.hold > (this.wp === 0 ? 4 : 1.5)) {
+        if (this.hold > (this.wp === 0 && this.route.length > 1 ? 4 : 1.0)) {
           this.wp++;
           this.hold = 0;
           if (this.wp >= this.route.length) {
+            const wasLoop = this.route.length > 1;
             this.route = [];
             this.phase = 'manual';
-            this.status = 'heliDone';
+            this.status = wasLoop ? 'heliDone' : 'heliHover';
           }
         }
       }
-      if (this.wp === this.route.length - 1) vzT = Math.max(-0.8, Math.min(vzT, -0.5)); // final descent ~0.6 m/s
+      if (this.route.length > 1 && this.wp === this.route.length - 1) vzT = Math.max(-0.8, Math.min(vzT, -0.5)); // final descent ~0.6 m/s
     }
     if (this.phase === 'crashed' || this.phase === 'landed') vzT = 0;
 
@@ -275,7 +284,7 @@ export class Helicopter {
     if (this.pos.y < ground) {
       const vy = this.vel.y;
       this.pos.y = ground;
-      if (vy < -1.6 || this.vel.length() > 3) {
+      if (vy < -3 || this.vel.length() > 5) {
         this.phase = 'crashed';
         this.status = 'heliCrash';
       } else if (this.phase !== 'crashed' && (this.phase !== 'spinup')) {
@@ -310,7 +319,11 @@ export class Helicopter {
     const tFwd = this.tilt.x * sy + this.tilt.y * cy;
     const tSide = this.tilt.x * cy - this.tilt.y * sy;
     const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(tFwd, this.yaw, -tSide, 'YXZ'));
-    if (this.phase === 'crashed') q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), 1.3));
+    if (this.phase === 'crashed') {
+      // Toppled on its side: lying on two legs and the rotor tips, body clear of the ground.
+      q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), 1.1));
+      this.object.position.y += 0.28;
+    }
     this.object.quaternion.copy(q);
     if (this.rotors) {
       // Shown at an alias-free rate; the blur discs carry the true speed.

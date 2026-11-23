@@ -241,8 +241,8 @@ float rockH(vec3 p, vec3 w) {
   float fw = length(fwidth(vRockP));
   float detail = 1.0 - smoothstep(0.01, 0.05, fw);
   // Mineral grains: bright plagioclase laths, dark pyroxene/ilmenite, 1–4 mm.
-  float g1 = lhash12(floor(vRockP.xz * 260.0 + vRockP.y * 31.0));
-  float grains = (g1 > 0.86 ? 0.35 : g1 < 0.12 ? -0.3 : 0.0) * detail;
+  float g1 = tri(vRockP * 260.0, w);
+  float grains = (smoothstep(0.72, 0.85, g1) * 0.35 - smoothstep(0.3, 0.15, g1) * 0.3) * detail;
   // Breccia clasts and mottling at cm scale; dark pits (vesicles).
   float mott = (tri(vRockP * 14.0 + 3.0, w) - 0.5) * 0.35;
   float pit = smoothstep(0.78, 0.92, tri(vRockP * 38.0 + 5.0, w));
