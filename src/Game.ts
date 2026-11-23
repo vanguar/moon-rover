@@ -169,7 +169,7 @@ export class Game {
 
     this.dust = new Dust(terrain, quality.dustParticles);
     this.scene.add(this.dust.mesh);
-    this.tracks = new Tracks(terrain, spec);
+    this.tracks = new Tracks(terrain, spec, this.sunDir);
     this.scene.add(this.tracks.mesh);
     this.hud = new Hud(terrain);
     this.hud.siteLabel = mars ? 'M2020' : 'LM';
@@ -533,7 +533,7 @@ export class Game {
     this.updateCamera(dt);
     this.terrainR.update(this.camera.position, p);
     this.dust.update(dt, rover, this.camera);
-    this.tracks.update(rover);
+    this.tracks.update(rover, dt);
     this.updateEnvironment(dt);
     this.updateSun(p);
     this.updateImpacts(dt);
@@ -615,6 +615,8 @@ export class Game {
     this.hemi.color.copy(skyL).multiplyScalar(Math.PI);
     this.hemi.groundColor.setRGB(0.3, 0.19, 0.12).multiplyScalar(eTot * 0.5);
     this.hemi.intensity = 1;
+    // Ruts: sky light vs. the direct Sun decides how dark the shaded rut wall is.
+    this.tracks.setAmbient(Math.max(0.05, (Math.PI * (skyL.r + skyL.g + skyL.b)) / 3 / Math.max(this.sun.intensity, 0.05)));
     // Aerial perspective: fog colour = sky near the horizon in the view direction.
     const fwd = this.camera.getWorldDirection(new THREE.Vector3());
     fwd.y = 0.04;

@@ -146,6 +146,53 @@ vec3 craterField(vec2 p, float cell, float seed) {
     }
   }
   return acc;
+}
+// Cubic B-spline texture filtering from 4 bilinear taps (Sigg & Hadwiger): smooth
+// magnification without the diamond/stair pattern of plain bilinear filtering.
+vec4 texBicubic(sampler2D t, vec2 uv) {
+  vec2 sz = vec2(textureSize(t, 0));
+  vec2 st = uv * sz - 0.5;
+  vec2 i = floor(st), f = st - i;
+  vec2 f2 = f * f, f3 = f2 * f;
+  vec2 w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0;
+  vec2 w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;
+  vec2 w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0;
+  vec2 w3 = f3 / 6.0;
+  vec2 g0 = w0 + w1, g1 = w2 + w3;
+  vec2 h0 = (w1 / g0 - 1.0 + i + 0.5) / sz, h1 = (w3 / g1 + 1.0 + i + 0.5) / sz;
+  return g0.y * (g0.x * texture2D(t, vec2(h0.x, h0.y)) + g1.x * texture2D(t, vec2(h1.x, h0.y)))
+       + g1.y * (g0.x * texture2D(t, vec2(h0.x, h1.y)) + g1.x * texture2D(t, vec2(h1.x, h1.y)));
+}
+// Pebbles and gravel (Mars): one rounded clast per cell with a random size,
+// elongation and orientation; returns (height, d/dx, d/dz, coverage).
+vec4 pebbleField(vec2 p, float cell, float seed, float density) {
+  vec2 c = floor(p / cell);
+  vec4 acc = vec4(0.0);
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      vec2 id = mod(c + vec2(float(i), float(j)), 4096.0);
+      if (lhash12(id + seed) > density) continue;
+      vec2 ctr = (c + vec2(float(i), float(j)) + vec2(lhash12(id + seed + 5.1), lhash12(id + seed + 9.7))) * cell;
+      float R = cell * (0.12 + 0.3 * pow(lhash12(id + seed + 2.3), 1.8));
+      float a = lhash12(id + seed + 7.7) * 6.2832;
+      vec2 d = p - ctr;
+      vec2 e = vec2(dot(d, vec2(cos(a), sin(a))), dot(d, vec2(-sin(a), cos(a)))) * vec2(1.0, 1.0 + 0.6 * lhash12(id + seed + 1.9));
+      // Irregular outline: the radius wobbles with direction.
+      float ang = atan(e.y, e.x);
+      float r = length(e) * (1.0 + 0.18 * sin(ang * 3.0 + lhash12(id + seed + 3.3) * 6.28) + 0.08 * sin(ang * 5.0 + seed));
+      if (r >= R) continue;
+      float q = r / R;
+      float k = sqrt(max(1.0 - q * q, 1e-3));
+      float h = 0.55 * R * k;
+      if (h > acc.x) {
+        float dh = -0.55 * q / k;
+        acc.x = h;
+        acc.yz = (r > 1e-5 ? d / r : vec2(0.0)) * dh;
+        acc.w = smoothstep(1.0, 0.82, q);
+      }
+    }
+  }
+  return acc;
 }`,
         )
         .replace(
@@ -157,12 +204,12 @@ float wIn = uHasFar > 0.5 ? smoothstep(0.0, 150.0, min(edgeD.x, edgeD.y)) : 1.0;
 // Orthophoto is a high-sun image: its brightness is mostly albedo.
 // Outside the window use its mean (top mip) as a neutral mare albedo.
 float outside = uHasFarAlb > 0.5 ? texture2D(uFarAlb, (vWorldP.xz + uFarHalf) / (2.0 * uFarHalf)).r : textureLod(uOrtho, vec2(0.5), 12.0).r;
-float ortho = mix(outside, texture2D(uOrtho, mapUv).r, wIn);
+float ortho = mix(outside, texBicubic(uOrtho, mapUv).r, wIn);
 if (uHi.w > 0.5) {
   vec2 hu = (vWorldP.xz - uHi.xy) / uHi.z;
   vec2 e = smoothstep(vec2(0.0), vec2(0.03), hu) * smoothstep(vec2(0.0), vec2(0.03), 1.0 - hu);
   float wHi = e.x * e.y;
-  if (wHi > 0.0) ortho = mix(ortho, texture2D(uOrthoHi, clamp(hu, 0.0, 1.0)).r, wHi);
+  if (wHi > 0.0) ortho = mix(ortho, texBicubic(uOrthoHi, clamp(hu, 0.0, 1.0)).r, wHi);
 }
 // Regolith micro-relief: 5 octaves from 4 m down to ~5 cm, faded below pixel size.
 float fp = max(length(fwidth(vWorldP.xz)), 1e-4);
@@ -187,18 +234,47 @@ if (wc2 > 0.0) grad += craterField(vWorldP.xz, 0.7, 29.0).yz * wc2;
 #endif
 #if MARS > 0
 // Mars: dark basaltic sand and rock vs. bright ferric dust (HiRISE RED is a panchromatic albedo).
-float alb = clamp(ortho * 0.9 + albedoVar * 0.3, 0.02, 1.0);
+// The broad noise octaves are muted here: the HiRISE albedo already carries the large-scale pattern.
+float alb = clamp(ortho * 0.9 + albedoVar * 0.08, 0.02, 1.0);
 // (linear) Stretch the contrast around the scene mean; Mars is about twice as bright as the lunar mare.
 alb = clamp(0.13 + (alb - 0.13) * 1.3, 0.015, 1.0);
 vec3 darkSoil = vec3(0.8, 0.6, 0.48), brightDust = vec3(1.3, 0.8, 0.5);
 diffuseColor.rgb = alb * mix(darkSoil, brightDust, smoothstep(0.05, 0.3, alb)) * 1.9;
 // Wind ripples (~12 cm wavelength) across the sand, faded with distance; they lie on the dark sand.
-float wr = clamp(1.5 - fp * 9.0, 0.0, 1.0) * smoothstep(0.2, 0.08, alb);
+// Sand covers the dark (low-albedo) areas; dust and pavement the bright ones.
+float sandy = smoothstep(0.17, 0.09, alb);
+float wr = clamp(1.6 - fp * 9.0, 0.0, 1.0) * sandy;
 if (wr > 0.0) {
+  // Asymmetric wind ripples (gentle stoss, steep lee), wavelength ~12 cm, crests wander.
   vec2 rd = vec2(0.94, 0.34);
-  float ph = dot(vWorldP.xz, rd) * 52.0 + lnoised(vWorldP.xz * 0.9).x * 7.0;
-  grad += rd * cos(ph) * 0.06 * wr;
+  float ph = dot(vWorldP.xz, rd) * 52.0 + lnoised(vWorldP.xz * 0.9).x * 7.0 + lnoised(vWorldP.xz * 3.1 + 4.0).x * 2.0;
+  // Skewed sine: h = sin(φ + 0.55·sin φ) — gentle stoss, steeper lee, continuous slope (no steps).
+  float sk = ph + 0.55 * sin(ph);
+  float slopeR = cos(sk) * (1.0 + 0.55 * cos(ph));
+  grad += rd * slopeR * 0.06 * wr;
+  diffuseColor.rgb *= 1.0 + 0.04 * wr * sin(sk);
 }
+// Pebbles and gravel lying on the surface (Jezero floor): two size classes, more on the
+// pavement than in the sand; dark basalt with a thin dust coat on top.
+float wp1 = clamp(1.6 - fp * 3.5, 0.0, 1.0);
+float wp2 = clamp(1.6 - fp * 10.0, 0.0, 1.0);
+float pebbleMask = 0.0;
+if (wp1 > 0.0) {
+  vec4 pb = pebbleField(vWorldP.xz, 0.3, 61.0, mix(0.16, 0.06, sandy));
+  grad -= pb.yz * wp1 * 0.8;
+  pebbleMask = max(pebbleMask, pb.w * wp1);
+}
+if (wp2 > 0.0) {
+  vec4 pg = pebbleField(vWorldP.xz, 0.09, 83.0, mix(0.4, 0.18, sandy));
+  grad -= pg.yz * wp2 * 0.6;
+  pebbleMask = max(pebbleMask, pg.w * wp2 * 0.85);
+}
+// Fine granule speckle below the pebbles.
+float wsp = clamp(1.5 - fp * 25.0, 0.0, 1.0);
+if (wsp > 0.0) diffuseColor.rgb *= 1.0 + (lhash12(floor(vWorldP.xz * 55.0)) - 0.5) * 0.22 * wsp;
+// Clasts: dark grey basalt, partly dust-coated (varies clast to clast).
+vec3 basalt = vec3(0.075, 0.062, 0.055) * (0.8 + 0.5 * lhash12(floor(vWorldP.xz * 9.0)));
+diffuseColor.rgb = mix(diffuseColor.rgb, mix(basalt, diffuseColor.rgb, 0.3), pebbleMask * 0.8);
 #else
 vec3 regolith = vec3(1.0, 0.965, 0.92);
 diffuseColor.rgb = regolith * clamp(ortho * 0.9 + albedoVar * 0.25, 0.02, 1.0);
@@ -218,7 +294,7 @@ if (wIn < 1.0) {
           '#include <normal_fragment_begin>',
           `#include <normal_fragment_begin>
 // Far away the mesh is coarse: take the surface orientation from the 2 m DTM normal map.
-vec2 sl = (texture2D(uDtmN, mapUv).rg - 0.5) * 5.0;
+vec2 sl = (texBicubic(uDtmN, mapUv).rg - 0.5) * 5.0;
 // Mirrored tiles outside the DTM window flip the slope sign.
 sl *= 1.0 - 2.0 * mod(floor(mapUv), 2.0);
 vec3 nDtm = normalize(vec3(-sl.x, 1.0, -sl.y));

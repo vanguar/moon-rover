@@ -137,8 +137,9 @@ function colorize(g: THREE.BufferGeometry, n: (x: number, y: number, z: number) 
     const m = 0.85 + 0.2 * fbm(n, v, 6, 2) + 0.08 * n(v.x * 23, v.y * 23, v.z * 23);
     c.copy(tint.base).multiplyScalar(m);
     if (tint.dust) {
-      const up = THREE.MathUtils.smoothstep(nr.getY(i), 0.25, 0.85) * (0.55 + 0.35 * fbm(n, v, 3, 2));
-      c.lerp(tint.dust, THREE.MathUtils.clamp(up, 0, 0.85));
+      // Dust settles only on the flatter upper faces, patchily; sides stay dark basalt.
+      const up = THREE.MathUtils.smoothstep(nr.getY(i), 0.55, 0.95) * (0.35 + 0.55 * (fbm(n, v, 3, 2) * 0.5 + 0.5));
+      c.lerp(tint.dust, THREE.MathUtils.clamp(up, 0, 0.6));
     }
     col.set([c.r, c.g, c.b], i * 3);
   }
@@ -174,7 +175,7 @@ export class Rocks {
     // Moon: grey basalt/breccia; Mars: dark grey-brown basalt under a coat of ferric dust.
     const mars = terrain.meta.body === 'mars';
     const tint: RockTint = mars
-      ? { base: new THREE.Color(0.13, 0.095, 0.075), dust: new THREE.Color(0.42, 0.2, 0.1) }
+      ? { base: new THREE.Color(0.075, 0.064, 0.058), dust: new THREE.Color(0.3, 0.17, 0.1) }
       : { base: new THREE.Color(0.27, 0.26, 0.245), dust: null };
     const mat = makeLunar(new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }), 'rock');
     for (let v = 0; v < VARIANTS; v++) {

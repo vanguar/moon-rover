@@ -15,6 +15,8 @@ interface Devil {
   age: number;
   seed: number;
   spin: number;
+  /** Downwind bend of the column top (wind shear). */
+  bend: number;
   /** Envelope 0..1 (forms, lives, decays). */
   s: number;
 }
@@ -81,6 +83,7 @@ export class MarsWeather {
       uAmb: { value: new THREE.Color(0.4, 0.28, 0.2) },
       uFogColor: { value: new THREE.Color() },
       uFogDensity: { value: 0 },
+      uWindDir: { value: new THREE.Vector2(1, 0) },
     };
     const devilMat = new THREE.ShaderMaterial({
       uniforms: this.devilU,
@@ -109,6 +112,7 @@ export class MarsWeather {
         uniform vec3 uAmb;
         uniform vec3 uFogColor;
         uniform float uFogDensity;
+        uniform vec2 uWindDir;
         float h3(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
         float n3(vec3 x) {
           vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
@@ -122,7 +126,8 @@ export class MarsWeather {
           return mix(0.42, 0.75, smoothstep(0.0, 1.0, y)) + 0.25 * skirt;
         }
         void main() {
-          float R = vS.x, H = vS.y;
+          // Bounding cylinder radius R = 3.6 × the column radius rc (room for the bent, swaying axis).
+          float R = vS.x, H = vS.y, rc = R / 3.6;
           vec3 ro = cameraPosition, rd = normalize(vW - cameraPosition);
           // Ray vs. vertical cylinder (centre vC, radius R).
           vec2 oc = ro.xz - vC.xz;
@@ -147,19 +152,25 @@ export class MarsWeather {
           for (int i = 0; i < N; i++) {
             float t = t0 + (float(i) + 0.5 + 0.5 * h3(vW * 7.0 + float(i))) * dt;
             vec3 p = ro + rd * t;
-            vec2 q = p.xz - vC.xz;
             float y = (p.y - vC.y) / H;
-            float r = length(q) / R;
+            // Axis: wind shear bends the top downwind (stronger wind aloft); the column also
+            // meanders and sways, more so with height.
+            vec2 axis = uWindDir * vP.w * y * y * rc * 2.6
+              + vec2(sin(uTime * 0.37 + y * 4.0 + vP.y * 20.0), cos(uTime * 0.29 + y * 3.1 + vP.y * 11.0)) * rc * 0.55 * y;
+            vec2 q = p.xz - vC.xz - axis;
+            float r = length(q) / rc;
             float rr = radiusAt(y);
             float wall = exp(-pow((r - rr * 0.8) / (rr * 0.35 + 0.05), 2.0));
             float core = smoothstep(rr * 1.05, rr * 0.2, r) * 0.35;
             float ang = atan(q.y, q.x);
-            float sw = ang * vP.z - y * 9.0 + uTime * 1.6 * vP.z;
-            float nz = n3(vec3(cos(sw) * 2.0, sin(sw) * 2.0, y * 14.0 - uTime * 1.2) + vP.y * 13.0);
-            nz = 0.35 + 0.65 * nz * n3(vec3(q * 0.15, y * 6.0 - uTime * 0.6) + vP.y);
+            // Rotating, rising spiral streaks: dust is carried round (~2.5 rad/s) and lifted.
+            float sw = ang - vP.z * (uTime * 2.5 - y * 7.0);
+            float nz = n3(vec3(cos(sw) * 2.6, sin(sw) * 2.6, y * 13.0 - uTime * 1.9) + vP.y * 13.0);
+            float nz2 = n3(vec3(cos(sw * 2.0) * 4.0, sin(sw * 2.0) * 4.0, y * 31.0 - uTime * 3.1) + vP.y * 7.0);
+            nz = 0.25 + 0.75 * nz * (0.55 + 0.45 * nz2) * n3(vec3(q / rc * 0.8, y * 5.0 - uTime * 0.7) + vP.y);
             float dens = (wall + core) * nz * (1.0 - smoothstep(0.55, 1.0, y)) * (0.35 + 0.65 * (1.0 - y));
             dens += (1.0 - smoothstep(0.0, 0.05, y)) * smoothstep(1.0, 0.3, r) * 0.6 * nz;
-            dens *= vP.x * 0.9 / max(R * 0.08, 0.6);
+            dens *= vP.x * 1.3 / max(rc * 0.3, 0.6);
             float lit = 0.55 + 0.45 * dot(normalize(q + 1e-4), sunH);
             // Martian dust: single-scattering albedo ~0.9 in red, lower in blue.
             vec3 c = (uLight * phase * lit + uAmb) * vec3(0.92, 0.66, 0.46);
@@ -363,7 +374,7 @@ export class MarsWeather {
     // Wind: light afternoon breeze, gusting; storm winds 15–25 m/s.
     this.gustPh += dt;
     const gust = 1 + 0.35 * Math.sin(this.gustPh * 0.31) + 0.2 * Math.sin(this.gustPh * 1.13 + 2) + 0.12 * Math.sin(this.gustPh * 2.9);
-    const speed = (3.5 + s * 17) * gust;
+    const speed = (5 + s * 16) * gust;
     const dir = Math.atan2(this.baseWind.z, this.baseWind.x) + Math.sin(this.gustPh * 0.05) * 0.3;
     this.wind.set(Math.cos(dir) * speed, 0, Math.sin(dir) * speed);
   }
@@ -377,7 +388,7 @@ export class MarsWeather {
       x: cx + Math.cos(a) * d, z: cz + Math.sin(a) * d,
       vx: this.wind.x * drift, vz: this.wind.z * drift,
       r, h: r * (8 + this.rnd() * 14), life: 50 + this.rnd() * 160, age: 0,
-      seed: this.rnd(), spin: this.rnd() < 0.5 ? 1 : -1, s: 0,
+      seed: this.rnd(), spin: this.rnd() < 0.5 ? 1 : -1, s: 0, bend: 0.25 + this.rnd() * 0.6,
     });
   }
 
@@ -402,8 +413,9 @@ export class MarsWeather {
       const fadeIn = Math.min(1, d.age / 12), fadeOut = Math.min(1, (d.life - d.age) / 15);
       d.s = Math.max(0, Math.min(fadeIn, fadeOut)) * (devilsOn ? 1 : Math.max(0, 1 - this.storm * 3));
       // Drift with the ambient wind plus a slow meander.
-      d.vx += (this.wind.x * 0.9 - d.vx) * dt * 0.1 + Math.sin(this.time * 0.3 + d.seed * 20) * dt * 0.4;
-      d.vz += (this.wind.z * 0.9 - d.vz) * dt * 0.1 + Math.cos(this.time * 0.27 + d.seed * 30) * dt * 0.4;
+      // Devils travel with the ambient wind (Perseverance saw 3–10 m/s) and wander off course.
+      d.vx += (this.wind.x * 1.3 - d.vx) * dt * 0.15 + Math.sin(this.time * 0.21 + d.seed * 20) * dt * 1.2;
+      d.vz += (this.wind.z * 1.3 - d.vz) * dt * 0.15 + Math.cos(this.time * 0.17 + d.seed * 30) * dt * 1.2;
       d.x += d.vx * dt;
       d.z += d.vz * dt;
       const dist = Math.hypot(d.x - rover.x, d.z - rover.z);
@@ -415,9 +427,9 @@ export class MarsWeather {
       this.devilNear = Math.max(this.devilNear, d.s * THREE.MathUtils.smoothstep(d.r * 3, d.r * 0.6, dist));
       if (n < MAX_DEVILS) {
         const y = this.terrain.height(d.x, d.z) - 1;
-        m4.compose(p.set(d.x, y, d.z), q, sc.set(d.r, d.h, d.r));
+        m4.compose(p.set(d.x, y, d.z), q, sc.set(d.r * 3.6, d.h, d.r * 3.6));
         this.devilMesh.setMatrixAt(n, m4);
-        this.devilParams.setXYZW(n, d.s, d.seed, d.spin, 0);
+        this.devilParams.setXYZW(n, d.s, d.seed, d.spin, d.bend);
         n++;
       }
     }
@@ -425,6 +437,8 @@ export class MarsWeather {
     this.devilMesh.instanceMatrix.needsUpdate = true;
     this.devilParams.needsUpdate = true;
     this.devilU.uTime.value = this.time;
+    const wl = Math.hypot(this.wind.x, this.wind.z) || 1;
+    (this.devilU.uWindDir.value as THREE.Vector2).set(this.wind.x / wl, this.wind.z / wl);
 
     // Blowing dust around the camera: wraps in an 80 m box.
     const cam = camera.position;

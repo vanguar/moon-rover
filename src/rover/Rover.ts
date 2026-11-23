@@ -62,6 +62,8 @@ export class Rover {
   readonly wheelSlip: number[];
   readonly wheelRimSpeed: number[];
   readonly wheelImpact: number[];
+  /** Normal load on each wheel, N (from the suspension). */
+  readonly wheelLoad: number[];
   readonly wheelWorld: THREE.Vector3[];
   readonly wheelNormal: THREE.Vector3[];
   /** Wheel centres in the chassis frame (drives the suspension-link visuals). */
@@ -113,6 +115,7 @@ export class Rover {
     this.wheelSlip = new Array(n).fill(0);
     this.wheelRimSpeed = new Array(n).fill(0);
     this.wheelImpact = new Array(n).fill(0);
+    this.wheelLoad = new Array(n).fill(0);
     this.lastSusp = new Array(n).fill(0);
     this.wheelWorld = Array.from({ length: n }, () => new THREE.Vector3());
     this.wheelNormal = Array.from({ length: n }, () => new THREE.Vector3(0, 1, 0));
@@ -405,6 +408,7 @@ export class Rover {
       const comp = local.y - this.spec.axleY; // + = compressed
       this.wheelImpact[i] = dt > 0 ? (comp - this.lastSusp[i]) / dt : 0;
       this.lastSusp[i] = comp;
+      this.wheelLoad[i] = contact ? Math.max(0, this.springK * (comp + 0.4 * this.spec.travel)) : 0;
 
       // Tyre flattening from the wheel load; motion blur of chevrons beyond ~1/3 pitch per frame (LRV wire-mesh tyre).
       if (wv.uniforms && wv.blurMat && wv.chevronMat) {
