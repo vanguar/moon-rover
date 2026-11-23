@@ -424,7 +424,7 @@ float baked = texture2D(uBaked, mapUv).r;
 float rtW = 1.0 - smoothstep(uRtRange * 0.5, uRtRange * 0.8, length(vWorldP.xz - uRover));
 float bakedSun = mix(smoothstep(0.2, 0.8, baked), smoothstep(0.05, 0.5, baked), rtW);
 if (wIn < 1.0) {
-  float farS = smoothstep(0.2, 0.8, texture2D(uFarShadow, (vWorldP.xz + uFarHalf) / (2.0 * uFarHalf)).r);
+  float farS = smoothstep(0.02, 0.98, texture2D(uFarShadow, (vWorldP.xz + uFarHalf) / (2.0 * uFarHalf)).r);
   bakedSun = mix(farS, bakedSun, wIn);
 }
 bakedSun *= microLit;`,

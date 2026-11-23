@@ -12,7 +12,7 @@ export class FarTerrain {
   readonly mesh: THREE.Mesh;
   private uniforms = { uNearR: { value: 3000 }, uFarShadow: { value: null as THREE.Texture | null } };
 
-  constructor(terrain: TerrainData, farShadow: THREE.Texture | undefined, mobile: boolean, farAlbedo?: THREE.Texture) {
+  constructor(terrain: TerrainData, farShadow: THREE.Texture | undefined, mobile: boolean, farAlbedo?: THREE.Texture, ortho?: THREE.Texture) {
     const f = terrain.far!;
     const stride = mobile ? 2 : 1;
     const n = Math.floor((f.n - 1) / stride) + 1;
@@ -69,20 +69,26 @@ export class FarTerrain {
     }
     const mat = makeLunar(new THREE.MeshLambertMaterial({ color: mars ? 0xffffff : 0x989690, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4 }), 'far', (shader) => {
       u.uFarShadow.value = u.uFarShadow.value ?? farShadow ?? null;
-      Object.assign(shader.uniforms, { uFarShadow: u.uFarShadow, uNearR: u.uNearR, uHasShadow: { value: farShadow ? 1 : 0 }, uFarAlb: { value: farAlbedo ?? null } });
-      shader.defines = { ...(shader.defines ?? {}), FAR_ALB: farAlbedo ? 1 : 0 };
+      Object.assign(shader.uniforms, {
+        uFarShadow: u.uFarShadow, uNearR: u.uNearR, uHasShadow: { value: farShadow ? 1 : 0 }, uFarAlb: { value: farAlbedo ?? null },
+        uOrtho: { value: ortho ?? null }, uMapSize: { value: new THREE.Vector2(terrain.meta.sizeX, terrain.meta.sizeZ) },
+      });
+      shader.defines = { ...(shader.defines ?? {}), FAR_ALB: farAlbedo ? 1 : 0, ORTHO: ortho && !mars ? 1 : 0 };
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vWP;\nvarying vec2 vFarUv;')
+        .replace('#include <common>', '#include <common>\nvarying vec3 vWP;\nvarying vec2 vFarUv;\nvarying vec3 vWN;')
         .replace('#include <uv_vertex>', '#include <uv_vertex>\nvFarUv = uv;')
-        .replace('#include <fog_vertex>', '#include <fog_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+        .replace('#include <fog_vertex>', '#include <fog_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvWN = normalize(mat3(modelMatrix) * objectNormal);');
       shader.fragmentShader = shader.fragmentShader
         .replace('#include <common>', `#include <common>
 varying vec3 vWP;
 varying vec2 vFarUv;
+varying vec3 vWN;
 uniform sampler2D uFarShadow;
 uniform sampler2D uFarAlb;
 uniform float uHasShadow;
 uniform float uNearR;
+uniform sampler2D uOrtho;
+uniform vec2 uMapSize;
 ${NOISE_GLSL}`)
         .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
 if (length(vWP.xz - cameraPosition.xz) < uNearR) discard;`)
@@ -95,11 +101,28 @@ float alt = smoothstep(150.0, 1800.0, vWP.y);
 float fa = texture2D(uFarAlb, vFarUv).r * (0.92 + 0.12 * nB.x);
 fa = clamp(0.13 + (fa - 0.13) * 1.3, 0.015, 1.0);
 diffuseColor.rgb = fa * mix(vec3(0.8, 0.6, 0.48), vec3(1.3, 0.8, 0.5), smoothstep(0.05, 0.3, fa)) * 1.9;
+#elif ORTHO > 0
+// Same albedo as the near terrain (orthophoto inside the 8 km window, its mean outside),
+// so the hand-over from the near chunks is seamless. Highland massifs (anorthositic)
+// are ~1.5–1.8× brighter than the mare, the steepest slopes a little brighter still
+// (fresher, less mature regolith).
+vec2 mUv = (vWP.xz + 0.5 * uMapSize) / uMapSize;
+vec2 eD = 0.5 * uMapSize - abs(vWP.xz);
+float wWin = smoothstep(0.0, 150.0, min(eD.x, eD.y));
+float oMean = textureLod(uOrtho, vec2(0.5), 12.0).r;
+// Outside the window: continue the albedo at the window's edge (blurred), relaxing over
+// ~3 km toward highland regolith, ~1.6× the mare (Hadley Delta, Mons Hadley).
+float outD = max(-min(eD.x, eD.y), 0.0);
+float edgeA = textureLod(uOrtho, clamp(mUv, 0.005, 0.995), 6.0).r;
+float farA = mix(edgeA, oMean * 1.6, smoothstep(0.0, 3000.0, outD));
+float oA = mix(farA, texture2D(uOrtho, clamp(mUv, 0.0, 1.0)).r, wWin);
+float var = (0.9 + 0.14 * nA.x + 0.1 * nB.x) * (1.0 + 0.12 * (1.0 - smoothstep(0.75, 0.95, normalize(vWN).y)));
+diffuseColor.rgb = vec3(1.0, 0.985, 0.965) * 1.5 * oA * mix(var, 1.0, wWin);
 #else
 diffuseColor.rgb *= (0.8 + 0.12 * alt) * (0.88 + 0.18 * nA.x + 0.1 * nB.x);
 #endif
 vec2 fgrad = nA.yz * 0.0016 * 120.0 + nB.yz * 0.011 * 25.0;
-float farSun = uHasShadow > 0.5 ? smoothstep(0.2, 0.8, texture2D(uFarShadow, vFarUv).r) : 1.0;`)
+float farSun = uHasShadow > 0.5 ? smoothstep(0.02, 0.98, texture2D(uFarShadow, vFarUv).r) : 1.0;`)
         .replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
 vec3 nWf = normalize(inverseTransformDirection(normal, viewMatrix) - vec3(fgrad.x, 0.0, fgrad.y) * 0.25);
 normal = normalize((viewMatrix * vec4(nWf, 0.0)).xyz);`)

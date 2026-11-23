@@ -33,8 +33,20 @@ uniform float uMaxH;       // highest point of the whole field
 uniform float uFarPass;    // 1: output covers the far grid, 0: the window
 uniform float uHasFar;
 
-float nearH(vec2 p) { return texture2D(uNear, (p + uNearHalf) / (2.0 * uNearHalf)).r; }
-float farH(vec2 p) { return texture2D(uFar, (p + uFarHalf) / (2.0 * uFarHalf)).r; }
+// Height textures are float (no hardware filtering on many GPUs): interpolate by hand.
+// Nearest samples turn a slope into 112 m steps that shadow each other in blocks.
+float bilinear(sampler2D t, vec2 uv) {
+  vec2 sz = vec2(textureSize(t, 0));
+  vec2 st = uv * sz - 0.5;
+  vec2 i = floor(st), f = st - i;
+  ivec2 m = ivec2(sz) - 1;
+  ivec2 a = clamp(ivec2(i), ivec2(0), m), b = clamp(ivec2(i) + 1, ivec2(0), m);
+  float h00 = texelFetch(t, a, 0).r, h10 = texelFetch(t, ivec2(b.x, a.y), 0).r;
+  float h01 = texelFetch(t, ivec2(a.x, b.y), 0).r, h11 = texelFetch(t, b, 0).r;
+  return mix(mix(h00, h10, f.x), mix(h01, h11, f.x), f.y);
+}
+float nearH(vec2 p) { return bilinear(uNear, (p + uNearHalf) / (2.0 * uNearHalf)); }
+float farH(vec2 p) { return bilinear(uFar, (p + uFarHalf) / (2.0 * uFarHalf)); }
 bool inNear(vec2 p) { return all(lessThan(abs(p), uNearHalf)); }
 float heightAt(vec2 p) {
   if (uFarPass < 0.5 && inNear(p)) return nearH(p);
@@ -43,7 +55,12 @@ float heightAt(vec2 p) {
 
 void main() {
   vec2 p0 = uFarPass > 0.5 ? (vUv * 2.0 - 1.0) * uFarHalf : (vUv * 2.0 - 1.0) * uNearHalf;
-  float h0 = heightAt(p0) + 0.6;
+  // Start above the surface by a slope-aware margin (the grid cannot resolve the
+  // exact surface between samples): no self-shadowing stripes on slopes.
+  float texel = uFarPass > 0.5 ? uFarTexel : uNearTexel.x;
+  vec2 sunH = normalize(uSun.xz + 1e-6);
+  float slope = (heightAt(p0 + sunH * texel) - heightAt(p0 - sunH * texel)) / (2.0 * texel);
+  float h0 = heightAt(p0) + 0.6 + max(slope, 0.0) * texel * 0.5 + texel * 0.01;
   float sinEl = uSun.y;
   if (sinEl <= -0.0046) { gl_FragColor = vec4(0.0); return; }
   vec2 dir = normalize(uSun.xz + 1e-6);
@@ -121,7 +138,7 @@ export class ShadowBaker {
     const size = mobile ? 1000 : 2000;
     this.near = new THREE.WebGLRenderTarget(size, size, opts);
     this.near.texture.wrapS = this.near.texture.wrapT = THREE.ClampToEdgeWrapping;
-    this.far = f ? new THREE.WebGLRenderTarget(512, 512, opts) : null;
+    this.far = f ? new THREE.WebGLRenderTarget(mobile ? 512 : 1024, mobile ? 512 : 1024, opts) : null;
     // A render target's own scissor flag overrides the renderer's.
     this.near.scissorTest = true;
     if (this.far) this.far.scissorTest = true;

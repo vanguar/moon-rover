@@ -185,7 +185,7 @@ export class Game {
       this.envSun.copy(this.sunDir);
     }
     if (terrain.far) {
-      this.far = new FarTerrain(terrain, extras.farShadow, isMobile, extras.farAlbedo);
+      this.far = new FarTerrain(terrain, extras.farShadow, isMobile, extras.farAlbedo, ortho);
       if (this.baker?.far) this.far.setShadowMap(this.baker.far.texture);
       this.far.setNearRadius(quality.drawDistance - 250);
       this.scene.add(this.far.mesh);
