@@ -87,6 +87,10 @@ export class Game {
   readonly finds: Discoveries | null = null;
   mission!: Missions;
   private heliMaxDist = 0;
+  /** Rover autopilot: drives to the mission target; hands over when stuck. */
+  autoDrive = false;
+  private ap = { stuck: 0, avoid: 0, avoidDir: 1, input: { throttle: 0, brake: 0, steer: 0, handbrake: false } };
+  onAutoDrive?: (on: boolean) => void;
   /** Opens the mission briefing (set by the UI). */
   onBriefing?: () => void;
   private dust: Dust;
@@ -609,6 +613,8 @@ export class Game {
       this.zoom(-1);
     } else if (a === 'zoomout') {
       this.zoom(1);
+    } else if (a === 'drive') {
+      this.setAutoDrive(!this.autoDrive);
     } else if (a === 'mission') {
       this.onBriefing?.();
     } else if (a === 'photo') {
@@ -725,7 +731,8 @@ export class Game {
     this.input.update(dt);
     const rover = this.rover;
     const parkedInput = { throttle: 0, brake: 0, steer: 0, handbrake: true };
-    const alpha = this.physics.step(dt, (h) => rover.step(h, this.heli ? parkedInput : this.input.drive));
+    const drive = this.heli ? parkedInput : this.autoDrive ? this.autopilot(dt) : this.input.drive;
+    const alpha = this.physics.step(dt, (h) => rover.step(h, drive));
     if (this.heli) {
       const d = this.input.drive;
       this.heli.attachAudio(this.audio.output);
@@ -797,6 +804,75 @@ export class Game {
       parked: idle || r.parkBrake || this.still > 3,
       wheelLocal: r.wheelLocal, preview: false,
     });
+  }
+
+  setAutoDrive(on: boolean, reason?: string): void {
+    if (on && (this.heli || !this.mission.target())) {
+      this.toast(t(this.heli ? 'apNoHeli' : 'apNoTarget'));
+      on = false;
+    }
+    if (on === this.autoDrive && !reason) return;
+    this.autoDrive = on;
+    this.ap.stuck = 0;
+    this.ap.avoid = 0;
+    if (on) this.rover.parkBrake = false;
+    this.audio.click(on ? 1700 : 900);
+    this.toast(t(reason ?? (on ? 'apOn' : 'apOff')));
+    this.onAutoDrive?.(on);
+  }
+
+  /**
+   * Autopilot (like the rovers' AutoNav, much simplified): steer toward the mission
+   * target, keep speed down on slopes and rough ground, turn away from slopes over 18°
+   * ahead; any driver input takes over; no progress for 4 s means stuck - the driver
+   * has to get it out (reverse, turn, rock it free).
+   */
+  private autopilot(dt: number): { throttle: number; brake: number; steer: number; handbrake: boolean } {
+    const ap = this.ap, out = ap.input, r = this.rover, d = this.input.drive;
+    if (d.throttle > 0.05 || d.brake > 0.05 || Math.abs(d.steer) > 0.15 || d.handbrake) {
+      this.setAutoDrive(false, 'apManual');
+      return d;
+    }
+    const tg = this.mission.target();
+    const p = r.object.position;
+    if (!tg || Math.hypot(tg.x - p.x, tg.z - p.z) < 6) {
+      this.setAutoDrive(false, tg ? 'apArrived' : 'apNoTarget');
+      return d;
+    }
+    const f = r.forwardVector(new THREE.Vector3());
+    const hdg = Math.atan2(f.x, f.z);
+    let want = Math.atan2(tg.x - p.x, tg.z - p.z);
+    // Look ahead 6 m: too steep (or a cliff) -> veer off to one side for a while.
+    const n = [0, 1, 0];
+    this.terrain.normal(p.x + Math.sin(hdg) * 6, p.z + Math.cos(hdg) * 6, n, 1.5);
+    const slopeAhead = (Math.acos(Math.min(1, n[1])) * 180) / Math.PI;
+    if (slopeAhead > 18 && ap.avoid <= 0) {
+      ap.avoid = 3;
+      ap.avoidDir = Math.random() < 0.5 ? -1 : 1;
+    }
+    if (ap.avoid > 0) {
+      ap.avoid -= dt;
+      want = hdg + ap.avoidDir * 0.9;
+    }
+    let err = want - hdg;
+    err = Math.atan2(Math.sin(err), Math.cos(err));
+    // Steering sign: positive input steers right (clockwise seen from above = -yaw here).
+    out.steer = THREE.MathUtils.clamp(-err * 1.6, -1, 1);
+    const { roll, pitch } = r.attitude();
+    const rough = Math.max(Math.abs(roll), Math.abs(pitch));
+    const turnSlow = 1 - 0.5 * Math.min(1, Math.abs(err) / 1.2);
+    out.throttle = THREE.MathUtils.clamp(0.75 * turnSlow * (1 - THREE.MathUtils.smoothstep(rough, 8, 22) * 0.6), 0.2, 0.75);
+    out.brake = 0;
+    out.handbrake = false;
+    // Stuck: commanding drive but hardly moving.
+    if (Math.abs(r.speed) < 0.12) ap.stuck += dt;
+    else ap.stuck = Math.max(0, ap.stuck - dt * 2);
+    if (ap.stuck > 4) {
+      this.setAutoDrive(false, 'apStuck');
+      if (this.sky) this.radio.say('stuck', { repeat: true });
+      return d;
+    }
+    return out;
   }
 
   setMission(kind: 'moon' | 'mars' | 'heli'): void {

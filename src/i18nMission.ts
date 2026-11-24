@@ -2,6 +2,16 @@
 type Dict = Record<string, string>;
 
 const ru: Dict = {
+  bDrive: 'Автопилот ровера (G)',
+  kDrive: 'Автопилот: ровер сам едет к цели задания',
+  apOn: 'Автопилот включён: еду к цели. Любая педаль или руль — ручное управление',
+  apOff: 'Автопилот выключен',
+  apManual: 'Ручное управление',
+  apArrived: 'Автопилот: цель достигнута',
+  apStuck: 'Автопилот: застрял! Нужна помощь — сдайте назад и объедьте препятствие',
+  apNoTarget: 'Автопилот: у текущего задания нет точки на карте',
+  apNoHeli: 'Автопилот ровера недоступен в режиме вертолёта (у вертолёта — T)',
+  radio_stuck: 'Видим, что ровер остановился. Попробуйте сдать назад и объехать.',
   authorLabel: 'Автор и разработчик',
   m_drive_touch: 'Проверка систем: проедьте 25 м (педаль «ГАЗ», джойстик — руль)',
   r_drive_touch: 'Проверка ходовой: проедьте 30 м (педаль «ГАЗ», джойстик — руль)',
@@ -83,6 +93,16 @@ const ru: Dict = {
 };
 
 const uk: Dict = {
+  bDrive: 'Автопілот ровера (G)',
+  kDrive: 'Автопілот: ровер сам їде до цілі завдання',
+  apOn: 'Автопілот увімкнено: їду до цілі. Будь-яка педаль чи кермо — ручне керування',
+  apOff: 'Автопілот вимкнено',
+  apManual: 'Ручне керування',
+  apArrived: 'Автопілот: ціль досягнуто',
+  apStuck: 'Автопілот: застряг! Потрібна допомога — здайте назад і об’їдьте перешкоду',
+  apNoTarget: 'Автопілот: поточне завдання не має точки на мапі',
+  apNoHeli: 'Автопілот ровера недоступний у режимі гелікоптера (у гелікоптера — T)',
+  radio_stuck: 'Бачимо, що ровер зупинився. Спробуйте здати назад і об’їхати.',
   authorLabel: 'Автор і розробник',
   m_drive_touch: 'Перевірка систем: проїдьте 25 м (педаль «ГАЗ», джойстик — кермо)',
   r_drive_touch: 'Перевірка ходової: проїдьте 30 м (педаль «ГАЗ», джойстик — кермо)',
@@ -161,6 +181,16 @@ const uk: Dict = {
 };
 
 const en: Dict = {
+  bDrive: 'Rover autopilot (G)',
+  kDrive: 'Autopilot: the rover drives itself to the task target',
+  apOn: 'Autopilot on: driving to the target. Any pedal or steering takes over',
+  apOff: 'Autopilot off',
+  apManual: 'Manual control',
+  apArrived: 'Autopilot: target reached',
+  apStuck: 'Autopilot: stuck! Needs help — back up and drive around the obstacle',
+  apNoTarget: 'Autopilot: the current task has no point on the map',
+  apNoHeli: 'Rover autopilot is not available in helicopter mode (helicopter: T)',
+  radio_stuck: 'We see the rover has stopped. Try backing up and going around.',
   authorLabel: 'Author and developer',
   m_drive_touch: 'Systems check: drive 25 m (GAS pedal, joystick — steering)',
   r_drive_touch: 'Drive system check: drive 30 m (GAS pedal, joystick — steering)',

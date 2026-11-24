@@ -415,3 +415,5 @@ body.mobile #hud { right: calc(138px + var(--safe-r)); }
 .author b { color: #e8edf2; font-weight: 600; }
 .author a { color: #9fd3ff; text-decoration: none; }
 .author a:hover { text-decoration: underline; }
+
+body.heli #tb-drive { display: none; }

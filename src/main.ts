@@ -303,7 +303,9 @@ function setupMenu(game: Game): void {
       game.input.emit(b.dataset.act as Action);
     });
   });
+  game.onAutoDrive = () => requestAnimationFrame(syncToolbar);
   function syncToolbar(): void {
+    $('#tb-drive').classList.toggle('on', game.autoDrive);
     $('#tb-lights').classList.toggle('on', game.rover.headlights);
     $('#tb-park').classList.toggle('on', game.rover.parkBrake);
     $('#tb-const').classList.toggle('on', game.constellationsOn);
