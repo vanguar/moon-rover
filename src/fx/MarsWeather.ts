@@ -50,6 +50,8 @@ export class MarsWeather {
   readonly wind = new THREE.Vector3(3, 0, -1.5);
   /** 0..1 storm strength (drives particles, sound). */
   storm = 0;
+  /** Dust settled on the ground by storms, 0..1 (fades slowly in calm wind). */
+  settled = 0;
   /** Nearest dust devil influence at the rover 0..1. */
   devilNear = 0;
   /** Distance to the nearest active devil, m. */
@@ -396,6 +398,8 @@ export class MarsWeather {
     if (this.mode === 'storm' && this.stormPhase === 'calm') { this.stormPhase = 'rising'; this.stormT = 0; }
     const s = this.storm * this.storm * (3 - 2 * this.storm);
     this.tau = 0.62 + s * 3.6;
+    // Fallout builds over a few minutes of storm, then is slowly blown off again.
+    this.settled = Math.min(1, Math.max(0, this.settled + (s > 0.4 ? s * dt / 90 : -dt / 600)));
     // Wind: light afternoon breeze, gusting; storm winds 15–25 m/s.
     this.gustPh += dt;
     const gust = 1 + 0.35 * Math.sin(this.gustPh * 0.31) + 0.2 * Math.sin(this.gustPh * 1.13 + 2) + 0.12 * Math.sin(this.gustPh * 2.9);

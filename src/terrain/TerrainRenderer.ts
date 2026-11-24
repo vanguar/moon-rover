@@ -36,6 +36,9 @@ export class TerrainRenderer {
     uOne: { value: number };
     /** Mars: share of diffuse light (1 − direct transmission); fades photographed shading. */
     uDiffuse: { value: number };
+    /** Mars weather on the ground: (storm 0..1, settled dust 0..1, time s) and the wind (m/s, x/z). */
+    uStorm: { value: THREE.Vector3 };
+    uWind: { value: THREE.Vector2 };
     uDet: { value: THREE.Texture | null };
     uDetRect: { value: THREE.Vector4 };
     uDetSlots: { value: Float32Array };
@@ -93,6 +96,8 @@ export class TerrainRenderer {
       uFarShadow: { value: farShadow ?? baked },
       uOne: { value: 1 },
       uDiffuse: { value: 0 },
+      uStorm: { value: new THREE.Vector3() },
+      uWind: { value: new THREE.Vector2() },
       uDet: { value: null },
       uDetRect: { value: new THREE.Vector4(0, 0, 256, 0) },
       uDetSlots: { value: new Float32Array(9).fill(-1) },
@@ -136,6 +141,8 @@ export class TerrainRenderer {
         uOne: u.uOne,
         uFive: { value: 5 },
         uDiffuse: u.uDiffuse,
+        uStorm: u.uStorm,
+        uWind: u.uWind,
         uDet: u.uDet,
         uDetRect: u.uDetRect,
         uDetSlots: u.uDetSlots,
@@ -189,6 +196,8 @@ uniform int uOne;
 uniform int uFive;
 uniform vec3 uSunShadow; // (horizontal direction to the Sun, cot(elevation))
 uniform float uDiffuse;
+uniform vec3 uStorm;
+uniform vec2 uWind;
 uniform sampler2D uDet;
 uniform vec4 uDetRect;
 uniform float uDetSlots[9];
@@ -534,7 +543,28 @@ dustF = mix(dustF * 0.5, 1.0, matW);
 vec3 darkSoil = vec3(0.66, 0.6, 0.57), brightDust = vec3(1.3, 0.84, 0.54);
 // Brightness difference kept smaller than in the orbital photo; the hue carries it.
 float albM = mix(aLocal, alb, 0.75);
+// Dust settled by storms: a bright ochre veil, thickest in sheltered and flat spots,
+// that stays after the storm until the wind (or a devil) sweeps it off.
+float veil = uStorm.y * (0.55 + 0.45 * lnoised(vWorldP.xz * 0.07 + 5.0).x);
+dustF = mix(dustF, 1.0, veil * 0.8);
+albM = mix(albM, max(albM, aLocal * 1.12), veil);
 diffuseColor.rgb = albM * mix(darkSoil, brightDust, dustF) * 1.9 * paveShade;
+// Storm: sand in saltation streams across the ground along the wind - bright and
+// dark streaks a few metres long that race downwind and flicker; ripple crests smoke.
+if (uStorm.x > 0.02) {
+  float ws = length(uWind) + 1e-3;
+  vec2 wd = uWind / ws;
+  vec2 wn = vec2(-wd.y, wd.x);
+  float along = dot(vWorldP.xz, wd), across = dot(vWorldP.xz, wn);
+  float t = uStorm.z;
+  float s1 = lnoised(vec2(along * 0.35 - t * ws * 0.35, across * 3.0)).x;
+  float s2 = lnoised(vec2(along * 0.9 - t * ws * 0.9 + 17.0, across * 7.0)).x;
+  float streak = (s1 - 0.5) * 0.65 + (s2 - 0.5) * 0.35;
+  float wS = uStorm.x * clamp(1.4 - fp * 0.6, 0.0, 1.0);
+  diffuseColor.rgb *= 1.0 + streak * 0.55 * wS;
+  // Moving sand blurs the fine ripple relief.
+  grad *= 1.0 - 0.6 * uStorm.x;
+}
 #if PAVE > 0
 // Exposed rock: dust-coated grey-brown basalt, less saturated than the sand around it.
 float rockW = matW * smoothstep(1.0, 1.08, paveShade) * clamp(1.4 - fp * 3.0, 0.0, 1.0);
