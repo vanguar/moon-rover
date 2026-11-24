@@ -38,6 +38,8 @@ export class DevilDust {
   private vel = new Float32Array(N * 3);
   private life = new Float32Array(N);
   private kind = new Float32Array(N); // 0 sand, 1 dust
+  /** Base size per particle, m: a power-law spread from fine silt haze to sand grains. */
+  private base = new Float32Array(N);
   private owner = new Int32Array(N).fill(-1);
   private geo: THREE.BufferGeometry;
   private aSize: Float32Array;
@@ -61,7 +63,7 @@ export class DevilDust {
       uniforms: { uColor: { value: new THREE.Color(0.55, 0.38, 0.25) }, uScale: { value: 700 } },
       vertexShader: `attribute float aSize; attribute float aAlpha; varying float vA; uniform float uScale;
         void main() { vA = aAlpha; vec4 mv = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = clamp(aSize * uScale / max(-mv.z, 0.1), 1.0, 90.0); gl_Position = projectionMatrix * mv; }`,
+          gl_PointSize = clamp(aSize * uScale / max(-mv.z, 0.1), 0.75, 90.0); gl_Position = projectionMatrix * mv; }`,
       fragmentShader: `uniform vec3 uColor; varying float vA;
         void main() { vec2 d = gl_PointCoord - 0.5; float r = dot(d, d) * 4.0; if (r > 1.0) discard;
           gl_FragColor = vec4(uColor, vA * (1.0 - r));
@@ -157,7 +159,12 @@ export class DevilDust {
         this.vel[i * 3 + 1] = 0.5 + Math.random();
         this.vel[i * 3 + 2] = d.vz;
         this.life[i] = 3 + Math.random() * 5;
-        this.kind[i] = Math.random() < 0.35 ? 0 : 1;
+        // Size spectrum (Martian dust ~1-3 µm haze up to 0.1-1 mm saltating sand): drawn
+        // as clumps from a power law - many tiny specks, fewer puffs, rare big haze blobs.
+        const sand = Math.random() < 0.35;
+        this.kind[i] = sand ? 0 : 1;
+        const u = Math.random();
+        this.base[i] = sand ? 0.008 + 0.05 * u * u * u : 0.015 + 0.75 * Math.pow(u, 3.2);
         this.owner[i] = di;
       }
       this.carry.set(di, c);
@@ -197,7 +204,8 @@ export class DevilDust {
       const kk = Math.min(1, dt / tau);
       this.vel[k] += (ax - this.vel[k]) * kk;
       this.vel[k + 2] += (az - this.vel[k + 2]) * kk;
-      const settle = this.kind[i] > 0.5 ? 0.15 : 1.6;
+      // Settling speed grows with size (Stokes): fine silt hangs, coarse sand falls.
+      const settle = this.kind[i] > 0.5 ? 0.02 + this.base[i] * 0.6 : 1.6;
       this.vel[k + 1] += ((w - settle) - this.vel[k + 1]) * kk * 0.6 - (this.kind[i] > 0.5 ? 0 : g * 0.25 * dt);
       this.pos[k] += this.vel[k] * dt;
       this.pos[k + 1] += this.vel[k + 1] * dt;
@@ -208,8 +216,10 @@ export class DevilDust {
       }
       const age = 1 - this.life[i] / 8;
       const fine = this.kind[i] > 0.5;
-      this.aSize[n] = (fine ? 0.25 + hAbove * 0.06 : 0.06) * (1 + age);
-      this.aAlpha[n] = (fine ? 0.11 : 0.5) * Math.min(1, this.life[i]) * d.s;
+      const bs = this.base[i];
+      // Big haze puffs spread and fade; small specks stay sharp and denser.
+      this.aSize[n] = bs * (1 + age * (fine ? 1.5 : 0.2) + (fine ? hAbove * 0.02 : 0));
+      this.aAlpha[n] = (fine ? 0.04 + 0.3 * Math.exp(-bs * 12) : 0.55) * Math.min(1, this.life[i]) * d.s;
       this.pos[n * 3] = this.pos[k];
       this.pos[n * 3 + 1] = this.pos[k + 1];
       this.pos[n * 3 + 2] = this.pos[k + 2];
@@ -218,6 +228,7 @@ export class DevilDust {
         this.vel.copyWithin(n * 3, k, k + 3);
         this.life[n] = this.life[i];
         this.kind[n] = this.kind[i];
+        this.base[n] = this.base[i];
         this.owner[n] = this.owner[i];
         this.life[i] = 0;
       }

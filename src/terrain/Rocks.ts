@@ -63,7 +63,7 @@ export type RockTint = { base: THREE.Color; dust: THREE.Color | null };
  * real blocks are after impact fragmentation and erosion. Smooth normals; the
  * vertex colour carries mineral mottling and (on Mars) dust settled on top.
  */
-function rockGeometry(seed: number, detail: number, tint: RockTint): THREE.BufferGeometry {
+function rockGeometry(seed: number, detail: number, tint: RockTint, blocky = false): THREE.BufferGeometry {
   let g: THREE.BufferGeometry = new THREE.IcosahedronGeometry(1, detail);
   g.deleteAttribute('uv');
   g.deleteAttribute('normal');
@@ -71,11 +71,14 @@ function rockGeometry(seed: number, detail: number, tint: RockTint): THREE.Buffe
   const p = g.getAttribute('position') as THREE.BufferAttribute;
   const rnd = mulberry32(seed);
   const n = noise3(seed);
-  const angular = rnd(); // 0 = weathered and rounded, 1 = fresh and blocky
-  const nCuts = 2 + Math.floor(rnd() * 3);
+  // 0 = weathered and rounded, 1 = fresh and blocky. Lunar blocks ("blocky"): many
+  // fracture planes like an impact fragment, but every edge softened - micrometeorite
+  // bombardment rounds lunar rocks over millions of years (cf. the station 6 boulder).
+  const angular = blocky ? 0.75 + 0.25 * rnd() : rnd();
+  const nCuts = blocky ? 5 + Math.floor(rnd() * 4) : 2 + Math.floor(rnd() * 3);
   const cuts = Array.from({ length: nCuts }, () => ({
     d: new THREE.Vector3(rnd() - 0.5, rnd() - 0.6, rnd() - 0.5).normalize(),
-    c: 0.62 + rnd() * 0.25,
+    c: blocky ? 0.55 + rnd() * 0.25 : 0.62 + rnd() * 0.25,
   }));
   const elong = new THREE.Vector3(0.85 + rnd() * 0.45, 0.6 + rnd() * 0.35, 0.8 + rnd() * 0.4);
   const v = new THREE.Vector3();
@@ -333,9 +336,11 @@ float rockH(vec3 p, vec3 w) {
       // Cobbles are small on screen: low-poly but smooth, lumpy shapes.
       // Mars: half the variants are rounded (delta cobbles, wind-worn), half angular
       // fresh fragments; the Moon gets angular ones too (impact fragments).
-      // Moon: impact fragments are almost all angular (5 of 6 shapes).
-      const angular = this.mars ? v >= VARIANTS / 2 : v >= 1;
-      const geo = angular ? angularGeometry(100 + v * 7, tint) : rockGeometry(100 + v * 7, 2, tint);
+      // Moon: impact fragments - all blocky, with edges rounded by micrometeorites.
+      const angular = this.mars ? v >= VARIANTS / 2 : true;
+      const geo = angular
+        ? this.mars ? angularGeometry(100 + v * 7, tint) : rockGeometry(100 + v * 7, 3, tint, true)
+        : rockGeometry(100 + v * 7, 2, tint);
       const m = new THREE.InstancedMesh(geo, mat, this.capacity());
       this.prep(m);
       this.meshes.push(m);
@@ -347,9 +352,10 @@ float rockH(vec3 p, vec3 w) {
     }
     for (let v = 0; v < BOULDER_VARIANTS; v++) {
       // Two rounded and two angular boulder shapes.
-      const ang = this.mars ? v >= BOULDER_VARIANTS / 2 : v >= 1;
-      this.boulderNear.push(new THREE.InstancedMesh(ang ? angularGeometry(311 + v * 13, tint) : rockGeometry(311 + v * 13, 4, tint), mat, 600));
-      const far = new THREE.InstancedMesh(ang ? angularGeometry(311 + v * 13, tint) : rockGeometry(311 + v * 13, 2, tint), mat, 2000);
+      const ang = this.mars ? v >= BOULDER_VARIANTS / 2 : true;
+      const near = ang ? (this.mars ? angularGeometry(311 + v * 13, tint) : rockGeometry(311 + v * 13, 5, tint, true)) : rockGeometry(311 + v * 13, 4, tint);
+      this.boulderNear.push(new THREE.InstancedMesh(near, mat, 600));
+      const far = new THREE.InstancedMesh(ang ? (this.mars ? angularGeometry(311 + v * 13, tint) : rockGeometry(311 + v * 13, 2, tint, true)) : rockGeometry(311 + v * 13, 2, tint), mat, 2000);
       // Far boulders are not drawn into the real-time shadow map (instanced meshes are not culled).
       this.boulderFar.push(far);
     }

@@ -257,11 +257,14 @@ export class MarsWeather {
           vec3 dir = v / spd;
           vec3 toCam = normalize(cameraPosition - c);
           vec3 side = normalize(cross(dir, toCam) + 1e-4);
-          float len = 0.02 + spd * 0.035;
-          float wid = 0.006 + aSeed * 0.012;
+          // Size spectrum: most grains are tiny specks, a few coarse sand grains and
+          // larger dust clumps (power law in the seed).
+          float sz = 0.002 + 0.03 * pow(aSeed, 4.0);
+          float len = sz + spd * (0.01 + 0.03 * aSeed);
+          float wid = sz;
           vec3 p = c + dir * position.x * len + side * position.y * wid;
           float d = length(cameraPosition - c);
-          vA = uAmount * smoothstep(40.0, 10.0, d) * smoothstep(0.3, 1.5, d) * (0.4 + 0.6 * aSeed);
+          vA = uAmount * smoothstep(40.0, 10.0, d) * smoothstep(0.3, 1.5, d) * (0.5 + 0.5 * aSeed);
           vPh = 0.7 * pow(max(dot(-toCam, uSun), 0.0), 4.0);
           gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
         }`,
