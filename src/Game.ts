@@ -20,6 +20,7 @@ import { Rover } from './rover/Rover';
 import { buildLunarModule } from './rover/models/nasa';
 import { ROVERS, type RoverSpec } from './rover/specs';
 import { Astronaut } from './eva/Astronaut';
+import { Footprints } from './eva/Footprints';
 import { fmtHM } from './format';
 import { Helicopter } from './heli/Helicopter';
 import { Radio } from './audio/Radio';
@@ -105,6 +106,8 @@ export class Game {
   private heliHud: HTMLElement | null = null;
   /** Astronaut on foot (Moon, crewed rover): out of the rover, hopping to the target. */
   eva: Astronaut | null = null;
+  /** Bootprints of every EVA (they stay: nothing erodes them on the Moon). */
+  private footprints: Footprints | null = null;
   /**
    * Suit oxygen of the crew (Moon, crewed LRV), s. Apollo 15-17 PLSS: 7 h at an average
    * work rate, plus ~30 min in the OPS emergency bottle; the suits stay on while driving.
@@ -436,6 +439,15 @@ export class Game {
     const x = r.x + f.z * 1.6, z = r.z - f.x * 1.6;
     const ground = (gx: number, gz: number) => Math.max(this.terrain.height(gx, gz), this.rocks.surfaceAt(gx, gz));
     this.eva = new Astronaut(this.terrain, ground, x, z, Math.atan2(f.x, f.z));
+    if (!this.footprints) {
+      this.footprints = new Footprints(this.terrain, this.sunDir, 0.5 / world().radius);
+      this.scene.add(this.footprints.mesh);
+    }
+    const fp = this.footprints;
+    this.eva.onLand = (lx, lz, yaw, v) => {
+      // On a rock top there is no soil to print.
+      if (this.rocks.surfaceAt(lx, lz) < this.terrain.height(lx, lz) + 0.02) fp.land(lx, lz, yaw, v);
+    };
     this.scene.add(this.eva.object);
     this.rover.parkBrake = true;
     this.heliHud = document.getElementById('heli-hud');

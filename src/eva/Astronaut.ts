@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import type { TerrainData } from '../terrain/TerrainData';
 
 /**
@@ -50,6 +51,8 @@ export class Astronaut {
   /** Heading: forward = (sin yaw, 0, cos yaw). */
   yaw = 0;
   onGround = true;
+  /** Touchdown at (x, z) with heading yaw and horizontal speed v: both boots leave prints. */
+  onLand?: (x: number, z: number, yaw: number, v: number) => void;
   /** Horizontal speed, m/s. */
   speed = 0;
   private land = 0;
@@ -69,15 +72,22 @@ export class Astronaut {
     this.sync();
   }
 
+  /**
+   * The A7L-B EMU of Apollo 15-17, after NASA/Smithsonian descriptions and photos:
+   * Beta-cloth outer garment with convolute (bellows) joints at shoulders, elbows and
+   * knees; LEVA - a white shell over the bubble helmet with the 24-carat gold visor;
+   * the PLSS backpack with the OPS on top; the RCU on the chest carrying the Hasselblad;
+   * red and blue oxygen connectors; lunar overshoes with light-blue ribbed silicone
+   * soles; gloves with blue fingertips; the commander's red stripes (from Apollo 13);
+   * the flag on the left shoulder; lower legs grey with lunar dust.
+   */
   private buildModel(): void {
-    const suit = new THREE.MeshStandardMaterial({ color: 0xeceae4, roughness: 0.85 });
-    const suitDust = new THREE.MeshStandardMaterial({ color: 0x9c9a95, roughness: 0.95 });
-    const red = new THREE.MeshStandardMaterial({ color: 0xa8231c, roughness: 0.7 });
-    const dark = new THREE.MeshStandardMaterial({ color: 0x3a3c40, roughness: 0.6 });
-    const glove = new THREE.MeshStandardMaterial({ color: 0x5d6470, roughness: 0.7 });
-    const visor = new THREE.MeshStandardMaterial({ color: 0xd4a23c, metalness: 1, roughness: 0.12 });
-    const metal = new THREE.MeshStandardMaterial({ color: 0xb8bcc2, metalness: 0.8, roughness: 0.35 });
-    const mesh = (g: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z: number, parent: THREE.Object3D) => {
+    const M = (color: number, rough = 0.9, metal = 0) => new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal });
+    const beta = M(0xe7e5de), betaDust = M(0xa3a09a, 0.95), betaShade = M(0xd2d0c9);
+    const red = M(0xa82a20, 0.7), blue = M(0x2c5ea8, 0.5), sole = M(0x86b7dc, 0.6);
+    const glove = M(0x9aa3ad, 0.8), tips = M(0x35558a, 0.6), dark = M(0x2c2e33, 0.6);
+    const metal = M(0xb9bdc3, 0.35, 0.85), gold = M(0xd6a640, 0.12, 1);
+    const add = (g: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z: number, parent: THREE.Object3D) => {
       const o = new THREE.Mesh(g, m);
       o.position.set(x, y, z);
       o.castShadow = true;
@@ -85,38 +95,73 @@ export class Astronaut {
       parent.add(o);
       return o;
     };
-    // Legs: hip pivot at 0.95 m, knee at 0.5 m; lunar-dusty lower legs and boots.
-    for (const [leg, knee, sx] of [[this.legL, this.kneeL, 0.12], [this.legR, this.kneeR, -0.12]] as const) {
+    const ring = (r: number, parent: THREE.Object3D, y: number, m: THREE.Material = betaShade, z = 0) => {
+      const o = add(new THREE.TorusGeometry(r, r * 0.16, 6, 18), m, 0, y, z, parent);
+      o.rotation.x = Math.PI / 2;
+      return o;
+    };
+    // Legs: hip pivot at 0.95 m, knee at 0.5 m.
+    for (const [leg, knee, sx] of [[this.legL, this.kneeL, 0.13], [this.legR, this.kneeR, -0.13]] as const) {
       leg.position.set(sx, 0.95, 0);
       this.body.add(leg);
-      mesh(new THREE.CapsuleGeometry(0.105, 0.3, 4, 10), suit, 0, -0.22, 0, leg);
+      add(new THREE.CylinderGeometry(0.118, 0.104, 0.42, 14), beta, 0, -0.22, 0, leg);
+      add(new RoundedBoxGeometry(0.07, 0.14, 0.15, 2, 0.02), betaShade, sx > 0 ? 0.1 : -0.1, -0.22, 0.02, leg); // thigh pocket
+      add(new THREE.CylinderGeometry(0.121, 0.121, 0.045, 14), red, 0, -0.38, 0, leg); // commander's stripe
       knee.position.set(0, -0.45, 0);
       leg.add(knee);
-      mesh(new THREE.CapsuleGeometry(0.095, 0.3, 4, 10), suitDust, 0, -0.2, 0, knee);
-      mesh(new THREE.BoxGeometry(0.15, 0.1, 0.3), dark, 0, -0.45, 0.04, knee);
-      // Commander's red stripe (Apollo 15 CDR Dave Scott).
-      mesh(new THREE.CylinderGeometry(0.108, 0.108, 0.05, 12), red, 0, -0.12, 0, leg);
+      for (let k = 0; k < 3; k++) ring(0.105, knee, 0.03 - k * 0.035, betaShade);
+      add(new THREE.CylinderGeometry(0.1, 0.088, 0.36, 14), betaDust, 0, -0.2, 0, knee);
+      // Lunar overshoe: white upper, light-blue ribbed sole (33.6 × 15.2 cm, 8 ribs).
+      add(new RoundedBoxGeometry(0.15, 0.11, 0.33, 3, 0.04), betaDust, 0, -0.4, 0.045, knee);
+      add(new THREE.BoxGeometry(0.152, 0.022, 0.336), sole, 0, -0.462, 0.045, knee);
+      for (let k = 0; k < 8; k++) add(new THREE.BoxGeometry(0.13, 0.008, 0.02), sole, 0, -0.476, -0.1 + k * 0.041, knee);
     }
-    // Torso and pressure suit.
-    mesh(new THREE.CapsuleGeometry(0.24, 0.42, 6, 14), suit, 0, 1.28, 0, this.body).scale.set(1, 1, 0.8);
-    mesh(new THREE.BoxGeometry(0.26, 0.14, 0.1), suit, 0, 1.28, 0.2, this.body); // remote control unit
-    mesh(new THREE.BoxGeometry(0.06, 0.05, 0.02), metal, 0.07, 1.3, 0.255, this.body);
-    // PLSS backpack and the oxygen purge system on top.
-    mesh(new THREE.BoxGeometry(0.5, 0.62, 0.24), suit, 0, 1.32, -0.3, this.body);
-    mesh(new THREE.BoxGeometry(0.46, 0.18, 0.22), suit, 0, 1.72, -0.29, this.body);
-    mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.25), metal, 0.18, 1.88, -0.32, this.body); // antenna
-    // Helmet: clear bubble with the gold-coated extravehicular visor.
-    mesh(new THREE.SphereGeometry(0.19, 20, 14), suit, 0, 1.74, -0.02, this.body);
-    mesh(new THREE.SphereGeometry(0.195, 20, 14, -Math.PI * 0.42, Math.PI * 0.84, Math.PI * 0.22, Math.PI * 0.5), visor, 0, 1.74, -0.015, this.body);
-    // Arms: shoulders at 1.5 m, slightly out from the body (the pressurised suit).
-    for (const [arm, sx] of [[this.armL, 0.3], [this.armR, -0.3]] as const) {
-      arm.position.set(sx, 1.5, 0);
+    // Torso (upper and lower), shoulder bellows.
+    add(new RoundedBoxGeometry(0.5, 0.56, 0.34, 4, 0.12), beta, 0, 1.3, 0, this.body);
+    add(new RoundedBoxGeometry(0.44, 0.26, 0.3, 3, 0.1), beta, 0, 1.0, 0, this.body);
+    // RCU on the chest with the Hasselblad on its bracket; oxygen connectors.
+    add(new RoundedBoxGeometry(0.24, 0.15, 0.1, 2, 0.02), betaShade, 0, 1.33, 0.21, this.body);
+    add(new THREE.BoxGeometry(0.22, 0.02, 0.08), dark, 0, 1.41, 0.21, this.body);
+    for (const kx of [-0.07, 0, 0.07]) add(new THREE.CylinderGeometry(0.012, 0.012, 0.02, 8), metal, kx, 1.425, 0.22, this.body);
+    add(new THREE.BoxGeometry(0.1, 0.1, 0.07), metal, 0, 1.22, 0.28, this.body);
+    const lens = add(new THREE.CylinderGeometry(0.03, 0.032, 0.05, 14), dark, 0, 1.22, 0.335, this.body);
+    lens.rotation.x = Math.PI / 2;
+    for (const [cx, m] of [[0.17, red], [0.17, blue], [-0.17, red], [-0.17, blue]] as const) {
+      const c = add(new THREE.CylinderGeometry(0.022, 0.022, 0.05, 10), m, cx, m === red ? 1.2 : 1.13, 0.17, this.body);
+      c.rotation.x = Math.PI / 2;
+    }
+    // PLSS with the OPS on top, straps.
+    add(new RoundedBoxGeometry(0.5, 0.64, 0.24, 3, 0.05), beta, 0, 1.32, -0.3, this.body);
+    add(new RoundedBoxGeometry(0.46, 0.19, 0.22, 3, 0.04), betaShade, 0, 1.73, -0.29, this.body);
+    add(new THREE.BoxGeometry(0.42, 0.02, 0.02), dark, 0, 1.6, -0.18, this.body);
+    add(new THREE.CylinderGeometry(0.008, 0.008, 0.3), metal, 0.19, 1.92, -0.33, this.body); // VHF antenna
+    // LEVA over the bubble helmet: white shell, gold visor, commander's stripe on top.
+    const head = new THREE.Group();
+    head.position.set(0, 1.73, 0.0);
+    this.body.add(head);
+    add(new THREE.SphereGeometry(0.205, 24, 16), beta, 0, 0, -0.015, head);
+    // SphereGeometry's φ = π/2 faces +z (the front): the visor spans ±0.38π around it.
+    add(new THREE.SphereGeometry(0.209, 24, 16, Math.PI * 0.12, Math.PI * 0.76, Math.PI * 0.2, Math.PI * 0.46), gold, 0, 0, -0.012, head);
+    const stripe = add(new THREE.TorusGeometry(0.207, 0.012, 6, 24, Math.PI), red, 0, 0, -0.015, head);
+    stripe.rotation.y = Math.PI / 2;
+    add(new THREE.CylinderGeometry(0.15, 0.17, 0.06, 18), betaShade, 0, -0.17, -0.01, head); // neck ring
+    // Arms: shoulders at 1.52 m, held out a little by the pressurised suit.
+    for (const [arm, sx] of [[this.armL, 0.31], [this.armR, -0.31]] as const) {
+      arm.position.set(sx, 1.52, 0);
       arm.rotation.z = sx > 0 ? 0.25 : -0.25;
       this.body.add(arm);
-      mesh(new THREE.CapsuleGeometry(0.085, 0.5, 4, 10), suit, 0, -0.32, 0.04, arm);
-      mesh(new THREE.CylinderGeometry(0.088, 0.088, 0.05, 12), red, 0, -0.18, 0.04, arm);
-      mesh(new THREE.SphereGeometry(0.075, 12, 8), glove, 0, -0.66, 0.08, arm);
+      for (let k = 0; k < 2; k++) ring(0.098, arm, -0.02 - k * 0.04);
+      add(new THREE.CylinderGeometry(0.092, 0.084, 0.28, 12), beta, 0, -0.2, 0.02, arm);
+      for (let k = 0; k < 3; k++) ring(0.086, arm, -0.36 - k * 0.032, betaShade, 0.03);
+      add(new THREE.CylinderGeometry(0.093, 0.093, 0.04, 12), red, 0, -0.3, 0.025, arm);
+      add(new THREE.CylinderGeometry(0.08, 0.075, 0.24, 12), beta, 0, -0.55, 0.04, arm);
+      add(new THREE.CylinderGeometry(0.085, 0.085, 0.07, 12), betaShade, 0, -0.69, 0.05, arm); // wrist ring
+      add(new RoundedBoxGeometry(0.1, 0.13, 0.07, 2, 0.03), glove, 0, -0.78, 0.06, arm);
+      add(new RoundedBoxGeometry(0.095, 0.04, 0.065, 2, 0.02), tips, 0, -0.85, 0.065, arm);
     }
+    // The flag on the left upper arm.
+    const flag = add(new THREE.PlaneGeometry(0.1, 0.065), new THREE.MeshStandardMaterial({ map: flagTexture(), roughness: 0.9 }), 0.095, -0.12, 0.02, this.armL);
+    flag.rotation.y = Math.PI / 2;
     this.camAnchor.position.set(0, 1.74, 0.08);
     this.body.add(this.camAnchor);
     this.object.add(this.body);
@@ -187,6 +232,7 @@ export class Astronaut {
         this.vel.y = 0;
         this.onGround = true;
         this.land = 0.12; // knees absorb the landing before the next push
+        this.onLand?.(this.pos.x, this.pos.z, this.yaw, Math.hypot(this.vel.x, this.vel.z));
       }
     }
     this.speed = Math.hypot(this.vel.x, this.vel.z);
@@ -231,4 +277,23 @@ export class Astronaut {
       }
     });
   }
+}
+
+/** US flag patch (13 stripes, blue canton with stars as dots). */
+function flagTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 76;
+  c.height = 40;
+  const g = c.getContext('2d')!;
+  for (let i = 0; i < 13; i++) {
+    g.fillStyle = i % 2 ? '#f3f1ea' : '#b22234';
+    g.fillRect(0, (i * 40) / 13, 76, 40 / 13 + 0.5);
+  }
+  g.fillStyle = '#3c3b6e';
+  g.fillRect(0, 0, 30, 21.5);
+  g.fillStyle = '#f3f1ea';
+  for (let r = 0; r < 9; r++) for (let k = 0; k < (r % 2 ? 5 : 6); k++) g.fillRect(2 + k * 5 + (r % 2 ? 2.5 : 0), 1.5 + r * 2.2, 1, 1);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
 }
