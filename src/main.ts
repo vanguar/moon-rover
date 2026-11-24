@@ -206,6 +206,7 @@ function setupMenu(game: Game): void {
   const showSection = (id: string) => {
     mtabs.forEach((b) => b.classList.toggle('on', b.dataset.mt === id));
     document.querySelectorAll<HTMLElement>('.mpane').forEach((p) => p.classList.toggle('on', p.dataset.mp === id));
+    if (id === 'journal' && game.finds) game.finds.renderJournal($('#journal'));
     if (id === 'garage') garage.start();
     else garage.stop();
   };
@@ -265,6 +266,7 @@ function setupMenu(game: Game): void {
     saveSettings(settings);
     setLang(settings.lang);
     garage.updateTexts();
+    game.mission.render();
     startLabel.textContent = t(started ? 'continue' : 'start');
   });
   quality.addEventListener('change', () => {
@@ -314,7 +316,59 @@ function setupMenu(game: Game): void {
     if (isMobile) document.body.classList.toggle('hud-full');
   });
 
+  // Mission briefing: shown at the first start of each mission, then with M or the flag button.
+  const brief = $('#brief');
+  const openBrief = () => {
+    const b = game.mission.briefing();
+    $('#b-title').textContent = b.title;
+    $('#b-intro').textContent = b.intro;
+    const ol = $('#b-steps');
+    ol.innerHTML = '';
+    for (const s of b.steps) {
+      const li = document.createElement('li');
+      li.textContent = s.text;
+      li.className = s.done ? 'done' : s.current ? 'cur' : '';
+      ol.append(li);
+    }
+    $('#b-keys').textContent = t(game.heli ? 'briefKeysHeli' : isMobile ? 'briefKeysTouch' : 'briefKeys');
+    brief.classList.remove('hidden');
+    game.setPaused(true);
+  };
+  const closeBrief = () => {
+    brief.classList.add('hidden');
+    try {
+      localStorage.setItem(`${game.mission.id}-briefed`, '1');
+    } catch {
+      /* storage unavailable */
+    }
+    if (menu.classList.contains('hidden')) game.setPaused(false);
+  };
+  $('#b-ok').addEventListener('click', closeBrief);
+  game.onBriefing = () => (brief.classList.contains('hidden') ? openBrief() : closeBrief());
+  $('#mission').addEventListener('pointerdown', (e) => {
+    e.stopPropagation();
+    openBrief();
+  });
+  $('#mission-reset').addEventListener('click', () => {
+    game.mission.reset();
+    try {
+      localStorage.removeItem(`${game.mission.id}-briefed`);
+    } catch {
+      /* storage unavailable */
+    }
+  });
+  const briefIfNew = () => {
+    let seen = false;
+    try {
+      seen = localStorage.getItem(`${game.mission.id}-briefed`) === '1';
+    } catch {
+      /* storage unavailable */
+    }
+    if (!seen) openBrief();
+  };
+
   const showGameUi = (on: boolean) => {
+    $('#mission').classList.toggle('hidden', !on);
     hud.classList.toggle('hidden', !on);
     toolbar.classList.toggle('hidden', !on);
     touch.classList.toggle('hidden', !on || !isMobile);
@@ -352,6 +406,8 @@ function setupMenu(game: Game): void {
       game.start();
     } else game.setPaused(false);
     syncToolbar();
+    game.mission.render();
+    briefIfNew();
   };
 
   startBtn.addEventListener('click', play);

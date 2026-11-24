@@ -321,3 +321,64 @@ body.mobile #heli-hud .hk { display: none; }
 body.heli #hud { display: none; }
 .tb.heli-only { display: none; }
 body.heli .tb.heli-only { display: grid; }
+
+/* ===== Mission panel ===== */
+#mission {
+  position: fixed; left: 16px; top: 16px; z-index: 6; max-width: min(380px, calc(100vw - 120px));
+  padding: 10px 14px; border-radius: 12px; background: rgba(10, 13, 18, 0.72); color: #eef3f8;
+  backdrop-filter: blur(6px); border: 1px solid rgba(255, 255, 255, 0.12); cursor: pointer;
+  font-size: 13px; line-height: 1.4;
+}
+#mission .mh { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: #ffc46b; margin-bottom: 4px; }
+#mission .mt { font-weight: 600; }
+#mission .md { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-family: ui-monospace, Menlo, Consolas, monospace; color: #9fd3ff; }
+#mission .marrow { width: 22px; height: 22px; display: inline-block; transition: transform 0.15s linear;
+  background: no-repeat center/contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2l7 18-7-4-7 4z' fill='%239fd3ff'/%3E%3C/svg%3E"); }
+body.mobile #mission { top: 8px; left: 8px; font-size: 12px; max-width: 46vw; padding: 6px 10px; }
+/* ===== Briefing ===== */
+#brief { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; background: rgba(0, 0, 0, 0.55); padding: 16px; }
+#brief .bbox { width: min(640px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: 20px 22px; border-radius: 16px;
+  background: rgba(12, 15, 20, 0.96); color: #eef3f8; border: 1px solid rgba(255, 255, 255, 0.14); }
+#brief h2 { margin: 0 0 8px; font-size: 22px; }
+#brief p { margin: 0 0 12px; line-height: 1.5; opacity: 0.9; }
+#brief ol { margin: 0 0 12px; padding-left: 22px; line-height: 1.6; }
+#brief li.done { opacity: 0.45; text-decoration: line-through; }
+#brief li.cur { color: #ffc46b; font-weight: 600; }
+#brief .bkeys { font: 12px/1.6 ui-monospace, Menlo, Consolas, monospace; opacity: 0.75; margin-bottom: 14px; white-space: pre-line; }
+/* ===== Toast ===== */
+#toast { position: fixed; left: 50%; top: 38%; transform: translateX(-50%); z-index: 8; padding: 10px 16px; border-radius: 12px;
+  background: rgba(10, 13, 18, 0.85); color: #ffe2a8; font-weight: 600; pointer-events: none; max-width: calc(100vw - 32px); text-align: center; opacity: 0; }
+#toast.go { animation: toast 4.5s ease-out forwards; }
+@keyframes toast { 0% { opacity: 0; } 8% { opacity: 1; } 75% { opacity: 1; } 100% { opacity: 0; } }
+/* ===== Radio subtitles (Houston) ===== */
+#radio {
+  position: fixed; left: 50%; top: 96px; transform: translateX(-50%); z-index: 7; max-width: min(720px, calc(100vw - 32px));
+  padding: 8px 14px; border-radius: 10px; background: rgba(8, 12, 18, 0.72); color: #d9ecff;
+  font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; border-left: 3px solid #6fb6ff; pointer-events: none;
+}
+/* ===== Discovery card ===== */
+#card {
+  position: fixed; inset: 0; margin: auto; z-index: 20; width: min(760px, calc(100vw - 32px)); height: fit-content;
+  max-height: calc(100vh - 32px); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px;
+  padding: 16px; border-radius: 16px; background: rgba(10, 12, 16, 0.94); color: #e8edf2; border: 1px solid rgba(255,255,255,0.12);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6); cursor: pointer; overflow: auto;
+}
+#card img { width: 100%; border-radius: 10px; display: block; }
+#card h3 { margin: 4px 0 8px; font-size: 20px; }
+#card p { margin: 0 0 10px; line-height: 1.5; font-size: 14px; }
+#card small { opacity: 0.6; font-size: 11px; }
+@media (max-width: 600px) { #card { grid-template-columns: 1fr; } }
+#flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 19; }
+#flash.go { animation: flash 0.35s ease-out; }
+@keyframes flash { from { opacity: 0.7; } to { opacity: 0; } }
+/* ===== Journal ===== */
+#journal { display: grid; gap: 8px; margin-bottom: 12px; }
+.jcount { opacity: 0.7; font-size: 13px; }
+.jnote { opacity: 0.7; font-size: 13px; margin: 0 0 8px; }
+.jrow { display: flex; gap: 10px; align-items: center; text-align: left; padding: 6px; border-radius: 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); color: inherit; cursor: default; }
+.jrow.on { cursor: pointer; }
+.jrow img { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; background: rgba(255,255,255,0.06); }
+.jrow:not(.on) img { visibility: hidden; }
+.jrow span { display: grid; }
+.jrow small { opacity: 0.6; }
+body.heli #mission { top: auto; bottom: 150px; }

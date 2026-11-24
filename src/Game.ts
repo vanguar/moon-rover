@@ -22,6 +22,7 @@ import { ROVERS, type RoverSpec } from './rover/specs';
 import { Helicopter } from './heli/Helicopter';
 import { Radio } from './audio/Radio';
 import { Discoveries } from './game/Discoveries';
+import { Missions } from './game/Missions';
 import { buildAlsep } from './game/Hardware';
 import { buildLrvModel } from './rover/model';
 import { applyWear } from './rover/models/wear';
@@ -83,6 +84,10 @@ export class Game {
   private heliHud: HTMLElement | null = null;
   readonly radio: Radio;
   readonly finds: Discoveries | null = null;
+  mission!: Missions;
+  private heliMaxDist = 0;
+  /** Opens the mission briefing (set by the UI). */
+  onBriefing?: () => void;
   private dust: Dust;
   private tracks: Tracks;
   private hud: Hud;
@@ -237,6 +242,7 @@ export class Game {
       this.finds = new Discoveries(terrain);
       this.finds.onFound = (site) => this.radio.say(`find_${site.id}`, { delay: 0.5 });
     }
+    this.setMission(mars ? (spec.heli ? 'heli' : 'mars') : 'moon');
     if (spec.heli) this.enterHeli();
     this.input.onAction((a) => this.onAction(a));
     this.bindLook(this.renderer.domElement);
@@ -297,6 +303,7 @@ export class Game {
     this.orbit.dist = 4;
     this.orbit.pitch = 0.35;
     this.cameraMode = 'chase';
+    this.setMission('heli');
   }
 
   private exitHeli(): void {
@@ -307,6 +314,7 @@ export class Game {
     this.rover.parkBrake = false;
     this.heliHud?.classList.add('hidden');
     document.body.classList.remove('heli');
+    this.setMission('mars');
     this.orbit.dist = 9 * this.sizeK;
   }
 
@@ -592,6 +600,8 @@ export class Game {
       this.zoom(-1);
     } else if (a === 'zoomout') {
       this.zoom(1);
+    } else if (a === 'mission') {
+      this.onBriefing?.();
     } else if (a === 'photo') {
       this.takePhoto();
     } else if (a === 'brush') {
@@ -710,6 +720,7 @@ export class Game {
     this.updateImpacts(dt);
     this.updateEnergy(dt);
     this.radio.update(dt);
+    this.updateMission();
     this.radioEvents();
 
     this.fpsAcc.t += dt;
@@ -755,6 +766,41 @@ export class Game {
       parked: idle || r.parkBrake || this.still > 3,
       wheelLocal: r.wheelLocal, preview: false,
     });
+  }
+
+  setMission(kind: 'moon' | 'mars' | 'heli'): void {
+    this.mission = new Missions(this.terrain, kind);
+    this.mission.onStep = (key, finished) => {
+      this.audio.click(1400);
+      // Mars is 5–20 light-minutes away: no live voice loop there.
+      if (this.sky) this.radio.say(finished ? 'missionDone' : 'nextStep', { repeat: true, delay: 0.3 });
+      this.toast(finished ? t(`${this.mission.id}_done`) : `${t('newTask')}: ${t(key)}`);
+    };
+  }
+
+  /** Short message in the middle of the screen. */
+  toast(text: string): void {
+    const el = document.getElementById('toast');
+    if (!el) return;
+    el.textContent = text;
+    el.classList.remove('hidden', 'go');
+    void el.offsetWidth;
+    el.classList.add('go');
+  }
+
+  private updateMission(): void {
+    const h = this.heli;
+    if (h) this.heliMaxDist = h.phase === 'landed' ? this.heliMaxDist : Math.max(this.heliMaxDist, Math.hypot(h.pos.x - h.pad.x, h.pos.z - h.pad.z));
+    const fwd = this.camera.getWorldDirection(new THREE.Vector3());
+    let camHdg = (Math.atan2(fwd.x, -fwd.z) * 180) / Math.PI;
+    if (camHdg < 0) camHdg += 360;
+    this.mission.update({
+      roverPos: h ? h.pos : this.rover.object.position,
+      odometer: this.rover.odometer,
+      found: this.finds?.found ?? new Set(),
+      atBase: this.hud.atBase,
+      heli: h ? { agl: h.agl, phase: h.phase, pos: h.pos, pad: h.pad, flights: h.flights, maxDist: this.heliMaxDist } : null,
+    }, camHdg);
   }
 
   /** The parked Apollo 15 LRV and the ALSEP at their LROC positions. */

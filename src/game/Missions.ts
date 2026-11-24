@@ -1,0 +1,169 @@
+import * as THREE from 'three';
+import { t } from '../i18n';
+import type { TerrainData } from '../terrain/TerrainData';
+
+/**
+ * Missions: what the player is doing, step by step. Each step has a briefing text,
+ * an optional target on the ground (bearing and distance shown on screen) and a
+ * completion test. Progress is saved per mission in localStorage.
+ */
+export interface MissionCtx {
+  roverPos: THREE.Vector3;
+  odometer: number;
+  found: Set<string>;
+  atBase: boolean;
+  heli: { agl: number; phase: string; pos: THREE.Vector3; pad: THREE.Vector3; flights: number; maxDist: number } | null;
+}
+
+interface Step {
+  key: string;
+  target?: () => { x: number; z: number } | null;
+  /** Arrival radius for steps that are done by reaching the target. */
+  reach?: number;
+  done: (c: MissionCtx) => boolean;
+}
+
+export class Missions {
+  readonly id: string;
+  private steps: Step[];
+  index = 0;
+  private panel = document.getElementById('mission');
+  private arrow: HTMLElement | null = null;
+  private text: HTMLElement | null = null;
+  private dist: HTMLElement | null = null;
+  onStep?: (key: string, finished: boolean) => void;
+
+  constructor(terrain: TerrainData, kind: 'moon' | 'mars' | 'heli') {
+    this.id = `mission-${kind}`;
+    const s = terrain.meta.sites ?? {};
+    const site = (k: string) => () => (s[k] ? { x: s[k].x, z: s[k].z } : null);
+    const L = terrain.meta.landing;
+    if (kind === 'moon') {
+      this.steps = [
+        { key: 'm_drive', done: (c) => c.odometer > 25 },
+        { key: 'm_lrv', target: site('lrv'), done: (c) => c.found.has('lrv') },
+        { key: 'm_alsep', target: site('alsep'), done: (c) => c.found.has('alsep') },
+        { key: 'm_lm', target: site('lm'), done: (c) => c.found.has('lm') },
+        { key: 'm_elbow', target: site('elbow'), done: (c) => c.found.has('elbow') },
+        { key: 'm_spur', target: site('spur'), done: (c) => c.found.has('spur') },
+        { key: 'm_stgeorge', target: site('stgeorge'), done: (c) => c.found.has('stgeorge') },
+        { key: 'm_home', target: () => ({ x: L.x, z: L.z }), done: (c) => c.atBase },
+      ];
+    } else if (kind === 'mars') {
+      // Octavia E. Butler Landing; the delta front ~2 km to the west-northwest (Kodiak and
+      // the scarp the rover reached in 2022), in the game window's coordinates.
+      this.steps = [
+        { key: 'r_drive', done: (c) => c.odometer > 30 },
+        { key: 'r_field', target: () => ({ x: L.x + 14, z: L.z - 4 }), reach: 12, done: () => false },
+        { key: 'r_delta', target: () => ({ x: L.x - 1900, z: L.z - 450 }), reach: 80, done: () => false },
+        { key: 'r_home', target: () => ({ x: L.x, z: L.z }), reach: 25, done: () => false },
+      ];
+    } else {
+      this.steps = [
+        { key: 'h_hover', done: (c) => !!c.heli && c.heli.agl > 2.5 },
+        { key: 'h_out', done: (c) => !!c.heli && c.heli.maxDist > 30 },
+        { key: 'h_land', done: (c) => !!c.heli && c.heli.phase === 'landed' && c.heli.pos.distanceTo(c.heli.pad) < 4 },
+        { key: 'h_auto', done: (c) => !!c.heli && c.heli.flights >= 2 && c.heli.phase === 'landed' },
+      ];
+    }
+    try {
+      this.index = Math.min(this.steps.length, Number(localStorage.getItem(this.id) ?? 0) || 0);
+    } catch {
+      this.index = 0;
+    }
+    this.buildPanel();
+  }
+
+  get finished(): boolean {
+    return this.index >= this.steps.length;
+  }
+
+  get stepKey(): string {
+    return this.finished ? `${this.id}_done` : this.steps[this.index].key;
+  }
+
+  reset(): void {
+    this.index = 0;
+    this.save();
+    this.render();
+  }
+
+  private save(): void {
+    try {
+      localStorage.setItem(this.id, String(this.index));
+    } catch {
+      /* storage unavailable */
+    }
+  }
+
+  private buildPanel(): void {
+    const p = this.panel;
+    if (!p) return;
+    p.innerHTML = '';
+    const head = document.createElement('div');
+    head.className = 'mh';
+    this.text = document.createElement('div');
+    this.text.className = 'mt';
+    const row = document.createElement('div');
+    row.className = 'md';
+    this.arrow = document.createElement('i');
+    this.arrow.className = 'marrow';
+    this.dist = document.createElement('span');
+    row.append(this.arrow, this.dist);
+    p.append(head, this.text, row);
+    this.render();
+  }
+
+  /** Re-render texts (step change, language change). */
+  render(): void {
+    if (!this.panel || !this.text) return;
+    const head = this.panel.querySelector('.mh')!;
+    head.textContent = `${t(`${this.id}_title`)} · ${Math.min(this.index + 1, this.steps.length)}/${this.steps.length}`;
+    this.text.textContent = t(this.stepKey);
+  }
+
+  /** Full briefing text for the overlay (mission goal + all steps with ticks). */
+  briefing(): { title: string; intro: string; steps: { text: string; done: boolean; current: boolean }[] } {
+    return {
+      title: t(`${this.id}_title`),
+      intro: t(`${this.id}_intro`),
+      steps: this.steps.map((s, i) => ({ text: t(s.key), done: i < this.index, current: i === this.index })),
+    };
+  }
+
+  update(c: MissionCtx, cameraHeadingDeg: number): void {
+    if (!this.finished) {
+      const s = this.steps[this.index];
+      const tg = s.target?.() ?? null;
+      let ok = s.done(c);
+      if (!ok && tg && s.reach !== undefined) ok = Math.hypot(tg.x - c.roverPos.x, tg.z - c.roverPos.z) < s.reach;
+      if (ok) {
+        this.index++;
+        this.save();
+        this.render();
+        this.onStep?.(this.stepKey, this.finished);
+      }
+    }
+    // Direction to the current target, relative to where the camera looks.
+    const s = this.finished ? null : this.steps[this.index];
+    const tg = s?.target?.() ?? null;
+    if (!this.arrow || !this.dist) return;
+    if (!tg) {
+      this.arrow.style.visibility = 'hidden';
+      this.dist.textContent = '';
+      return;
+    }
+    const dx = tg.x - c.roverPos.x, dz = tg.z - c.roverPos.z;
+    const d = Math.hypot(dx, dz);
+    let brg = (Math.atan2(dx, -dz) * 180) / Math.PI;
+    if (brg < 0) brg += 360;
+    this.arrow.style.visibility = 'visible';
+    this.arrow.style.transform = `rotate(${brg - cameraHeadingDeg}deg)`;
+    this.dist.textContent = `${d < 1000 ? `${d.toFixed(0)} ${t('hM')}` : `${(d / 1000).toFixed(2)} ${t('hKm')}`} · ${Math.round(brg).toString().padStart(3, '0')}°`;
+  }
+
+  /** Target of the current step (for the minimap). */
+  target(): { x: number; z: number } | null {
+    return this.finished ? null : (this.steps[this.index].target?.() ?? null);
+  }
+}

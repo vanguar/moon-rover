@@ -1,6 +1,6 @@
 import type { DriveInput } from '../rover/Rover';
 
-export type Action = 'camera' | 'top' | 'reset' | 'lights' | 'pause' | 'park' | 'hud' | 'zoomin' | 'zoomout' | 'const' | 'weather' | 'auto' | 'brush' | 'photo';
+export type Action = 'camera' | 'top' | 'reset' | 'lights' | 'pause' | 'park' | 'hud' | 'zoomin' | 'zoomout' | 'const' | 'weather' | 'auto' | 'brush' | 'photo' | 'mission';
 
 /**
  * Merges keyboard, gamepad, touch (joystick + pedals) and device-tilt steering
@@ -31,7 +31,7 @@ export class Input {
       this.lastDevice = 'keyboard';
       if (!e.repeat) {
         const map: Record<string, Action> = {
-          KeyC: 'camera', KeyV: 'top', KeyR: 'reset', KeyH: 'lights', Escape: 'pause', KeyP: 'park', KeyI: 'hud', KeyK: 'const', KeyB: 'weather', KeyT: 'auto', KeyX: 'brush', KeyF: 'photo',
+          KeyC: 'camera', KeyV: 'top', KeyR: 'reset', KeyH: 'lights', Escape: 'pause', KeyP: 'park', KeyI: 'hud', KeyK: 'const', KeyB: 'weather', KeyT: 'auto', KeyX: 'brush', KeyF: 'photo', KeyM: 'mission',
           Equal: 'zoomin', NumpadAdd: 'zoomin', Minus: 'zoomout', NumpadSubtract: 'zoomout',
         };
         const a = map[e.code];
