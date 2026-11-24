@@ -215,6 +215,14 @@ vec2 detSlopeAt(vec2 p, out float ok) {
   return sign(sv) * sv * sv * 2.0;
 }
 ${NOISE_GLSL}
+#if MARS > 0
+#define CRATER_P 0.32
+#define CRATER_D 1.0
+#else
+// Apollo 15 mare: small craters in every stage of degradation almost everywhere.
+#define CRATER_P 0.55
+#define CRATER_D 1.5
+#endif
 // Cast shadows of sub-metre craters (low Sun: the up-Sun inner wall is in shadow).
 // Marches the bowl profile toward the Sun; returns 1 lit .. 0 shadowed.
 float craterShadow(vec2 p, float cell, float seed, vec2 s2, float tanEl) {
@@ -223,13 +231,13 @@ float craterShadow(vec2 p, float cell, float seed, vec2 s2, float tanEl) {
   for (int j = -uOne; j <= uOne; j++) {
     for (int i = -uOne; i <= uOne; i++) {
       vec2 id = mod(c + vec2(float(i), float(j)), 4096.0);
-      if (lhash12(id + seed) > 0.32) continue;
+      if (lhash12(id + seed) > CRATER_P) continue;
       vec2 ctr = (c + vec2(float(i), float(j)) + vec2(lhash12(id + seed + 17.3), lhash12(id + seed + 41.7))) * cell;
       float R = cell * (0.12 + 0.33 * lhash12(id + seed + 7.1));
       vec2 d = p - ctr;
       if (dot(d, d) > R * R) continue;
       float fresh = lhash12(id + seed + 3.3);
-      float depth = 2.0 * R * (0.025 + 0.09 * fresh * fresh);
+      float depth = 2.0 * R * (0.025 + 0.09 * fresh * fresh) * CRATER_D;
       float rim = depth * (0.12 + 0.25 * fresh);
       float q0 = length(d) / R, b0 = 1.0 - q0 * q0;
       float h0 = -depth * b0 * b0;
@@ -304,7 +312,7 @@ vec3 craterField(vec2 p, float cell, float seed) {
   for (int j = -uOne; j <= uOne; j++) {
     for (int i = -uOne; i <= uOne; i++) {
       vec2 id = mod(c + vec2(float(i), float(j)), 4096.0);
-      if (lhash12(id + seed) > 0.32) continue;
+      if (lhash12(id + seed) > CRATER_P) continue;
       vec2 ctr = (c + vec2(float(i), float(j)) + vec2(lhash12(id + seed + 17.3), lhash12(id + seed + 41.7))) * cell;
       float R = cell * (0.12 + 0.33 * lhash12(id + seed + 7.1));
       vec2 d = p - ctr;
@@ -312,7 +320,7 @@ vec3 craterField(vec2 p, float cell, float seed) {
       if (r > 2.0 * R) continue;
       float q = r / R;
       float fresh = lhash12(id + seed + 3.3);
-      float depth = 2.0 * R * (0.025 + 0.09 * fresh * fresh);
+      float depth = 2.0 * R * (0.025 + 0.09 * fresh * fresh) * CRATER_D;
       float rim = depth * (0.12 + 0.25 * fresh);
       float h = 0.0, dh = 0.0;
       if (q < 1.0) { float b = 1.0 - q * q; h -= depth * b * b; dh += 4.0 * depth * q * b; }
@@ -572,6 +580,14 @@ diffuseColor.rgb = mix(diffuseColor.rgb, mix(basalt, diffuseColor.rgb, 0.3), peb
 // Lunar regolith: a nearly neutral, faintly warm grey (reflectance rises slowly toward the red).
 // Calibrated on Apollo 15 Hasselblad frames (docs/REALISM.md): ground/massif brightness ratio ≈ 1 : 1.6.
 vec3 regolith = vec3(1.0, 0.985, 0.965) * 1.5;
+// The NAC orthophoto carries the shading of hummocks and small craters below the
+// 2 m DTM (it was taken with the Sun ~50° from zenith). On the ground those read as
+// shadows with nothing casting them. Variation at 1–25 m is compressed out of the
+// albedo; the relief itself comes from the craterlets below, lit by the game's Sun.
+{
+  float aLow = textureLod(uOrtho, mapUv, 4.0).r;
+  ortho = aLow * (1.0 + (ortho / max(aLow, 0.01) - 1.0) * 0.3);
+}
 // Albedo variation is relative (±~18 %), not added: in dark areas an additive term
 // dominated the photo and drew the noise lattice.
 float alb = clamp(ortho * 0.9 * (1.0 + albedoVar * 1.2), 0.005, 1.0);
@@ -585,9 +601,9 @@ diffuseColor.rgb = regolith * alb;
 vec2 s2 = uSunShadow.xy;
 float cotEl = uSunShadow.z;
 microLit = 1.0;
-// Cast shadows inside craterlets: the most expensive part of the shader (9 cells ×
-// 5 march steps), only on High and Ultra.
-#if CRATERLETS > 1
+// Cast shadows inside craterlets (9 cells × 5 march steps): 2 m field from Medium up,
+// the 0.7 m field on Ultra.
+#if CRATERLETS > 0
 if (wc1 > 0.0) microLit = min(microLit, mix(1.0, craterShadow(vWorldP.xz, 2.2, 11.0, s2, 1.0 / cotEl), wc1));
 #endif
 #if CRATERLETS > 2
