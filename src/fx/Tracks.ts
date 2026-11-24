@@ -111,7 +111,8 @@ export class Tracks {
         uAmb: { value: world().atmosphere ? 0.55 : 0.06 },
         uHalfW: { value: 0.12 },
         uPitch: { value: 0.29 },
-        uFresh: { value: world().atmosphere ? 0.84 : 0.9 },
+        // Compacted soil in the rut is darker than the fluffy surface (both worlds).
+        uFresh: { value: world().atmosphere ? 0.82 : 0.86 },
         uCurvK: { value: 0.5 / world().radius },
       },
       vertexShader: /* glsl */ `
@@ -147,15 +148,23 @@ export class Tracks {
         float vn(float x) { float i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f); return mix(hsh(vec2(i, 3.0)), hsh(vec2(i + 1.0, 3.0)), f); }
         // Cross profile (in units of the local sinkage) at across-coordinate u (|u| = 1 at the wheel edge).
         float profile(float u, float v) {
-          float a = abs(u + (vn(v * 0.9) - 0.5) * 0.12);
-          float edge = 1.0 + (vn(v * 2.7 + 7.0) - 0.5) * 0.18; // ragged walls
-          // The tyre is as wide as the rut: a flat floor to the shoulders, then a short wall.
-          float trough = 1.0 - smoothstep(edge - 0.08, edge + 0.1, a);
-          float berm = exp(-pow((a - edge - 0.12) / (0.11 + 0.05 * vn(v * 1.3)), 2.0)) * (0.3 + 0.25 * vn(v * 0.7 + 2.0));
-          // Shallow grouser/chevron imprints, crumbling at the edges (dry regolith).
-          float imprint = texture2D(uTread, vec2(clamp(u * 0.5 / ${BERM.toFixed(2)} + 0.5, 0.0, 1.0), v)).g * trough;
-          imprint *= 0.6 + 0.4 * vn(v * 5.0 + u * 3.0);
-          return -trough - 0.22 * imprint + berm;
+          // Crumbly, wandering walls: two octaves of jitter (dry regolith collapses
+          // into the rut unevenly, as on the Apollo photographs).
+          float a = abs(u + (vn(v * 0.9) - 0.5) * 0.16 + (vn(v * 4.3 + 11.0) - 0.5) * 0.08);
+          float edge = 1.0 + (vn(v * 2.7 + 7.0) - 0.5) * 0.3 + (vn(v * 9.1 + 3.0) - 0.5) * 0.12;
+          float trough = 1.0 - smoothstep(edge - 0.12, edge + 0.16, a);
+          float berm = exp(-pow((a - edge - 0.15) / (0.13 + 0.06 * vn(v * 1.3)), 2.0)) * (0.2 + 0.25 * vn(v * 0.7 + 2.0));
+          // Shallow chevron imprints, partly crumbled away (gaps along the track).
+          float keep = smoothstep(0.25, 0.6, vn(v * 0.6 + 5.0));
+          float imprint = texture2D(uTread, vec2(clamp(u * 0.5 / ${BERM.toFixed(2)} + 0.5, 0.0, 1.0), v)).g * trough * keep;
+          imprint *= 0.5 + 0.5 * vn(v * 5.0 + u * 3.0);
+          return -trough - 0.14 * imprint + berm;
+        }
+        // Clods pushed out onto the berms: small bright/dark specks.
+        float clods(float u, float v) {
+          float b = smoothstep(0.95, 1.15, abs(u)) * (1.0 - smoothstep(1.25, ${BERM.toFixed(2)}, abs(u)));
+          float h = hsh(floor(vec2(u * 18.0, v * 9.0)));
+          return b * (h > 0.86 ? (h - 0.86) * 4.0 : 0.0);
         }
         void main() {
           float u = (vUv.x * 2.0 - 1.0) * ${BERM.toFixed(2)};
@@ -171,12 +180,14 @@ export class Tracks {
           vec3 fwd = normalize(cross(side, vec3(0.0, 1.0, 0.0)));
           vec3 n = normalize(vec3(0.0, 1.0, 0.0) - side * sA - fwd * sF);
           float L = max(dot(n, uSun), 0.0), L0 = max(uSun.y, 0.02);
+          // The rut is shallow (~1-2 cm): soften its relief shading toward the flat ground.
+          L = mix(L0, L, 0.6);
           // Self-shadowing of the trough when the Sun is low: the near wall hides the floor.
-          float wallShade = 1.0 - smoothstep(0.0, 1.0, -h0) * smoothstep(0.35, 0.05, uSun.y) * 0.25;
+          float wallShade = 1.0 - smoothstep(0.0, 1.0, -h0) * smoothstep(0.35, 0.05, uSun.y) * 0.15;
           float f = (uAmb + L * wallShade) / (uAmb + L0);
           // Freshly turned, compacted soil is darker than the dusted surface.
           float fresh = mix(1.0, uFresh, clamp(-h0, 0.0, 1.0));
-          float m = f * fresh;
+          float m = f * fresh * (1.0 + 0.35 * clods(u, v));
           // Fade the far end of the rut set and the outer berm margin.
           float fade = (1.0 - smoothstep(80.0, 160.0, length(vW - cameraPosition))) * (1.0 - smoothstep(1.3, ${BERM.toFixed(2)}, abs(u)));
           m = mix(1.0, m, fade);

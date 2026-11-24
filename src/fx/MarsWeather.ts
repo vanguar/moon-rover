@@ -460,7 +460,8 @@ export class MarsWeather {
         continue;
       }
       if (dist < this.devilDist && d.s > 0.2) this.devilDist = dist - d.r * 0.5;
-      this.devilNear = Math.max(this.devilNear, d.s * THREE.MathUtils.smoothstep(d.r * 3, d.r * 0.6, dist));
+      // Eases in from 4 radii to the core (the arguments were swapped before: it switched on at once).
+      this.devilNear = Math.max(this.devilNear, d.s * (1 - THREE.MathUtils.smoothstep(dist, d.r * 0.5, d.r * 4)));
       if (n < MAX_DEVILS) {
         const y = this.terrain.height(d.x, d.z) - 1;
         m4.compose(p.set(d.x, y, d.z), q, sc.set(d.r * 3.6, d.h, d.r * 3.6));

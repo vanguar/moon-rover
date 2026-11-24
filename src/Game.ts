@@ -1201,7 +1201,10 @@ export class Game {
     const fogC = ms.colorAt(fwd.normalize(), new THREE.Color()).multiplyScalar(bright * 0.92);
     const fog = this.scene.fog as THREE.FogExp2;
     fog.color.copy(fogC);
-    fog.density = 6.5e-5 * Math.pow(w.tau / 0.62, 1.6);
+    // Inside a devil or a storm front the dust closes in around the rover: the haze
+    // thickens smoothly with proximity (devilNear eases in from 3 radii), no edge.
+    const inDevil = w.devilNear * w.devilNear * (3 - 2 * w.devilNear);
+    fog.density = 6.5e-5 * Math.pow(w.tau / 0.62, 1.6) * (1 + inDevil * 60);
     this.far?.setNearRadius(this.q.drawDistance - 250);
     // Camera auto-exposure (partial: storms still look dark).
     const target = THREE.MathUtils.clamp(1.45 * Math.pow(1.6 / Math.max(eTot, 0.05), 0.55), 0.8, 4.5);
