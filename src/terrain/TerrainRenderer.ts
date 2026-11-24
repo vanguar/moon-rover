@@ -39,6 +39,7 @@ export class TerrainRenderer {
     uDetRect: { value: THREE.Vector4 };
     uDetSlots: { value: Float32Array };
     uDetRes: { value: number };
+    uDetSlopes: { value: number };
   };
   private chunks = new Map<string, Chunk>();
   private workers: Worker[] = [];
@@ -95,6 +96,7 @@ export class TerrainRenderer {
       uDetRect: { value: new THREE.Vector4(0, 0, 256, 0) },
       uDetSlots: { value: new Float32Array(9).fill(-1) },
       uDetRes: { value: 512 },
+      uDetSlopes: { value: 0 },
     };
     const u = this.uniforms;
     this.material = makeLunar(new THREE.MeshLambertMaterial({ color: 0xffffff }), 'terrain', (shader) => {
@@ -123,6 +125,7 @@ export class TerrainRenderer {
         uDetRect: u.uDetRect,
         uDetSlots: u.uDetSlots,
         uDetRes: u.uDetRes,
+        uDetSlopes: u.uDetSlopes,
       });
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nvarying vec3 vWorldP;\nvarying vec3 vNormalW;\nattribute vec2 aMorph;\nuniform vec4 uLodD;')
@@ -173,6 +176,10 @@ uniform sampler2D uDet;
 uniform vec4 uDetRect;
 uniform float uDetSlots[9];
 uniform float uDetRes;
+uniform float uDetSlopes;
+// Set by the photo-tile block, used for the normal: 1 m DTM slopes and their weight.
+vec2 gDetSlope = vec2(0.0);
+float gDetW = 0.0;
 ${NOISE_GLSL}
 // Cast shadows of sub-metre craters (low Sun: the up-Sun inner wall is in shadow).
 // Marches the bowl profile toward the Sun; returns 1 lit .. 0 shadowed.
@@ -370,12 +377,19 @@ if (uDetRect.w > 0.5) {
     wD *= smoothstep(0.0, 0.02, min(min(lc.x, 1.0 - lc.x), min(lc.y, 1.0 - lc.y))) * 0.6 + 0.4;
     float h = 0.5 / uDetRes;
     vec2 base = sl / 3.0;
-    float det = texture2D(uDet, base + clamp(lc, h, 1.0 - h) / 3.0).r;
+    vec3 detT = texture2D(uDet, base + clamp(lc, h, 1.0 - h) / 3.0).rgb;
+    // The atlas holds raw bytes: albedo is sRGB-encoded, slopes are square-root coded.
+    float det = pow(detT.r, 2.2);
+    if (uDetSlopes > 0.5) {
+      vec2 sv = detT.gb * 2.0 - 1.0;
+      gDetSlope = sign(sv) * sv * sv * 2.0;
+      gDetW = wD;
+    }
     float o = 6.0 / uDetRect.z / 3.0;
-    float detLow = 0.25 * (texture2D(uDet, base + clamp(lc + vec2(o * 3.0, 0.0), h, 1.0 - h) / 3.0).r
-                        + texture2D(uDet, base + clamp(lc - vec2(o * 3.0, 0.0), h, 1.0 - h) / 3.0).r
-                        + texture2D(uDet, base + clamp(lc + vec2(0.0, o * 3.0), h, 1.0 - h) / 3.0).r
-                        + texture2D(uDet, base + clamp(lc - vec2(0.0, o * 3.0), h, 1.0 - h) / 3.0).r);
+    float detLow = 0.25 * (pow(texture2D(uDet, base + clamp(lc + vec2(o * 3.0, 0.0), h, 1.0 - h) / 3.0).r, 2.2)
+                        + pow(texture2D(uDet, base + clamp(lc - vec2(o * 3.0, 0.0), h, 1.0 - h) / 3.0).r, 2.2)
+                        + pow(texture2D(uDet, base + clamp(lc + vec2(0.0, o * 3.0), h, 1.0 - h) / 3.0).r, 2.2)
+                        + pow(texture2D(uDet, base + clamp(lc - vec2(0.0, o * 3.0), h, 1.0 - h) / 3.0).r, 2.2));
     float baseLow = textureLod(uOrtho, mapUv, 3.0).r;
     det *= clamp(baseLow / max(detLow, 0.01), 0.5, 2.0);
     ortho = mix(ortho, det, wD);
@@ -541,6 +555,8 @@ sl *= 1.0 - 2.0 * mod(floor(mapUv), 2.0);
 vec3 nDtm = normalize(vec3(-sl.x, 1.0, -sl.y));
 float farW = smoothstep(uNearN * 0.5, uNearN, length(vWorldP.xz - cameraPosition.xz));
 vec3 nBase = normalize(mix(normalize(vNormalW), nDtm, farW * wIn));
+// Near the rover on Mars: relief shading from the 1 m HiRISE DTM (the mesh is 2 m).
+if (gDetW > 0.0) nBase = normalize(mix(nBase, normalize(vec3(-gDetSlope.x, 1.0, -gDetSlope.y)), gDetW * 0.85));
 vec3 nW = normalize(nBase - vec3(grad.x, 0.0, grad.y));
 normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`,
         )
@@ -603,8 +619,9 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`,
   }
 
   /** Attach the streamed full-resolution photo tiles. */
-  setDetail(tex: THREE.Texture, rect: THREE.Vector4, slots: Float32Array, res: number): void {
+  setDetail(tex: THREE.Texture, rect: THREE.Vector4, slots: Float32Array, res: number, slopes = false): void {
     const u = this.uniforms;
+    u.uDetSlopes.value = slopes ? 1 : 0;
     u.uDet.value = tex;
     u.uDetRect.value = rect;
     u.uDetSlots.value = slots;

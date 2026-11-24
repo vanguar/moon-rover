@@ -195,7 +195,7 @@ export class Game {
     this.scene.add(this.terrainR.group);
     if (terrain.meta.detail && quality.level !== 'low') {
       this.detail = new DetailTiles(this.renderer, terrain, `${import.meta.env.BASE_URL}${W.dataDir}`);
-      this.terrainR.setDetail(this.detail.texture, this.detail.rect, this.detail.slots, terrain.meta.detail.res);
+      this.terrainR.setDetail(this.detail.texture, this.detail.rect, this.detail.slots, terrain.meta.detail.res, !!terrain.meta.detail.slopes);
     }
     this.terrainR.setSun(this.sunDir);
     if (!mars) {

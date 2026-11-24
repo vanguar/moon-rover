@@ -32,7 +32,7 @@ export class DetailTiles {
     this.have = new Set(d.tiles);
     const S = d.res * N;
     this.texture = new THREE.DataTexture(new Uint8Array(S * S * 4), S, S, THREE.RGBAFormat);
-    this.texture.colorSpace = THREE.SRGBColorSpace;
+    this.texture.colorSpace = THREE.NoColorSpace; // raw bytes: sRGB albedo + coded slopes
     this.texture.minFilter = THREE.LinearFilter;
     this.texture.magFilter = THREE.LinearFilter;
     this.texture.generateMipmaps = false;
@@ -75,7 +75,7 @@ export class DetailTiles {
         return;
       }
       const src = new THREE.Texture(bmp);
-      src.colorSpace = THREE.SRGBColorSpace;
+      src.colorSpace = THREE.NoColorSpace;
       src.flipY = false;
       src.needsUpdate = true;
       const sx = slot % N, sy = Math.floor(slot / N);

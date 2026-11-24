@@ -26,7 +26,7 @@ export interface TerrainMeta {
   orthoSun?: { azimuth: number; incidence: number };
   projection?: { radius: number; standardParallel: number };
   /** Full-resolution orthophoto tiles streamed around the rover (DetailTiles). */
-  detail?: { x0: number; z0: number; tile: number; res: number; tiles: string[] };
+  detail?: { x0: number; z0: number; tile: number; res: number; tiles: string[]; slopes?: boolean };
   centerLat: number;
   centerLon: number;
   landing: { x: number; z: number };

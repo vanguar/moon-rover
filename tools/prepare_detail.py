@@ -37,7 +37,8 @@ def save_tiles(out_dir, get, x0, z0, ni, nj, res, keep):
             if a is None or not keep(a):
                 continue
             n = f"{i}_{j}.jpg"
-            Image.fromarray(a).save(os.path.join(out_dir, n), quality=Q, optimize=True, progressive=True)
+            # RGB tiles (albedo + slopes) keep full chroma resolution: no 4:2:0 subsampling.
+            Image.fromarray(a).save(os.path.join(out_dir, n), quality=Q, optimize=True, progressive=True, subsampling=0 if a.ndim == 3 else -1)
             names.append(f"{i}_{j}")
             total += os.path.getsize(os.path.join(out_dir, n))
         print(f"  row {j + 1}/{nj}: {len(names)} tiles, {total / 1e6:.1f} MB", flush=True)
@@ -114,6 +115,27 @@ def mars():
     fac_img = Image.fromarray(factor, mode="F")
 
     src = rasterio.open(M.HIRISE_ORTHO)
+    # HiRISE DTM at 1 m (cached by prepare_mars.py): slopes for the relief shading
+    # near the rover, finer than the 2 m game mesh.
+    from rasterio.crs import CRS
+    dtm = np.load(os.path.join(M.RAW, "hirise_dtm_window.npy")).astype(np.float32)
+    dtm = np.where(dtm > -1e30, dtm, np.nan)
+    if np.isnan(dtm).any():
+        dtm = np.where(np.isnan(dtm), np.nanmean(dtm), dtm)
+    dtm_tr = rasterio.Affine(*json.load(open(os.path.join(M.RAW, "hirise_dtm_window.json"))))
+    dtm_crs = CRS.from_proj4(f"+proj=eqc +lat_ts=0 +lat_0=0 +lon_0=0 +x_0=0 +y_0=0 +R={M.R_MARS} +units=m +no_defs")
+
+    def slopes(gx, gz):
+        n = 256 + 2  # 1 m grid with a 1-sample border
+        tr, _ = M.game_transform(TILE + 2, n, gx + TILE / 2, gz + TILE / 2)
+        hh = np.zeros((n, n), np.float32)
+        reproject(dtm, hh, src_transform=dtm_tr, src_crs=dtm_crs, dst_transform=tr, dst_crs=M.GAME_CRS,
+                  resampling=Resampling.cubic, src_nodata=None)
+        gz_, gx_ = np.gradient(hh.astype(np.float64), 1.0)  # rows = +z (south), cols = +x (east)
+        sx, sz = gx_[1:-1, 1:-1], gz_[1:-1, 1:-1]
+        enc = lambda v: np.sign(v) * np.sqrt(np.minimum(np.abs(v) / 2.0, 1.0))  # |slope| <= 2 (63°)
+        up = lambda a: np.asarray(Image.fromarray(((enc(a) * 0.5 + 0.5) * 255).astype(np.float32), mode="F").resize((res, res), Image.BICUBIC))
+        return up(sx), up(sz)
 
     def get(i, j):
         gx, gz = x0 + i * TILE, z0 + j * TILE
@@ -125,11 +147,12 @@ def mars():
             return None
         fx, fz = (gx + half) / px, (gz + half) / px
         f = np.asarray(fac_img.transform((res, res), Image.EXTENT, (fx, fz, fx + TILE / px, fz + TILE / px), Image.BILINEAR))
-        out = np.where(a > 0, np.clip(a / f, 0, 255), 0).astype(np.uint8)
-        return out
+        alb = np.where(a > 0, np.clip(a / f, 0, 255), 0)
+        sx, sz = slopes(gx, gz)
+        return np.dstack([alb, np.clip(sx, 0, 255), np.clip(sz, 0, 255)]).astype(np.uint8)
 
     names, total = save_tiles(os.path.join(D, "detail"), get, x0, z0, ni, nj, res, lambda a: True)
-    meta["detail"] = {"x0": x0, "z0": z0, "tile": TILE, "res": res, "tiles": names}
+    meta["detail"] = {"x0": x0, "z0": z0, "tile": TILE, "res": res, "tiles": names, "slopes": True}
     json.dump(meta, open(os.path.join(D, "terrain.json"), "w", encoding="utf-8"), indent=2)
     print(f"Mars detail: {len(names)} tiles, {total / 1e6:.1f} MB")
 
