@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
+import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import type { QualitySettings } from '../config';
 import type { Physics } from '../physics/Physics';
@@ -98,33 +99,64 @@ function rockGeometry(seed: number, detail: number, tint: RockTint): THREE.Buffe
   return colorize(g, n, tint);
 }
 
-/** Layered sedimentary/lava-flow outcrop: a ledge of strata with recessed bedding planes. */
-function outcropGeometry(seed: number, tint: RockTint): THREE.BufferGeometry {
-  let g: THREE.BufferGeometry = new THREE.IcosahedronGeometry(1, 4);
-  g.deleteAttribute('uv');
-  g.deleteAttribute('normal');
-  g = mergeVertices(g);
-  const p = g.getAttribute('position') as THREE.BufferAttribute;
+/**
+ * Angular rock: a fresh fragment from weathering and rockfall - the convex hull of
+ * points on an irregular, elongated body, so it has flat fracture faces and sharp
+ * edges (flat shading), plus a few spalled-off corners.
+ */
+function angularGeometry(seed: number, tint: RockTint): THREE.BufferGeometry {
   const rnd = mulberry32(seed);
   const n = noise3(seed);
-  const layers = 4 + Math.floor(rnd() * 4);
-  const v = new THREE.Vector3();
-  for (let i = 0; i < p.count; i++) {
-    v.fromBufferAttribute(p, i).normalize();
-    // Irregular outline in plan view, flat-ish top, steeper front.
-    const s = 1 + 0.35 * fbm(n, v, 0.9, 3);
-    v.multiplyScalar(s);
-    v.y *= 0.5;
-    // Bedding: each layer recessed by a different amount, with a soft step.
-    const ly = (v.y + 0.6) * layers;
-    const li = Math.floor(ly), lf = ly - li;
-    const recess = 0.08 * (0.5 + 0.5 * Math.sin(li * 12.9898 + seed)) * (1 - THREE.MathUtils.smoothstep(lf, 0.0, 0.25));
-    v.x *= 1 - recess;
-    v.z *= 1 - recess;
-    v.y += (Math.round(ly) - ly) * 0.06 / layers;
-    p.setXYZ(i, v.x, v.y, v.z);
+  const pts: THREE.Vector3[] = [];
+  const el = new THREE.Vector3(0.8 + rnd() * 0.5, 0.45 + rnd() * 0.45, 0.7 + rnd() * 0.5);
+  const count = 10 + Math.floor(rnd() * 9);
+  for (let i = 0; i < count; i++) {
+    const v = new THREE.Vector3(rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1).normalize();
+    v.multiplyScalar(0.75 + 0.35 * rnd()).multiply(el);
+    if (v.y < -0.25) v.y = -0.25 - (v.y + 0.25) * 0.3; // flatter base, resting on the soil
+    pts.push(v);
   }
-  g.computeVertexNormals();
+  let g: THREE.BufferGeometry = new ConvexGeometry(pts);
+  g = g.index ? g.toNonIndexed() : g;
+  g.deleteAttribute('uv');
+  g.computeVertexNormals(); // non-indexed: one normal per face -> crisp facets
+  return colorize(g, n, tint);
+}
+
+/**
+ * Bedded slabs: a ledge of 3-5 stacked plates with broken, irregular outlines,
+ * each slightly offset and tilted - layered lava flows / sediments breaking up
+ * along their bedding planes.
+ */
+function slabGeometry(seed: number, tint: RockTint): THREE.BufferGeometry {
+  const rnd = mulberry32(seed);
+  const n = noise3(seed);
+  const parts: THREE.BufferGeometry[] = [];
+  const layers = 3 + Math.floor(rnd() * 2);
+  let y = -0.5;
+  for (let l = 0; l < layers; l++) {
+    // Plates as thick as a third of their width: blocky ledges, not sheets.
+    const th = 0.26 + rnd() * 0.18;
+    const shrink = 1 - l * (0.12 + rnd() * 0.1);
+    const ox = (rnd() - 0.5) * 0.3, oz = (rnd() - 0.5) * 0.25;
+    const pts: THREE.Vector3[] = [];
+    const sides = 7 + Math.floor(rnd() * 5);
+    for (let k = 0; k < sides; k++) {
+      const a = (k / sides) * Math.PI * 2 + (rnd() - 0.5) * 0.5;
+      const r = shrink * (0.7 + 0.35 * rnd());
+      const x = Math.cos(a) * r * 1.15 + ox, z = Math.sin(a) * r * 0.8 + oz;
+      pts.push(new THREE.Vector3(x, y + th * (0.1 * rnd()), z), new THREE.Vector3(x * (0.92 + 0.06 * rnd()), y + th * (0.9 + 0.1 * rnd()), z * (0.92 + 0.06 * rnd())));
+    }
+    let g: THREE.BufferGeometry = new ConvexGeometry(pts);
+    g.rotateZ((rnd() - 0.5) * 0.12);
+    g.rotateX((rnd() - 0.5) * 0.1);
+    g = g.index ? g.toNonIndexed() : g;
+    g.deleteAttribute('uv');
+    g.computeVertexNormals();
+    parts.push(g);
+    y += th * (0.92 + 0.08 * rnd());
+  }
+  const g = mergeGeometries(parts)!;
   return colorize(g, n, tint);
 }
 
@@ -262,22 +294,30 @@ float rockH(vec3 p, vec3 w) {
     });
     for (let v = 0; v < VARIANTS; v++) {
       // Cobbles are small on screen: low-poly but smooth, lumpy shapes.
-      const m = new THREE.InstancedMesh(rockGeometry(100 + v * 7, 2, tint), mat, this.capacity());
+      // Mars: half the variants are rounded (delta cobbles, wind-worn), half angular
+      // fresh fragments; the Moon gets angular ones too (impact fragments).
+      // Moon: impact fragments are almost all angular (5 of 6 shapes).
+      const angular = this.mars ? v >= VARIANTS / 2 : v >= 1;
+      const geo = angular ? angularGeometry(100 + v * 7, tint) : rockGeometry(100 + v * 7, 2, tint);
+      const m = new THREE.InstancedMesh(geo, mat, this.capacity());
       this.prep(m);
       this.meshes.push(m);
       // Gravel: the same shapes at a quarter of the triangles (they are a few cm on screen).
-      const gm = new THREE.InstancedMesh(rockGeometry(100 + v * 7, 1, tint), mat, Math.ceil((9 * CELL * CELL * GRAVEL.mars * 1.2) / VARIANTS) + 32);
+      const gm = new THREE.InstancedMesh(angular ? geo : rockGeometry(100 + v * 7, 1, tint), mat, Math.ceil((9 * CELL * CELL * GRAVEL.mars * 1.2) / VARIANTS) + 32);
       this.prep(gm);
       gm.castShadow = false;
       this.gravelMeshes.push(gm);
     }
     for (let v = 0; v < BOULDER_VARIANTS; v++) {
-      this.boulderNear.push(new THREE.InstancedMesh(rockGeometry(311 + v * 13, 4, tint), mat, 600));
-      const far = new THREE.InstancedMesh(rockGeometry(311 + v * 13, 2, tint), mat, 2000);
+      // Two rounded and two angular boulder shapes.
+      const ang = this.mars ? v >= BOULDER_VARIANTS / 2 : v >= 1;
+      this.boulderNear.push(new THREE.InstancedMesh(ang ? angularGeometry(311 + v * 13, tint) : rockGeometry(311 + v * 13, 4, tint), mat, 600));
+      const far = new THREE.InstancedMesh(ang ? angularGeometry(311 + v * 13, tint) : rockGeometry(311 + v * 13, 2, tint), mat, 2000);
       // Far boulders are not drawn into the real-time shadow map (instanced meshes are not culled).
       this.boulderFar.push(far);
     }
-    this.outcropMesh = new THREE.InstancedMesh(outcropGeometry(5, tint), mat, 800);
+    // Outcrops: bedded slabs (stacked plates breaking along bedding planes).
+    this.outcropMesh = new THREE.InstancedMesh(slabGeometry(5, tint), mat, 800);
     for (const m of [...this.boulderNear, ...this.boulderFar, this.outcropMesh]) this.prep(m);
     for (const m of this.boulderFar) m.castShadow = false;
     this.placeBoulders();
@@ -329,13 +369,14 @@ float rockH(vec3 p, vec3 w) {
         const rnd = mulberry32(Math.floor(hash2(i, j, 4242) * 4294967296));
         const px = x + (rnd() - 0.5) * BOULDER_GRID, pz = z + (rnd() - 0.5) * BOULDER_GRID;
         const outcrop = (slopeDeg > 24 && rnd() < 0.35) || (mat > 0.7 && rnd() < 0.45);
+        // (Outcrop albedo: weathered, dust-coated rock, close to the soil around it.)
         let r: number, sx: number, sy: number, sz: number;
         const q = new THREE.Quaternion();
         if (outcrop) {
           // Slab along the contour, dipping with the slope.
           r = slopeDeg > 24 ? 2 + rnd() * 4 : 1.2 + rnd() * 2.5;
           // On the flat pavement: low, wide ledges (layered flows), 20-60 cm proud.
-          sx = r * (1.2 + rnd()); sy = slopeDeg > 24 ? r * (0.35 + rnd() * 0.3) : 0.35 + rnd() * 0.5; sz = r * (0.6 + rnd() * 0.4);
+          sx = r * (1.0 + 0.6 * rnd()); sy = slopeDeg > 24 ? r * (0.45 + rnd() * 0.3) : 0.5 + rnd() * 0.6; sz = r * (0.7 + rnd() * 0.4);
           const yaw = Math.atan2(this.tmpN[0], this.tmpN[2]) + Math.PI / 2;
           const up = new THREE.Vector3(this.tmpN[0], this.tmpN[1], this.tmpN[2]);
           q.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw));
@@ -348,7 +389,7 @@ float rockH(vec3 p, vec3 w) {
         // Partially buried; large blocks sink deeper into the regolith.
         const y = t.height(px, pz) - sy * (outcrop ? 0.45 : 0.3);
         const idx = this.boulders.length;
-        this.boulders.push({ x: px, y, z: pz, r, sx, sy, sz, q, v: Math.floor(rnd() * BOULDER_VARIANTS), albedo: 0.85 + rnd() * 0.4, outcrop });
+        this.boulders.push({ x: px, y, z: pz, r, sx, sy, sz, q, v: Math.floor(rnd() * BOULDER_VARIANTS), albedo: outcrop ? (this.mars ? 0.75 : 0.5) + rnd() * 0.2 : 0.85 + rnd() * 0.4, outcrop });
         const key = `${Math.floor(px / BOULDER_CELL)},${Math.floor(pz / BOULDER_CELL)}`;
         if (!this.boulderGrid.has(key)) this.boulderGrid.set(key, []);
         this.boulderGrid.get(key)!.push(idx);
