@@ -35,6 +35,10 @@ export class TerrainRenderer {
     uOne: { value: number };
     /** Mars: share of diffuse light (1 − direct transmission); fades photographed shading. */
     uDiffuse: { value: number };
+    uDet: { value: THREE.Texture | null };
+    uDetRect: { value: THREE.Vector4 };
+    uDetSlots: { value: Float32Array };
+    uDetRes: { value: number };
   };
   private chunks = new Map<string, Chunk>();
   private workers: Worker[] = [];
@@ -87,6 +91,10 @@ export class TerrainRenderer {
       uFarShadow: { value: farShadow ?? baked },
       uOne: { value: 1 },
       uDiffuse: { value: 0 },
+      uDet: { value: null },
+      uDetRect: { value: new THREE.Vector4(0, 0, 256, 0) },
+      uDetSlots: { value: new Float32Array(9).fill(-1) },
+      uDetRes: { value: 512 },
     };
     const u = this.uniforms;
     this.material = makeLunar(new THREE.MeshLambertMaterial({ color: 0xffffff }), 'terrain', (shader) => {
@@ -111,6 +119,10 @@ export class TerrainRenderer {
         uOne: u.uOne,
         uFive: { value: 5 },
         uDiffuse: u.uDiffuse,
+        uDet: u.uDet,
+        uDetRect: u.uDetRect,
+        uDetSlots: u.uDetSlots,
+        uDetRes: u.uDetRes,
       });
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nvarying vec3 vWorldP;\nvarying vec3 vNormalW;\nattribute vec2 aMorph;\nuniform vec4 uLodD;')
@@ -157,6 +169,10 @@ uniform int uOne;
 uniform int uFive;
 uniform vec3 uSunShadow; // (horizontal direction to the Sun, cot(elevation))
 uniform float uDiffuse;
+uniform sampler2D uDet;
+uniform vec4 uDetRect;
+uniform float uDetSlots[9];
+uniform float uDetRes;
 ${NOISE_GLSL}
 // Cast shadows of sub-metre craters (low Sun: the up-Sun inner wall is in shadow).
 // Marches the bowl profile toward the Sun; returns 1 lit .. 0 shadowed.
@@ -336,6 +352,35 @@ if (uHi.w > 0.5) {
   float wHi = e.x * e.y;
   if (wHi > 0.0) ortho = mix(ortho, texBicubic(uOrthoHi, clamp(hu, 0.0, 1.0)).r, wHi);
 }
+// Full-resolution photo tiles around the rover (HiRISE 25 cm / NAC 50 cm), where a
+// screen pixel is small enough to show them. Brightness matched to the base photo
+// by their local means (the base map has frame seams removed).
+if (uDetRect.w > 0.5) {
+  vec2 tp = (vWorldP.xz - uDetRect.xy) / uDetRect.z;
+  vec2 ij = floor(tp);
+  vec2 sl = mod(ij, 3.0);
+  int si = int(sl.x + sl.y * 3.0 + 0.5);
+  float want = ij.x + ij.y * 4096.0;
+  float texM = uDetRect.z / uDetRes;
+  float fpD = length(fwidth(vWorldP.xz));
+  float wD = (abs(uDetSlots[si] - want) < 0.5 ? 1.0 : 0.0) * (1.0 - smoothstep(texM * 2.0, texM * 6.0, fpD));
+  if (wD > 0.0) {
+    vec2 lc = fract(tp);
+    // Fade the outer 2 % of each tile: no seam where a neighbour is still loading.
+    wD *= smoothstep(0.0, 0.02, min(min(lc.x, 1.0 - lc.x), min(lc.y, 1.0 - lc.y))) * 0.6 + 0.4;
+    float h = 0.5 / uDetRes;
+    vec2 base = sl / 3.0;
+    float det = texture2D(uDet, base + clamp(lc, h, 1.0 - h) / 3.0).r;
+    float o = 6.0 / uDetRect.z / 3.0;
+    float detLow = 0.25 * (texture2D(uDet, base + clamp(lc + vec2(o * 3.0, 0.0), h, 1.0 - h) / 3.0).r
+                        + texture2D(uDet, base + clamp(lc - vec2(o * 3.0, 0.0), h, 1.0 - h) / 3.0).r
+                        + texture2D(uDet, base + clamp(lc + vec2(0.0, o * 3.0), h, 1.0 - h) / 3.0).r
+                        + texture2D(uDet, base + clamp(lc - vec2(0.0, o * 3.0), h, 1.0 - h) / 3.0).r);
+    float baseLow = textureLod(uOrtho, mapUv, 3.0).r;
+    det *= clamp(baseLow / max(detLow, 0.01), 0.5, 2.0);
+    ortho = mix(ortho, det, wD);
+  }
+}
 // Regolith micro-relief: 5 octaves from 4 m down to ~5 cm, faded below pixel size.
 float fp = max(length(fwidth(vWorldP.xz)), 1e-4);
 vec2 grad = vec2(0.0);
@@ -432,10 +477,12 @@ diffuseColor.rgb = regolith * alb;
 vec2 s2 = uSunShadow.xy;
 float cotEl = uSunShadow.z;
 microLit = 1.0;
-#if CRATERLETS > 0
+// Cast shadows inside craterlets: the most expensive part of the shader (9 cells ×
+// 5 march steps), only on High and Ultra.
+#if CRATERLETS > 1
 if (wc1 > 0.0) microLit = min(microLit, mix(1.0, craterShadow(vWorldP.xz, 2.2, 11.0, s2, 1.0 / cotEl), wc1));
 #endif
-#if CRATERLETS > 1
+#if CRATERLETS > 2
 if (wc2 > 0.0) microLit = min(microLit, mix(1.0, craterShadow(vWorldP.xz, 0.7, 29.0, s2, 1.0 / cotEl), wc2));
 #endif
 // Rock fragments and clods: more on bright (fresh, blocky) ejecta, as on every Apollo
@@ -451,6 +498,9 @@ if (wl1 > 0.0) {
   clastTone = tn;
   microLit = min(microLit, mix(1.0, cl.w, wl1));
 }
+#if CRATERLETS < 2
+wl2 = 0.0; // fine gravel only on High and Ultra
+#endif
 if (wl2 > 0.0) {
   vec4 cg = clastField(vWorldP.xz, 0.14, 83.0, mix(0.22, 0.45, fresh), s2, cotEl, tn);
   grad += cg.xy * wl2 * 0.8;
@@ -515,7 +565,7 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`,
 
   private craterletLevel(): number {
     if (this.mars) return this.q.level === 'low' || this.q.level === 'medium' ? 0 : 1;
-    return this.q.level === 'low' ? 0 : this.q.level === 'medium' ? 1 : 2;
+    return this.q.level === 'low' ? 0 : this.q.level === 'medium' ? 1 : this.q.level === 'high' ? 2 : 3;
   }
 
   /** 2 m slope map of the DTM (RG8: dh/dx, dh/dz) for per-pixel normals at distance. */
@@ -550,6 +600,15 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`,
   setShadowMaps(near: THREE.Texture, far: THREE.Texture | null): void {
     this.uniforms.uBaked.value = near;
     if (far) this.uniforms.uFarShadow.value = far;
+  }
+
+  /** Attach the streamed full-resolution photo tiles. */
+  setDetail(tex: THREE.Texture, rect: THREE.Vector4, slots: Float32Array, res: number): void {
+    const u = this.uniforms;
+    u.uDet.value = tex;
+    u.uDetRect.value = rect;
+    u.uDetSlots.value = slots;
+    u.uDetRes.value = res;
   }
 
   /** Sun direction (world, unit) for the sub-pixel cast shadows. */

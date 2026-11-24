@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { TerrainData } from '../terrain/TerrainData';
 import { applyWear } from '../rover/models/wear';
+import { bakeByMaterial } from '../rover/models/kit';
 
 /**
  * Apollo 15 ALSEP as deployed (layout after the ALSEP deployment map in the Apollo
@@ -72,6 +73,7 @@ export function buildAlsep(t: TerrainData, cx: number, cz: number): THREE.Group 
     const c = add(new THREE.PlaneGeometry(0.04, len).rotateX(-Math.PI / 2), cable, p.x / 2, 0.012, p.z / 2);
     c.rotation.y = Math.atan2(p.x, p.z);
   }
+  bakeByMaterial(g, new Set());
   g.position.set(cx, t.height(cx, cz), cz);
   applyWear(g, { dust: { value: 0.35 }, dustColor: new THREE.Color(0.2, 0.195, 0.188), lowY: 0.15, rootInv: { value: new THREE.Matrix4().copy(new THREE.Matrix4().makeTranslation(cx, t.height(cx, cz), cz)).invert() } });
   return g;

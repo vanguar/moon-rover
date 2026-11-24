@@ -30,6 +30,7 @@ import { Rocks } from './terrain/Rocks';
 import type { TerrainData } from './terrain/TerrainData';
 import { FarTerrain } from './terrain/FarTerrain';
 import { TerrainRenderer } from './terrain/TerrainRenderer';
+import { DetailTiles } from './terrain/DetailTiles';
 import { t } from './i18n';
 import { world } from './world';
 
@@ -100,6 +101,7 @@ export class Game {
   private composer: EffectComposer | null = null;
   private topHeight = 70;
   private far: FarTerrain | null = null;
+  private detail: DetailTiles | null = null;
   /** Baked sun-shadow mask on the CPU (500²), to place impact flashes in the dark. */
   private shadowMask: Uint8Array | null = null;
   private flashTimer = 8;
@@ -191,6 +193,10 @@ export class Game {
     this.shadowMask = this.readMask(baked);
     this.terrainR = new TerrainRenderer(terrain, ortho, baked, quality, extras.orthoHi, extras.farShadow, extras.farAlbedo);
     this.scene.add(this.terrainR.group);
+    if (terrain.meta.detail && quality.level !== 'low') {
+      this.detail = new DetailTiles(this.renderer, terrain, `${import.meta.env.BASE_URL}${W.dataDir}`);
+      this.terrainR.setDetail(this.detail.texture, this.detail.rect, this.detail.slots, terrain.meta.detail.res);
+    }
     this.terrainR.setSun(this.sunDir);
     if (!mars) {
       // Terrain shadows follow the Sun: recomputed on the GPU (see ShadowBaker).
@@ -713,6 +719,8 @@ export class Game {
     this.rocks.update(p);
     this.updateCamera(dt);
     this.terrainR.update(this.camera.position, p);
+    const fp = this.heli ? this.heli.pos : p;
+    this.detail?.update(fp.x, fp.z);
     this.dust.update(dt, rover, this.camera);
     this.tracks.update(rover, dt);
     this.updateEnvironment(dt);

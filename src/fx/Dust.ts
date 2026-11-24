@@ -164,7 +164,9 @@ void RE_IndirectDiffuse_Lambert( const in vec3 irradiance, const in vec3 geometr
       this.age[i] += dt;
       // Landing: test against the real ground under the grain (slopes, craters), not the
       // height where it was thrown. Coarse clumps that land fast splash a few fines.
-      if (this.vel[k + 1] < 0 && this.pos[k + 1] < this.ground[i] + 1.5) {
+      // (Only when the grain is below the last known ground level: one height lookup
+      // per landing instead of thousands per frame.)
+      if (this.vel[k + 1] < 0 && this.pos[k + 1] < this.ground[i]) {
         const gy = this.terrain.height(this.pos[k], this.pos[k + 2]);
         this.ground[i] = gy;
         if (this.pos[k + 1] <= gy) {

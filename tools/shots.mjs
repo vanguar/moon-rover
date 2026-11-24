@@ -20,9 +20,9 @@ const page = await browser.newPage({ viewport: { width: 1000, height: 1000 } });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 await page.goto(`${base}?world=moon&shots=1`);
 await page.waitForSelector('#start', { state: 'visible', timeout: 180000 });
-await page.click('#start');
+await page.click('#start'); await page.waitForTimeout(600); if (await page.isVisible('#brief')) await page.click('#b-ok');
 await page.waitForTimeout(800);
-await page.addStyleTag({ content: '#hud,#toolbar,#touch,#menu,.toast,#radio{display:none!important}' });
+await page.addStyleTag({ content: '#hud,#toolbar,#touch,#menu,.toast,#radio,#mission,#brief,#toast{display:none!important}' });
 
 for (const v of views) {
   if (only.length && !only.includes(v.name)) continue;

@@ -39,12 +39,18 @@ export class InstrumentPanel {
 
   constructor() {
     this.canvas = document.createElement('canvas');
-    this.canvas.width = W;
-    this.canvas.height = H;
+    // Drawn in 1024 × 640 units, stored at 0.75 scale (the face is < 500 px on screen).
+    this.canvas.width = W * 0.75;
+    this.canvas.height = H * 0.75;
     this.g = this.canvas.getContext('2d')!;
+    this.g.setTransform(0.75, 0, 0, 0.75, 0, 0);
     this.tex = new THREE.CanvasTexture(this.canvas);
     this.tex.colorSpace = THREE.SRGBColorSpace;
     this.tex.anisotropy = 8;
+    // Re-uploading a 1024 × 640 canvas with mipmaps stalled integrated GPUs (−30 % fps):
+    // no mipmaps, and uploads only when the readings actually change.
+    this.tex.generateMipmaps = false;
+    this.tex.minFilter = THREE.LinearFilter;
 
     const pw = 0.5, ph = 0.3125;
     const housing = new THREE.Mesh(
@@ -92,10 +98,18 @@ export class InstrumentPanel {
     this.timer -= dt;
     this.blink += dt;
     if (this.timer > 0) return;
-    this.timer = 1 / 15;
+    this.timer = 1 / 5;
+    const blinkOn = Math.floor(this.blink * 2) % 2;
+    const key = [d.speedKmh.toFixed(1), d.pitch.toFixed(0), d.roll.toFixed(0), d.heading.toFixed(0), d.bearing.toFixed(0), d.range.toFixed(1),
+      d.distance.toFixed(1), (d.battery * 100).toFixed(0), d.volts.toFixed(1), d.battTempC.toFixed(0), d.motorTempC.map((v) => v.toFixed(0)).join(),
+      d.slope.toFixed(0), d.elevation.toFixed(0), d.parkBrake, d.headlights, d.warnRoll, d.warnBatt, d.warnTemp, blinkOn].join('|');
+    if (key === this.lastKey) return;
+    this.lastKey = key;
     this.draw(d);
     this.tex.needsUpdate = true;
   }
+
+  private lastKey = '';
 
   private draw(d: PanelData): void {
     const g = this.g;

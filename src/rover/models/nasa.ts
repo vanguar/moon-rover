@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { dataUrl } from '../../version';
-import { type RoverAnimState, type RoverModel, type WheelVisual } from './kit';
+import { bakeByMaterial, type RoverAnimState, type RoverModel, type WheelVisual } from './kit';
 
 /**
  * Official NASA 3D models (NASA 3D Resources, github.com/nasa/NASA-3D-Resources,
@@ -60,8 +60,12 @@ export function buildLunarModule(): THREE.Object3D | null {
   if (!g) return null;
   const o = g.scene.clone(true);
   o.scale.setScalar(1.42);
-  prepare(o);
-  return o;
+  // 134 separate parts → one mesh per material (12 draw calls instead of ~270 with shadows).
+  const holder = new THREE.Group();
+  holder.add(o);
+  bakeByMaterial(holder, new Set());
+  prepare(holder);
+  return holder;
 }
 
 /**

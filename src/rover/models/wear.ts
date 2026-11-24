@@ -39,8 +39,11 @@ uniform mat4 uWearRootInv;
 ${NOISE_GLSL}
 // Noise values shared by the normal, roughness and colour stages (computed once).
 float gWearA = 0.0, gWearB = 0.0;
+// One noise lookup on the plane facing the dominant normal axis (instead of three
+// blended planes): a third of the cost on parts that can fill half the screen.
 float wTri(vec3 p, vec3 w) {
-  return lnoised(p.yz).x * w.x + lnoised(p.xz + 13.1).x * w.y + lnoised(p.xy + 27.7).x * w.z;
+  vec2 q = w.x > w.y && w.x > w.z ? p.yz : w.y > w.z ? p.xz + 13.1 : p.xy + 27.7;
+  return lnoised(q).x;
 }
 `;
 
@@ -131,7 +134,7 @@ vWearY = (uWearRootInv * modelMatrix * vec4(position, 1.0)).y;`,
 {
   vec3 an = abs(normalize(vWearN));
   vec3 w = an / (an.x + an.y + an.z + 1e-4);
-  float n2 = wTri(vWearP * 4.0 + 9.0, w);
+  float n2 = gWearA;
   float n3 = gWearB;
   // Grime and small chips on paint.
   if (uWearKind > 0.5 && uWearKind < 1.5) diffuseColor.rgb *= 0.9 + 0.12 * n2 - 0.25 * smoothstep(0.86, 0.95, n3);
