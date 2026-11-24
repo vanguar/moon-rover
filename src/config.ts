@@ -20,7 +20,7 @@ export interface QualitySettings {
 
 const PRESETS: Record<QualityLevel, Omit<QualitySettings, 'level' | 'pixelRatio'> & { maxPixelRatio: number }> = {
   low: {
-    maxPixelRatio: 1, shadowMapSize: 2048, shadowRange: 30, drawDistance: 1600,
+    maxPixelRatio: 1.25, shadowMapSize: 2048, shadowRange: 30, drawDistance: 1600,
     lodSegments: [128, 64, 32, 16, 8], lodDistances: [70, 260, 600, 1100],
     rockRadius: 110, rockDensity: 0.45, maxRocks: 2500, dustParticles: 1200, stars: 2500,
   },
@@ -47,10 +47,56 @@ export const isMobile: boolean = (() => {
   return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (touch && Math.min(screen.width, screen.height) < 900);
 })();
 
+const LEVEL_ORDER: QualityLevel[] = ['low', 'medium', 'high', 'ultra'];
+const AUTO_KEY = 'moon-rover-autoq';
+
+/**
+ * What automatic quality settled on for this device in earlier sessions: the level it
+ * ran at, whether it had headroom left (then the next session tries one level up),
+ * and the lowest level found too slow (never probed again).
+ */
+interface AutoMemory {
+  level: QualityLevel;
+  headroom?: boolean;
+  ceiling?: QualityLevel;
+}
+
+function loadAutoMemory(): AutoMemory | null {
+  try {
+    const m = JSON.parse(localStorage.getItem(AUTO_KEY) ?? 'null') as AutoMemory | null;
+    return m && LEVEL_ORDER.includes(m.level) ? m : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Remember the level automatic quality ended up with (see Game.adaptQuality). */
+export function saveAutoQuality(level: QualityLevel, headroom: boolean, tooSlow?: QualityLevel): void {
+  try {
+    const prev = loadAutoMemory();
+    let ceiling = prev?.ceiling;
+    if (tooSlow && (!ceiling || LEVEL_ORDER.indexOf(tooSlow) < LEVEL_ORDER.indexOf(ceiling))) ceiling = tooSlow;
+    localStorage.setItem(AUTO_KEY, JSON.stringify({ level, headroom, ceiling } satisfies AutoMemory));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
 export function autoQuality(): QualityLevel {
+  // Learned on this device: start where it settled, one level up if there was headroom
+  // (but never at a level that already proved too slow).
+  const m = loadAutoMemory();
+  if (m) {
+    const i = LEVEL_ORDER.indexOf(m.level);
+    const up = LEVEL_ORDER[Math.min(i + 1, LEVEL_ORDER.length - 1)];
+    const cap = m.ceiling ? LEVEL_ORDER.indexOf(m.ceiling) - 1 : LEVEL_ORDER.length - 1;
+    return m.headroom && LEVEL_ORDER.indexOf(up) <= cap ? up : m.level;
+  }
   if (isMobile) {
+    // First run: start high enough to look good; the first seconds of driving step it
+    // down quickly if the phone cannot keep up.
     const mem = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4;
-    return mem >= 6 && (navigator.hardwareConcurrency ?? 4) >= 8 ? 'medium' : 'low';
+    return mem >= 6 && (navigator.hardwareConcurrency ?? 4) >= 8 ? 'high' : 'medium';
   }
   // Integrated GPUs (Intel Iris/UHD, Apple M-series iGPU is fine) start one level lower.
   try {

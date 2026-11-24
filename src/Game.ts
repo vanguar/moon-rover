@@ -4,7 +4,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { CabinAudio } from './audio/CabinAudio';
-import { isMobile, makeQuality, type QualityLevel, type QualitySettings } from './config';
+import { isMobile, makeQuality, saveAutoQuality, type QualityLevel, type QualitySettings } from './config';
 import { Dust } from './fx/Dust';
 import { MarsSky } from './fx/MarsSky';
 import { MarsWeather, type WeatherMode } from './fx/MarsWeather';
@@ -1564,20 +1564,30 @@ export class Game {
     d.t = 0;
     d.n = 0;
     d.late = 0;
-    const maxScale = 1, minScale = isMobile ? 0.5 : 0.6;
+    // Resolution never drops below 0.75 device pixels per CSS pixel: under that the
+    // image turns to mush (it used to reach 0.5 on phones) - a lower level is better.
+    const maxScale = 1, minScale = Math.min(1, Math.max(isMobile ? 0.5 : 0.6, 0.75 / this.q.pixelRatio));
     let scale = d.scale;
+    // Calibration: the first ~25 s of play find the level this device can hold
+    // (level changes recompile shaders - a short freeze - so they happen early).
+    d.played += 0.5;
+    const settling = d.played < 25;
     if (lateFrac > 0.12) {
       d.calm = 0;
+      d.easy = 0;
       if (scale > minScale + 1e-3) scale = Math.max(minScale, scale - 0.1);
       // A level change recompiles the big terrain shader (a 1–3 s freeze on an iGPU):
-      // only downward, at most once per 90 s, never back up automatically.
-      else if (this.autoQuality && ++d.floorHits >= 4 && this.time - d.downAt > 90) {
+      // only downward; while calibrating after 2 slow checks (4 s apart), later after
+      // 4 and at most once per 90 s.
+      else if (this.autoQuality && ++d.floorHits >= (settling ? 2 : 4) && this.time - d.downAt > (settling ? 4 : 90)) {
         d.floorHits = 0;
         const i = LEVELS.indexOf(this.q.level);
         if (i > 0) {
+          const slow = this.q.level;
           this.setQuality(LEVELS[i - 1], true);
           scale = 0.85;
           d.downAt = this.time;
+          saveAutoQuality(this.q.level, false, slow);
         }
       }
     } else if (lateFrac < 0.02) {
@@ -1587,6 +1597,17 @@ export class Game {
         scale = Math.min(maxScale, scale + 0.05);
         d.calm = 0;
       }
+      // A minute at full resolution with time to spare: next session tries a level up.
+      if (scale >= maxScale - 1e-3) d.easy += 0.5;
+      if (this.autoQuality && d.easy >= 60 && !d.savedEasy) {
+        d.savedEasy = true;
+        saveAutoQuality(this.q.level, true);
+      }
+    }
+    else d.easy = 0; // a few late frames: no headroom to speak of
+    if (this.autoQuality && !settling && !d.savedLevel) {
+      d.savedLevel = true;
+      saveAutoQuality(this.q.level, false);
     }
     if (Math.abs(scale - d.scale) > 1e-3) {
       d.scale = scale;
@@ -1596,7 +1617,7 @@ export class Game {
   }
 
   /** Dynamic-resolution state (see adaptQuality). */
-  private drs = { t: 0, n: 0, late: 0, scale: 1, calm: 0, floorHits: 0, warm: 4, minDt: 1 / 60, downAt: -1e9 };
+  private drs = { t: 0, n: 0, late: 0, scale: 1, calm: 0, floorHits: 0, warm: 4, minDt: 1 / 60, downAt: -1e9, played: 0, easy: 0, savedEasy: false, savedLevel: false };
 
   private readMask(baked: THREE.Texture): Uint8Array | null {
     try {
