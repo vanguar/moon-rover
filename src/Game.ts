@@ -302,6 +302,7 @@ export class Game {
     this.scene.add(this.heli.object, this.heli.dustObject);
     this.rover.parkBrake = true;
     this.input.heliMode = true;
+    this.audio.setRoverMuted(true);
     this.heliHud = document.getElementById('heli-hud');
     this.heliHud?.classList.remove('hidden');
     document.body.classList.add('heli');
@@ -317,6 +318,7 @@ export class Game {
     this.scene.remove(this.heli.object, this.heli.dustObject);
     this.heli = null;
     this.input.heliMode = false;
+    this.audio.setRoverMuted(false);
     this.rover.parkBrake = false;
     this.heliHud?.classList.add('hidden');
     document.body.classList.remove('heli');

@@ -34,6 +34,14 @@ export class CabinAudio {
   private sendTimer = 0;
   /** Wind loudness 0..1 (Mars weather), heard through the rover's microphone. */
   wind = 0;
+  private roverGain: GainNode | null = null;
+
+  /** Silence the rover's mechanical sound (the helicopter is being flown). */
+  setRoverMuted(m: boolean): void {
+    if (this.ctx && this.roverGain) this.roverGain.gain.setTargetAtTime(m ? 0 : 1, this.ctx.currentTime, 0.15);
+    this.roverMuted = m;
+  }
+  private roverMuted = false;
 
   async start(volume: number): Promise<void> {
     if (this.ctx) {
@@ -69,7 +77,10 @@ export class CabinAudio {
     try {
       await ctx.audioWorklet.addModule(workletUrl);
       this.node = new AudioWorkletNode(ctx, 'rover-audio', { numberOfInputs: 0, outputChannelCount: [2] });
-      this.node.connect(this.master);
+      // Through its own gain so it can be muted while the helicopter flies.
+      this.roverGain = ctx.createGain();
+      this.roverGain.gain.value = this.roverMuted ? 0 : 1;
+      this.node.connect(this.roverGain).connect(this.master);
     } catch (e) {
       console.warn('AudioWorklet unavailable', e);
     }
