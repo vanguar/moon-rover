@@ -475,6 +475,17 @@ float wc2 = clamp(1.5 - fp * 5.0, 0.0, 1.0);
 if (wc2 > 0.0) grad += craterField(vWorldP.xz, 0.7, 29.0).yz * wc2;
 #endif
 #if MARS > 0
+// HiRISE photographed the floor with the Sun ~35° high: the transverse ripples
+// (TARs, 1–2 m high, below the DTM resolution) are baked into the image as dark
+// shadow stripes 1–25 m across. Seen from the ground they read as shadows lying on
+// flat sand. Brightness variation at those scales is therefore removed from the
+// albedo (the game's own Sun and the 1 m slopes light the relief); the material
+// contrast of larger patches and the sub-metre grain stay.
+{
+  float aLow = textureLod(uOrtho, mapUv, 4.0).r;
+  float r = ortho / max(aLow, 0.01);
+  ortho = aLow * (1.0 + (r - 1.0) * 0.18);
+}
 // In a dust storm the light is diffuse: shading still left in the HiRISE photograph
 // (ripples below the DTM resolution) must not read as shadows — fade it to the local mean.
 ortho = mix(ortho, textureLod(uOrthoHi, clamp((vWorldP.xz - uHi.xy) / uHi.z, 0.0, 1.0), 4.0).r, uDiffuse * 0.75 * step(0.5, uHi.w));
@@ -489,13 +500,14 @@ alb = clamp(0.135 + (alb - 0.135) * 0.8, 0.015, 1.0);
 // (slightly cool), bright ferric dust is a warm butterscotch. The fraction follows the
 // albedo relative to its surroundings, so every dark patch also changes hue.
 float aLocal = textureLod(uOrtho, mapUv, 5.0).r * 0.9;
-float dustF = smoothstep(0.82, 1.18, alb / max(aLocal, 0.01));
+// Dust vs. sand from patches of ~25 m against ~100 m (not from the ripple shading).
+float dustF = smoothstep(0.9, 1.1, textureLod(uOrtho, mapUv, 4.0).r / max(textureLod(uOrtho, mapUv, 6.0).r, 0.01));
 float paveShade = 1.0;
 #if PAVE > 0
 // Material from the map shared with the physics: rocky pavement crops out of the sand
 // as fractured plates a few centimetres proud, with sand in the cracks.
 float matW = texture2D(uMat, mapUv).r;
-dustF = mix(dustF * 0.35, 1.0, matW);
+dustF = mix(dustF * 0.5, 1.0, matW);
 {
   vec2 pq = vec2(dot(vWorldP.xz, vec2(PAVE_ROT.x, -PAVE_ROT.y)), dot(vWorldP.xz, PAVE_ROT.yx)) / PAVE_SIZE;
   float e = 0.75 / 1024.0;
