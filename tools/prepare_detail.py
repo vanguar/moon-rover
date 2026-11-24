@@ -106,7 +106,8 @@ def mars():
 
     # Shading factor (same model as deshade_mars.py) on the 2 m DTM grid.
     import deshade_mars as DS
-    h = np.asarray(Image.open(os.path.join(D, "heightmap.png"))).astype(np.float64) * (meta["maxHeight"] - meta["minHeight"]) / 65535
+    import heightmap_io
+    h = heightmap_io.load(D).astype(np.float64) * (meta["maxHeight"] - meta["minHeight"]) / 65535
     px = meta["pixelSize"]
     az, el = 275, 35
     s = DS.shade(h, px, az, el)

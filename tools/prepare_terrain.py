@@ -7,7 +7,7 @@ Inputs  (raw_data/, not committed):
   bsc5-short.json                          Yale Bright Star Catalog
 
 Outputs (public/data/):
-  heightmap.png   16-bit grayscale PNG (4000 x 4000, 2 m), heights normalized to [min, max]
+  heightmap.bin   16-bit heights (4000 x 4000, 2 m) in steps of heightStep above minHeight (tools/heightmap_io.py)
   ortho.jpg       albedo image of the whole window (2 m/px)
   ortho_hi.jpg    orthophoto at ~0.6 m/px around the LM and the east rim of the rille
   shadow.png      8-bit baked cast-shadow mask for the game epoch (fallback; the game
@@ -36,6 +36,7 @@ from rasterio.windows import Window
 from scipy import ndimage
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import heightmap_io  # noqa: E402
 from ephemeris import GAME_EPOCH, LunarSky  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -290,10 +291,10 @@ def main():
     hmin, hmax = float(h.min()), float(h.max())
     print(f"Height range: {hmin:.1f} .. {hmax:.1f} m")
     # 4 cm height steps: far below the DTM's vertical precision (~0.5 m), and a third
-    # smaller PNG than full 16-bit precision.
+    # smaller file than full 16-bit precision.
     q = np.round((h - hmin) / HSTEP).astype(np.uint16)
     hmax = hmin + float(q.max()) * HSTEP
-    Image.fromarray(q, mode="I;16").save(os.path.join(OUT, "heightmap.png"), optimize=True)
+    heightmap_io.save(OUT, q)
     # DTM weight (1 = measured at 2 m, 0 = SLDEM + synthetic detail), for docs and debugging.
     Image.fromarray((wdtm[::4, ::4] * 255).astype(np.uint8)).save(os.path.join(RAW, "dtm_weight.png"))
     # DTM weight for the run-time roughness (1000², a few kB).

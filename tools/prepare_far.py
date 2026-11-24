@@ -21,6 +21,7 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import heightmap_io  # noqa: E402
 from ephemeris import GAME_EPOCH, LunarSky  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -77,7 +78,7 @@ def main():
     h = sample_sldem(dem, lat, lon)
 
     # Vertical alignment with the NAC DTM over the DTM window.
-    hm = np.asarray(Image.open(os.path.join(OUT, "heightmap.png")), dtype=np.float64)
+    hm = heightmap_io.load(OUT).astype(np.float64)
     dtm = meta["minHeight"] + hm * meta.get("heightStep", (meta["maxHeight"] - meta["minHeight"]) / 65535.0)
     half_w = meta["sizeX"] / 2
     inwin = (np.abs(xx) < half_w) & (np.abs(zz) < half_w)

@@ -23,6 +23,7 @@ function dataVersion(): string {
   return h.digest('hex').slice(0, 10);
 }
 import { VitePWA } from 'vite-plugin-pwa';
+import wasm from 'vite-plugin-wasm';
 
 // GitHub Pages serves the site from /<repo>/; override with BASE_PATH for other hosts.
 const base = process.env.BASE_PATH ?? '/moon-rover/';
@@ -32,8 +33,9 @@ const DATA_VERSION = dataVersion();
 /**
  * Start the big terrain downloads from the HTML itself, before the game code has
  * even arrived (they used to begin only after ~1 MB of JS was fetched and run).
- * The URLs carry the same ?v= hash as the game's own requests, so the game picks
- * up these responses instead of downloading again.
+ * The URLs carry the same ?v= hash as the game's own requests, and the game reads
+ * every one of them with fetch() (images too, see loadTexture in src/main.ts), so
+ * it picks up these responses instead of downloading again.
  */
 function preloadData() {
   return {
@@ -43,8 +45,8 @@ function preloadData() {
 var q=new URLSearchParams(location.search).get('world'),w=q;
 if(!w){try{w=(JSON.parse(localStorage.getItem('moon-rover-settings')||'{}').world)}catch(e){}}
 var d=w==='mars'?'data/mars/':'data/',v='?v=${DATA_VERSION}';
-function l(f,as){var e=document.createElement('link');e.rel='preload';e.as=as;e.href=d+f+v;e.crossOrigin='anonymous';if(as==='fetch')e.setAttribute('fetchpriority','high');document.head.appendChild(e)}
-l('terrain.json','fetch');l('heightmap.png','fetch');l('ortho.jpg','image');l('ortho_hi.jpg','image');l('shadow.png','image');
+function l(f,hi){var e=document.createElement('link');e.rel='preload';e.as='fetch';e.href=d+f+v;e.crossOrigin='anonymous';if(hi)e.setAttribute('fetchpriority','high');document.head.appendChild(e)}
+l('terrain.json',1);l('heightmap.bin',1);l('ortho.jpg');l('ortho_hi.jpg');l('shadow.png');
 }catch(e){}})();</script>`;
       return html.replace('<head>', `<head>
     ${script}`);
@@ -65,6 +67,8 @@ export default defineConfig({
   },
   worker: { format: 'es' },
   plugins: [
+    // Rapier's WebAssembly as an ES module import (top-level await; es2022 target).
+    wasm(),
     preloadData(),
     VitePWA({
       // Own service worker (src/sw.ts): network-first page, see the comment there.
@@ -73,7 +77,6 @@ export default defineConfig({
       srcDir: 'src',
       filename: 'sw.ts',
       injectRegister: false,
-      includeAssets: ['icons/*.png', 'rovers/*.jpg'],
       manifest: {
         name: 'Планетоход — Луна и Марс',
         short_name: 'Планетоход',
@@ -96,8 +99,10 @@ export default defineConfig({
         // use under their versioned URLs (src/version.ts), so a release never mixes old and
         // new data and phones never download the 25 MB twice.
         globPatterns: ['**/*.{js,css,html,png,jpg,json,wasm,webmanifest}'],
-        globIgnores: ['**/data/**', '**/models/**', '**/draco/**', 'sw.js'],
-        maximumFileSizeToCacheInBytes: 16 * 1024 * 1024, // heightmap.png of the 8 × 8 km site is ~14 MB
+        // assets/draco_*: copies three's DRACOLoader references by default; the game
+        // sets its decoder path to draco/ (src/rover/models/nasa.ts) and never loads them.
+        globIgnores: ['**/data/**', '**/models/**', '**/draco/**', '**/assets/draco_*', 'sw.js'],
+        maximumFileSizeToCacheInBytes: 16 * 1024 * 1024,
       },
     }),
   ],

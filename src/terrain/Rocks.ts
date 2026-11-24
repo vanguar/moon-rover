@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
-import type RAPIER from '@dimforge/rapier3d-compat';
+import type RAPIER from '@dimforge/rapier3d';
 import type { QualitySettings } from '../config';
 import type { Physics } from '../physics/Physics';
 import { makeLunar, NOISE_GLSL } from '../render/lunar';
@@ -17,6 +17,11 @@ const COLLIDER_SMALL = 0.1;
 const BOULDER_GRID = 8;
 const BOULDER_CELL = 64;
 const BOULDER_VARIANTS = 4;
+/** Boulder probability per BOULDER_GRID cell: base + steep slopes + rocky pavement (each weight ≤ 1). */
+const BOULDER_P0 = 0.004;
+const BOULDER_P_SLOPE = 0.12;
+const BOULDER_P_PAVE = 0.05;
+const BOULDER_P_MAX = BOULDER_P0 + BOULDER_P_SLOPE + BOULDER_P_PAVE;
 /** Gravel layer (5–30 cm) in the 3 × 3 cells around the rover, per m² (Moon / Mars). */
 const GRAVEL = { moon: 0.12, mars: 0.4 };
 
@@ -401,13 +406,16 @@ float rockH(vec3 p, vec3 w) {
       for (let i = 0; i < n; i++) {
         const x = -t.halfX + (i + 0.5) * BOULDER_GRID, z = -t.halfZ + (j + 0.5) * BOULDER_GRID;
         const h = hash2(i, j, 991);
+        // Above the highest possible p (steepest slope on pavement) the cell is empty
+        // whatever the slope: skip the costly normal (4 height samples) for ~83 % of cells.
+        if (h > BOULDER_P_MAX) continue;
         t.normal(x, z, this.tmpN, 3);
         const slopeDeg = (Math.acos(Math.min(1, this.tmpN[1])) * 180) / Math.PI;
         // Probability per 64 m² cell: sparse on the plains, dense on steep slopes.
         // Mars: the bedrock pavement (material map) is strewn with blocks and low ledges
         // of the Máaz lava flows; the sand between them has few.
         const mat = t.materialAt(x, z);
-        const p = 0.004 + 0.12 * THREE.MathUtils.smoothstep(slopeDeg, 10, 30) + 0.05 * mat;
+        const p = BOULDER_P0 + BOULDER_P_SLOPE * THREE.MathUtils.smoothstep(slopeDeg, 10, 30) + BOULDER_P_PAVE * mat;
         if (h > p) continue;
         const rnd = mulberry32(Math.floor(hash2(i, j, 4242) * 4294967296));
         const px = x + (rnd() - 0.5) * BOULDER_GRID, pz = z + (rnd() - 0.5) * BOULDER_GRID;

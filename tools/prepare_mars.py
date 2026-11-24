@@ -7,7 +7,7 @@ Sources (Mars 2020 Terrain Relative Navigation maps, USGS Astrogeology, read rem
   CTX ortho 6 m    JEZ_ctx_B_soc_008_orthoMosaic_6m_Eqc_latTs0_lon0.tif
 
 Outputs (public/data/mars/):
-  heightmap.png  16-bit, 3000 x 3000 at 2 m (6 x 6 km)
+  heightmap.bin  16-bit, 3000 x 3000 at 2 m (6 x 6 km), tools/heightmap_io.py
   ortho.jpg      4096² over the window (1.46 m/px);  ortho_hi.jpg 4096² over 2.4 km (0.59 m/px)
   shadow.png     baked cast shadows for the real sun (Mars24 algorithm)
   far_height.png CTX terrain, 501² at 60 m (30 x 30 km); far_albedo.jpg CTX ortho 2048²; far_shadow.png
@@ -32,6 +32,8 @@ from rasterio.fill import fillnodata
 from rasterio.transform import from_origin
 from rasterio.warp import reproject
 from rasterio.windows import from_bounds
+
+import heightmap_io
 
 os.environ.setdefault("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
 os.environ.setdefault("GDAL_HTTP_MAX_RETRY", "5")
@@ -179,7 +181,7 @@ def main():
     hmin, hmax = float(h.min()), float(h.max())
     print(f"Height range {hmin:.1f} .. {hmax:.1f} m (areoid)")
     q = np.round((h - hmin) / (hmax - hmin) * 65535).astype(np.uint16)
-    Image.fromarray(q, mode="I;16").save(os.path.join(OUT, "heightmap.png"), optimize=True)
+    heightmap_io.save(OUT, q)
 
     tr, _ = game_transform(SIZE * PX, ORTHO_OUT)
     print("Warping HiRISE ortho (window) ...", flush=True)

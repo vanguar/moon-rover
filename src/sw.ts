@@ -18,6 +18,12 @@
  *    background (stale-while-revalidate);
  *  - skipWaiting() first, before precaching; files are precached one by one so
  *    one failed request cannot abort the installation of a new version;
+ *  - precaching downloads only what changed: a file with the same URL and
+ *    revision as in the previous build's cache is copied from there; content-hashed
+ *    files (no revision) may come from the HTTP cache, where the page has usually
+ *    just put them; the others are revalidated (a 304 when unchanged);
+ *  - the page asks (HAS_URL) whether this worker serves its own build, so it
+ *    reloads after an update only when it really is an old one;
  *  - activate deletes every cache that is not ours (including old Workbox ones).
  */
 const sw = self as unknown as ServiceWorkerGlobalScope;
@@ -41,18 +47,51 @@ const CACHE = `${PREFIX}${BUILD}`;
 const RUNTIME = `${PREFIX}runtime`;
 const SCOPE = new URL(sw.registration.scope);
 
+/** The precache manifest stored with each build's cache, to tell unchanged files at the next install. */
+const MANIFEST_KEY = new URL('__precache-manifest', SCOPE).href;
+// vite-plugin-pwa lists the web manifest and its icons twice: one entry per URL.
+const ENTRIES = [...new Map(MANIFEST.map((m) => [new URL(m.url, SCOPE).href, m] as const))];
+const MANIFEST_URLS = new Set(ENTRIES.map(([url]) => url));
+
+/** url -> [revision, cache name] of every file precached by earlier builds still on the device. */
+async function previousEntries(): Promise<Map<string, [string | null, string]>> {
+  const out = new Map<string, [string | null, string]>();
+  for (const key of await caches.keys()) {
+    if (key === CACHE || !key.startsWith(PREFIX) || key === RUNTIME || key === DATA) continue;
+    try {
+      const res = await (await caches.open(key)).match(MANIFEST_KEY);
+      const list = res ? ((await res.json()) as ManifestEntry[]) : [];
+      for (const m of list) out.set(new URL(m.url, SCOPE).href, [m.revision, key]);
+    } catch {
+      /* unreadable old cache: download its files again */
+    }
+  }
+  return out;
+}
+
+async function precache(): Promise<void> {
+  const c = await caches.open(CACHE);
+  const prev = await previousEntries();
+  await Promise.all(
+    ENTRIES.map(async ([url, m]) => {
+      try {
+        const old = prev.get(url);
+        if (old && old[0] === m.revision) {
+          const hit = await (await caches.open(old[1])).match(url);
+          if (hit) return c.put(url, hit);
+        }
+        await c.add(new Request(url, { cache: m.revision === null ? 'default' : 'no-cache' }));
+      } catch (err) {
+        console.warn('[SW] precache failed', url, err);
+      }
+    }),
+  );
+  await c.put(MANIFEST_KEY, new Response(JSON.stringify(MANIFEST), { headers: { 'Content-Type': 'application/json' } }));
+}
+
 sw.addEventListener('install', (e) => {
   void sw.skipWaiting();
-  e.waitUntil(
-    caches.open(CACHE).then((c) =>
-      Promise.all(
-        MANIFEST.map((m) => {
-          const url = new URL(m.url, SCOPE).href;
-          return c.add(new Request(url, { cache: 'reload' })).catch((err) => console.warn('[SW] precache failed', url, err));
-        }),
-      ),
-    ),
-  );
+  e.waitUntil(precache());
 });
 
 sw.addEventListener('activate', (e) => {
@@ -74,6 +113,7 @@ sw.addEventListener('activate', (e) => {
 
 sw.addEventListener('message', (e) => {
   if (e.data === 'SKIP_WAITING') void sw.skipWaiting();
+  else if (e.data?.type === 'HAS_URL') e.ports[0]?.postMessage(MANIFEST_URLS.has(String(e.data.url)));
 });
 
 async function fromCache(req: Request | string): Promise<Response | undefined> {
@@ -88,7 +128,11 @@ async function put(cacheName: string, req: Request, res: Response): Promise<void
 
 async function networkFirst(req: Request, fallback?: string): Promise<Response> {
   try {
-    const res = await fetch(req, { cache: 'no-cache' });
+    // A navigation Request cannot be re-created with an init (TypeError: mode
+    // 'navigate'), which silently sent every launch to the cached page: fetch its URL.
+    let res = await fetch(req.mode === 'navigate' ? req.url : req, { cache: 'no-cache' });
+    // A navigation may not be answered with a followed redirect: hand over a copy.
+    if (res.redirected) res = new Response(res.body, { status: res.status, statusText: res.statusText, headers: res.headers });
     if (res.ok) void put(RUNTIME, req, res.clone());
     return res;
   } catch (err) {

@@ -1,4 +1,4 @@
-import RAPIER from '@dimforge/rapier3d-compat';
+import RAPIER from '@dimforge/rapier3d';
 import { world } from '../world';
 import type { TerrainData } from '../terrain/TerrainData';
 
@@ -45,7 +45,8 @@ export class Physics {
   }
 
   static async create(terrain: TerrainData): Promise<Physics> {
-    await RAPIER.init();
+    // The WebAssembly module is instantiated when this chunk loads (vite-plugin-wasm,
+    // a separate streamed .wasm instead of the compat build's 4 MB of base64 in JS).
     return new Physics(RAPIER, terrain);
   }
 

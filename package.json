@@ -12,7 +12,7 @@
     "probe": "node tools/probe.mjs"
   },
   "dependencies": {
-    "@dimforge/rapier3d-compat": "^0.21.0",
+    "@dimforge/rapier3d": "^0.21.0",
     "three": "^0.187.0"
   },
   "devDependencies": {
@@ -20,6 +20,7 @@
     "playwright": "^1.65.1",
     "typescript": "^7.0.2",
     "vite": "^6.4.6",
-    "vite-plugin-pwa": "^2.0.0"
+    "vite-plugin-pwa": "^2.0.0",
+    "vite-plugin-wasm": "^3.6.0"
   }
 }

@@ -20,6 +20,8 @@ import numpy as np
 from PIL import Image
 from scipy import ndimage
 
+import heightmap_io
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 D = os.path.join(ROOT, "public", "data", "mars")
 BK = os.path.join(ROOT, "raw_data", "mars", "ortho_shaded")
@@ -40,7 +42,7 @@ def main():
     for f in ("ortho.jpg", "ortho_hi.jpg"):
         if not os.path.exists(os.path.join(BK, f)):
             shutil.copy(os.path.join(D, f), os.path.join(BK, f))
-    h = np.asarray(Image.open(os.path.join(D, "heightmap.png"))).astype(np.float64) * (m["maxHeight"] - m["minHeight"]) / 65535
+    h = heightmap_io.load(D).astype(np.float64) * (m["maxHeight"] - m["minHeight"]) / 65535
     px = m["pixelSize"]
     o = np.asarray(Image.open(os.path.join(BK, "ortho.jpg")).convert("L")).astype(np.float64)
     o2 = np.asarray(Image.fromarray(o.astype(np.uint8)).resize(h.shape[::-1], Image.BILINEAR)).astype(np.float64)

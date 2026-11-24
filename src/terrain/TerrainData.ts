@@ -1,4 +1,6 @@
+import { fetchBlob } from '../net';
 import { dataUrl } from '../version';
+import { decodeHeightmap } from './heightmap';
 import { buildPavement, paveHeight } from './Pavement';
 
 /**
@@ -77,12 +79,15 @@ function vnoise(x: number, z: number, seed: number): number {
 }
 
 /** Roughness octaves 120 m … 4 m, amplitude ∝ λ^1.1 (the DTM's k^-2.2 power spectrum). */
+const ROUGH_LAM: number[] = [];
+for (let lam = 120; lam >= 4; lam *= 0.5) ROUGH_LAM.push(lam);
+const ROUGH_AMP = ROUGH_LAM.map((lam) => Math.pow(lam, 1.1));
+
 function roughRaw(x: number, z: number): number {
-  let s = 0, lam = 120, k = 0;
-  while (lam >= 4) {
-    s += vnoise(x / lam + k * 13.7, z / lam - k * 7.1, 900 + k) * Math.pow(lam, 1.1);
-    lam *= 0.5;
-    k++;
+  let s = 0;
+  for (let k = 0; k < ROUGH_LAM.length; k++) {
+    const lam = ROUGH_LAM[k];
+    s += vnoise(x / lam + k * 13.7, z / lam - k * 7.1, 900 + k) * ROUGH_AMP[k];
   }
   return s;
 }
@@ -379,88 +384,59 @@ export class TerrainData {
   }
 }
 
-export async function loadTerrainData(base: string, onProgress?: (f: number) => void): Promise<TerrainData> {
-  const { decodePng16 } = await import('./png16');
-  const meta: TerrainMeta = await (await fetch(dataUrl(`${base}terrain.json`))).json();
-  const res = await fetch(dataUrl(`${base}heightmap.png`));
-  const total = Number(res.headers.get('content-length')) || 4.6e6;
-  const reader = res.body!.getReader();
-  const parts: Uint8Array[] = [];
-  let got = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    parts.push(value);
-    got += value.length;
-    onProgress?.(Math.min(1, got / total));
+/** First channel of an 8-bit map, scaled to n × n (native size when n is omitted); null on failure. */
+async function loadGray(url: string, opts: ImageBitmapOptions | undefined, n?: number): Promise<Uint8Array | null> {
+  try {
+    const r = await fetch(dataUrl(url));
+    const bmp = await createImageBitmap(await r.blob(), opts);
+    const w = n ?? bmp.width, h = n ?? bmp.height;
+    const c = new OffscreenCanvas(w, h);
+    const g = c.getContext('2d', { willReadFrequently: true })!;
+    g.drawImage(bmp, 0, 0, w, h);
+    const d = g.getImageData(0, 0, w, h).data;
+    const out = new Uint8Array(w * h);
+    for (let i = 0; i < out.length; i++) out[i] = d[i * 4];
+    return out;
+  } catch {
+    return null;
   }
-  const buf = await new Blob(parts as BlobPart[]).arrayBuffer();
+}
+
+async function loadFar(base: string, far: NonNullable<TerrainMeta['far']>): Promise<FarGrid | null> {
+  try {
+    const fr = await fetch(dataUrl(`${base}far_height.png`));
+    if (!fr.ok) return null;
+    const { decodePng16 } = await import('./png16');
+    const fp = await decodePng16(await fr.arrayBuffer());
+    const fs = (far.max - far.min) / 65535;
+    const fh = new Float32Array(fp.data.length);
+    for (let i = 0; i < fh.length; i++) fh[i] = far.min + fp.data[i] * fs;
+    return { n: fp.width, spacing: far.spacing, half: ((fp.width - 1) * far.spacing) / 2, heights: fh };
+  } catch {
+    return null;
+  }
+}
+
+async function loadHeights(base: string, onProgress?: (f: number) => void): Promise<Uint16Array> {
+  const buf = await (await fetchBlob(dataUrl(`${base}heightmap.bin`), onProgress, 6e6)).arrayBuffer();
   const t0 = performance.now();
-  const png = await decodePng16(buf);
+  const hm = await decodeHeightmap(buf);
   console.info(`[load] heightmap decode ${((performance.now() - t0) / 1000).toFixed(2)} s`);
-  const heights = png.data;
-  let far: FarGrid | null = null;
-  if (meta.far) {
-    try {
-      const fr = await fetch(dataUrl(`${base}far_height.png`));
-      if (fr.ok) {
-        const fp = await decodePng16(await fr.arrayBuffer());
-        const fs = (meta.far.max - meta.far.min) / 65535;
-        const fh = new Float32Array(fp.data.length);
-        for (let i = 0; i < fh.length; i++) fh[i] = meta.far.min + fp.data[i] * fs;
-        far = { n: fp.width, spacing: meta.far.spacing, half: ((fp.width - 1) * meta.far.spacing) / 2, heights: fh };
-      }
-    } catch {
-      far = null;
-    }
-  }
-  let material: Uint8Array | null = null;
-  if (meta.material) {
-    try {
-      const r = await fetch(dataUrl(`${base}${meta.material.file}`));
-      const bmp = await createImageBitmap(await r.blob());
-      const n = meta.material.n;
-      const c = new OffscreenCanvas(n, n);
-      const g = c.getContext('2d', { willReadFrequently: true })!;
-      g.drawImage(bmp, 0, 0, n, n);
-      const d = g.getImageData(0, 0, n, n).data;
-      material = new Uint8Array(n * n);
-      for (let i = 0; i < material.length; i++) material[i] = d[i * 4];
-    } catch {
-      material = null;
-    }
-  }
-  // Baked pavement pattern (tools/make_pavement.ts); computed here only as a fallback.
-  let pave: Uint8Array | null = null;
-  if (material && meta.material?.pave) {
-    try {
-      const r = await fetch(dataUrl(`${base}${meta.material.pave}`));
-      const bmp = await createImageBitmap(await r.blob(), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
-      const c = new OffscreenCanvas(bmp.width, bmp.height);
-      const g = c.getContext('2d', { willReadFrequently: true })!;
-      g.drawImage(bmp, 0, 0);
-      const d = g.getImageData(0, 0, bmp.width, bmp.height).data;
-      pave = new Uint8Array(bmp.width * bmp.height);
-      for (let i = 0; i < pave.length; i++) pave[i] = d[i * 4];
-    } catch {
-      pave = null;
-    }
-  }
-  let dtmW: Uint8Array | null = null;
-  if (meta.synthRough) {
-    try {
-      const r = await fetch(dataUrl(`${base}${meta.synthRough.file}`));
-      const bmp = await createImageBitmap(await r.blob(), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
-      const n = meta.synthRough.n;
-      const c = new OffscreenCanvas(n, n);
-      const g = c.getContext('2d', { willReadFrequently: true })!;
-      g.drawImage(bmp, 0, 0, n, n);
-      const d = g.getImageData(0, 0, n, n).data;
-      dtmW = new Uint8Array(n * n);
-      for (let i = 0; i < dtmW.length; i++) dtmW[i] = d[i * 4];
-    } catch {
-      dtmW = null;
-    }
-  }
-  return new TerrainData(meta, heights, far, material, pave, dtmW);
+  return hm.data;
+}
+
+export async function loadTerrainData(base: string, onProgress?: (f: number) => void): Promise<TerrainData> {
+  // The heightmap does not depend on the metadata: both downloads start at once,
+  // and all the smaller maps in parallel as soon as the metadata names them.
+  const heightsP = loadHeights(base, onProgress);
+  const meta: TerrainMeta = await (await fetch(dataUrl(`${base}terrain.json`))).json();
+  const [heights, far, material, pave, dtmW] = await Promise.all([
+    heightsP,
+    meta.far ? loadFar(base, meta.far) : null,
+    meta.material ? loadGray(`${base}${meta.material.file}`, undefined, meta.material.n) : null,
+    // Baked pavement pattern (tools/make_pavement.ts); computed in TerrainData only as a fallback.
+    meta.material?.pave ? loadGray(`${base}${meta.material.pave}`, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' }) : null,
+    meta.synthRough ? loadGray(`${base}${meta.synthRough.file}`, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' }, meta.synthRough.n) : null,
+  ]);
+  return new TerrainData(meta, heights, far, material, material ? pave : null, dtmW);
 }

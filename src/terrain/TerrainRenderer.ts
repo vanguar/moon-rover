@@ -746,18 +746,26 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`,
     const w = t.w, h = t.h, px = t.meta.pixelSize;
     const data = new Uint8Array(w * h * 2);
     const H = t.heights, k = t.hScale;
+    // Square-root encoding: fine steps near zero slope, where nearly all the ground
+    // is (linear 8-bit steps of 0.02 drew contour-like banding at low Sun).
+    const enc = (v: number) => Math.sign(v) * Math.sqrt(Math.min(Math.abs(v) / 5, 1));
+    // The encoded byte depends only on the integer height difference and the span
+    // (1 pixel at the edges, 2 inside): tabulate it instead of 2 sqrt per pixel.
+    const OFF = 65535;
+    const lut = (span: number): Uint8Array => {
+      const tab = new Uint8Array(2 * OFF + 1);
+      for (let d = -OFF; d <= OFF; d++) tab[d + OFF] = Math.max(0, Math.min(255, Math.round((enc((d * k) / (span * px)) * 0.5 + 0.5) * 255)));
+      return tab;
+    };
+    const inner = lut(2), edge = lut(1);
     for (let j = 0; j < h; j++) {
       const j0 = Math.max(0, j - 1), j1 = Math.min(h - 1, j + 1);
+      const tz = j1 - j0 === 2 ? inner : edge;
       for (let i = 0; i < w; i++) {
         const i0 = Math.max(0, i - 1), i1 = Math.min(w - 1, i + 1);
-        const sx = ((H[j * w + i1] - H[j * w + i0]) * k) / ((i1 - i0) * px);
-        const sz = ((H[j1 * w + i] - H[j0 * w + i]) * k) / ((j1 - j0) * px);
         const o = (j * w + i) * 2;
-        // Square-root encoding: fine steps near zero slope, where nearly all the ground
-        // is (linear 8-bit steps of 0.02 drew contour-like banding at low Sun).
-        const enc = (v: number) => Math.sign(v) * Math.sqrt(Math.min(Math.abs(v) / 5, 1));
-        data[o] = Math.max(0, Math.min(255, Math.round((enc(sx) * 0.5 + 0.5) * 255)));
-        data[o + 1] = Math.max(0, Math.min(255, Math.round((enc(sz) * 0.5 + 0.5) * 255)));
+        data[o] = (i1 - i0 === 2 ? inner : edge)[H[j * w + i1] - H[j * w + i0] + OFF];
+        data[o + 1] = tz[H[j1 * w + i] - H[j0 * w + i] + OFF];
       }
     }
     const tex = new THREE.DataTexture(data, w, h, THREE.RGFormat, THREE.UnsignedByteType);

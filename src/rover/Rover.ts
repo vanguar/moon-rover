@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type RAPIER from '@dimforge/rapier3d-compat';
+import type RAPIER from '@dimforge/rapier3d';
 import type { ContactForce, Physics } from '../physics/Physics';
 import type { TerrainData } from '../terrain/TerrainData';
 import { world } from '../world';

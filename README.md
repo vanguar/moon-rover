@@ -36,7 +36,7 @@
 
 **Автор и разработчик:** Volodymyr Zadorozhnyi · [obivan.ua@gmail.com](mailto:obivan.ua@gmail.com)
 
-Стек: Vite + TypeScript + Three.js, физика — Rapier (`@dimforge/rapier3d-compat`).
+Стек: Vite + TypeScript + Three.js, физика — Rapier (`@dimforge/rapier3d`, отдельный `.wasm` через `vite-plugin-wasm`).
 
 ## Запуск
 
@@ -61,7 +61,7 @@ npm run preview   # предпросмотр сборки
      curl -r $((1470*92160))-$((2500*92160-1)) -o raw_data/sldem_512_rows_1470_2500.bin        https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_00n_30n_000_045_float.img
      ```
 2. `pip install rasterio numpy pillow`
-3. `python tools/prepare_terrain.py` — heightmap (16-бит PNG), ортоснимки 4096² (весь участок и 0.6 м/пикс. центр),
+3. `python tools/prepare_terrain.py` — карта высот `heightmap.bin` (16 бит без потерь, формат в `tools/heightmap_io.py`), ортоснимки 4096² (весь участок и 0.6 м/пикс. центр),
    маска теней 2 м для реального Солнца, звёзды, `terrain.json`.
 4. `python tools/prepare_sky.py` — линии созвездий и галактическая система координат (Млечный Путь).
 5. `python tools/prepare_far.py` — дальний рельеф (сетка 112 м, выровнена по DTM), его запечённые тени

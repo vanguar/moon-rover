@@ -6,6 +6,7 @@ import { Game } from './Game';
 import type { WeatherMode } from './fx/MarsWeather';
 import { detectLang, LANGS, setLang, setVariant, t, type Lang } from './i18n';
 import type { Action } from './input/Input';
+import { fetchBlob } from './net';
 import { loadNasaModel } from './rover/models/nasa';
 import { ROVERS, roversFor } from './rover/specs';
 import { loadTerrainData } from './terrain/TerrainData';
@@ -20,8 +21,13 @@ const BASE = import.meta.env.BASE_URL;
 //   this the update check can look at a stale HTTP-cached copy for 10 minutes;
 // - an update check at every launch and every return to the foreground;
 // - when a new worker replaces an old one (the first launch after a deploy), the
-//   page is reloaded once so the fresh build is shown right away — on the title
-//   screen at once, during a drive only once the app goes to the background.
+//   page is reloaded once if it is not the build that worker serves (a page from
+//   an older worker's cache) — on the title screen at once, during a drive only
+//   once the app goes to the background. The page itself is fetched network-first,
+//   so normally it is already the new build and loading is not started over;
+// - on the very first visit the worker is registered only after the game has
+//   loaded: its precache would otherwise download the same files again, in
+//   parallel with the page's own downloads.
 declare const __APP_BUILD__: string;
 let playing = false;
 let pendingReload = false;
@@ -31,12 +37,31 @@ const reloadNow = () => {
   reloaded = true;
   location.reload();
 };
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
+
+/** Does the active worker serve this page's own build? false when it cannot tell. */
+function workerServesThisBuild(): Promise<boolean> {
+  const sw = navigator.serviceWorker.controller;
+  if (!sw) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const ch = new MessageChannel();
+    const timer = setTimeout(() => resolve(false), 2000);
+    ch.port1.onmessage = (e) => {
+      clearTimeout(timer);
+      resolve(e.data === true);
+    };
+    sw.postMessage({ type: 'HAS_URL', url: import.meta.url }, [ch.port2]);
+  });
+}
+
+function registerServiceWorker(): void {
   const hadController = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (!hadController) return; // first install: the page is already fresh
-    if (playing) pendingReload = true;
-    else reloadNow();
+    void workerServesThisBuild().then((fresh) => {
+      if (fresh) return;
+      if (playing) pendingReload = true;
+      else reloadNow();
+    });
   });
   navigator.serviceWorker
     .register(`${BASE}sw.js`, { scope: BASE, updateViaCache: 'none' })
@@ -60,6 +85,9 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
     })
     .catch((e) => console.warn('[SW] registration failed', e));
 }
+
+const useServiceWorker = 'serviceWorker' in navigator && import.meta.env.PROD;
+if (useServiceWorker && navigator.serviceWorker.controller) registerServiceWorker();
 
 /** Emergency reset: drop the worker and the caches, then load from the network. */
 async function hardReset(): Promise<void> {
@@ -99,25 +127,34 @@ const showProgress = () => {
   loadBar.style.width = `${Math.round(p * 100)}%`;
 };
 
-function loadTexture(url: string, key: 'ortho' | 'other'): Promise<THREE.Texture> {
-  return new Promise((resolve, reject) => {
-    new THREE.TextureLoader().load(
-      url,
-      (tex) => {
-        if (key === 'ortho') progress.ortho = 1;
-        else progress.other = Math.min(1, progress.other + 0.5);
-        showProgress();
-        resolve(tex);
-      },
-      (e) => {
-        if (e.total && key === 'ortho') {
-          progress.ortho = e.loaded / e.total;
-          showProgress();
-        }
-      },
-      reject,
-    );
-  });
+/**
+ * Image texture decoded off the main thread (createImageBitmap): an <img> is decoded
+ * synchronously during the WebGL upload, ~0.3 s per 4096² JPEG on a laptop. An
+ * ImageBitmap ignores Texture.flipY, so the flip three.js would apply at upload
+ * (flipY = true, the Texture default) is done while decoding; consumers that set
+ * flipY = false get the image as stored. The data images carry no colour profile.
+ */
+async function loadTexture(url: string, key: 'ortho' | 'other', flipY: boolean): Promise<THREE.Texture> {
+  const blob = await fetchBlob(url, key === 'ortho' ? (f) => {
+    progress.ortho = f;
+    showProgress();
+  } : undefined);
+  let tex: THREE.Texture;
+  try {
+    const bmp = await createImageBitmap(blob, { imageOrientation: flipY ? 'flipY' : 'from-image', premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
+    tex = new THREE.Texture(bmp);
+    tex.flipY = false;
+  } catch {
+    // No ImageBitmap decoding of this image here: the regular <img> path.
+    const src = URL.createObjectURL(blob);
+    tex = await new THREE.TextureLoader().loadAsync(src).finally(() => URL.revokeObjectURL(src));
+    tex.flipY = flipY;
+  }
+  tex.needsUpdate = true;
+  if (key === 'ortho') progress.ortho = 1;
+  else progress.other = Math.min(1, progress.other + 0.5);
+  showProgress();
+  return tex;
 }
 
 const T0 = performance.now();
@@ -128,6 +165,8 @@ async function boot(): Promise<void> {
   // The physics engine (Rapier, ~4 MB with its WebAssembly) is a separate chunk,
   // downloaded in parallel with the terrain data instead of before anything shows.
   const physicsModule = import('./physics/Physics');
+  // Official NASA models (LM at the Apollo site; Perseverance and Ingenuity on Mars), in parallel with the data.
+  const models = Promise.all((W.id === 'moon' ? (['lm'] as const) : (['perseverance', 'ingenuity'] as const)).map((m) => loadNasaModel(m).catch((e) => console.warn('[models]', m, e))));
   const D = `${BASE}${W.dataDir}`;
   const moon = W.id === 'moon';
   const bin = (name: string) =>
@@ -137,23 +176,22 @@ async function boot(): Promise<void> {
       progress.height = f;
       showProgress();
     }),
-    loadTexture(dataUrl(`${D}ortho.jpg`), 'ortho'),
-    loadTexture(dataUrl(`${D}shadow.png`), 'other'),
-    loadTexture(dataUrl(`${D}ortho_hi.jpg`), 'other').catch(() => undefined),
+    loadTexture(dataUrl(`${D}ortho.jpg`), 'ortho', false),
+    loadTexture(dataUrl(`${D}shadow.png`), 'other', false),
+    loadTexture(dataUrl(`${D}ortho_hi.jpg`), 'other', false).catch(() => undefined),
     moon ? bin('stars.bin') : Promise.resolve(undefined),
     moon ? bin('constellations.bin') : Promise.resolve(undefined),
-    loadTexture(dataUrl(`${D}far_shadow.png`), 'other').catch(() => undefined),
-    moon ? Promise.resolve(undefined) : loadTexture(dataUrl(`${D}far_albedo.jpg`), 'other').catch(() => undefined),
-    moon ? loadTexture(dataUrl(`${D}milkyway.jpg`), 'other').catch(() => undefined) : Promise.resolve(undefined),
-    loadTexture(dataUrl(`${D}rocks.jpg`), 'other').catch(() => undefined),
+    loadTexture(dataUrl(`${D}far_shadow.png`), 'other', false).catch(() => undefined),
+    moon ? Promise.resolve(undefined) : loadTexture(dataUrl(`${D}far_albedo.jpg`), 'other', false).catch(() => undefined),
+    moon ? loadTexture(dataUrl(`${D}milkyway.jpg`), 'other', true).catch(() => undefined) : Promise.resolve(undefined),
+    loadTexture(dataUrl(`${D}rocks.jpg`), 'other', true).catch(() => undefined),
   ]);
   if (rockPhoto) {
     rockPhoto.colorSpace = THREE.SRGBColorSpace;
     rockPhoto.anisotropy = 4;
   }
   mark('data');
-  // Official NASA models (LM at the Apollo site; Perseverance and Ingenuity on Mars).
-  await Promise.all((moon ? (['lm'] as const) : (['perseverance', 'ingenuity'] as const)).map((m) => loadNasaModel(m).catch((e) => console.warn('[models]', m, e))));
+  await models;
   loadText.textContent = t('loadPhysics');
   const { Physics } = await physicsModule;
   const physics = await Physics.create(terrain);
@@ -468,7 +506,12 @@ function setupMenu(game: Game): void {
   });
 }
 
-boot().catch((e) => {
-  console.error(e);
-  loadText.textContent = `${t('loadError')}: ${e instanceof Error ? e.message : e}`;
-});
+boot()
+  .catch((e) => {
+    console.error(e);
+    loadText.textContent = `${t('loadError')}: ${e instanceof Error ? e.message : e}`;
+  })
+  .finally(() => {
+    // First visit: install the worker (offline play, PWA) now that the game is loaded.
+    if (useServiceWorker && !navigator.serviceWorker.controller) registerServiceWorker();
+  });
