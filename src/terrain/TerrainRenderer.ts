@@ -233,7 +233,7 @@ ${NOISE_GLSL}
 #define CRATER_D 1.0
 #else
 // Apollo 15 mare: small craters in every stage of degradation almost everywhere.
-#define CRATER_P 0.55
+#define CRATER_P 0.7
 #define CRATER_D 1.5
 #endif
 // Cast shadows of sub-metre craters (low Sun: the up-Sun inner wall is in shadow).
@@ -488,11 +488,12 @@ for (int o = 0; o < 6; o++) {
 }
 // Craterlets: 0.6 m and 2 m cells, faded when smaller than a pixel.
 #if CRATERLETS > 0
-float wc1 = clamp(1.5 - fp * 1.5, 0.0, 1.0);
+// Fade by screen footprint, gently, so craterlets do not vanish a few metres away.
+float wc1 = clamp(1.6 - fp * 0.9, 0.0, 1.0);
 if (wc1 > 0.0) grad += craterField(vWorldP.xz, 2.2, 11.0).yz * wc1;
 #endif
 #if CRATERLETS > 1
-float wc2 = clamp(1.5 - fp * 5.0, 0.0, 1.0);
+float wc2 = clamp(1.6 - fp * 3.0, 0.0, 1.0);
 if (wc2 > 0.0) grad += craterField(vWorldP.xz, 0.7, 29.0).yz * wc2;
 #endif
 #if MARS > 0

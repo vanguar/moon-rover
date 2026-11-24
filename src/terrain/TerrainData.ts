@@ -144,13 +144,16 @@ export class TerrainData {
     const mars = meta.body === 'mars';
     // Crater density per km² is fixed (CRATER_COUNT per 4 × 4 km).
     const areaK = (meta.sizeX * meta.sizeZ) / 16e6;
-    const count = Math.round(CRATER_COUNT * areaK * (mars ? 0.35 : 1));
+    // Moon: the Apollo 15 mare is saturated with small and medium craters - 2.5x the
+    // earlier density, radii up to 45 m.
+    const count = Math.round(CRATER_COUNT * areaK * (mars ? 0.35 : 2.5));
+    const rMax = mars ? CRATER_RMAX : 45;
     const depthK = mars ? 0.45 : 1;
     this.craters = new Float32Array(count * 5);
     for (let i = 0; i < count; i++) {
       // Cumulative size-frequency N(>R) ~ R^-2 (Pareto, truncated).
       let R = CRATER_RMIN * Math.pow(1 - rnd(), -0.5);
-      if (R > CRATER_RMAX) R = CRATER_RMIN + rnd() * 3;
+      if (R > rMax) R = CRATER_RMIN + rnd() * 3;
       const fresh = rnd();
       // Most small craters on an old mare surface are degraded (shallow, soft rims).
       const depth = 2 * R * (0.03 + 0.15 * fresh * fresh * fresh) * depthK;

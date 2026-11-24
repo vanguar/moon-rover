@@ -17,7 +17,8 @@ import type { TerrainData } from '../terrain/TerrainData';
  * Track: the vortex removes the bright surface dust and exposes darker material, so
  * devils leave dark streaks (seen from orbit and by Perseverance's cameras).
  */
-const N = 2400;
+// Kept modest: big soft sprites close to the camera cost a lot of fill rate.
+const N = 1200;
 const TRACK_N = 1400;
 
 interface DevilIn {
@@ -63,7 +64,7 @@ export class DevilDust {
       uniforms: { uColor: { value: new THREE.Color(0.55, 0.38, 0.25) }, uScale: { value: 700 } },
       vertexShader: `attribute float aSize; attribute float aAlpha; varying float vA; uniform float uScale;
         void main() { vA = aAlpha; vec4 mv = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = clamp(aSize * uScale / max(-mv.z, 0.1), 0.75, 90.0); gl_Position = projectionMatrix * mv; }`,
+          gl_PointSize = clamp(aSize * uScale / max(-mv.z, 0.1), 0.75, 36.0); gl_Position = projectionMatrix * mv; }`,
       fragmentShader: `uniform vec3 uColor; varying float vA;
         void main() { vec2 d = gl_PointCoord - 0.5; float r = dot(d, d) * 4.0; if (r > 1.0) discard;
           gl_FragColor = vec4(uColor, vA * (1.0 - r));
@@ -141,9 +142,9 @@ export class DevilDust {
       const di = d.id;
       this.trackStep(di, d, dt);
       const dist = Math.hypot(d.x - cam.x, d.z - cam.z);
-      if (dist > 450 || d.s < 0.05) return;
+      if (dist > 350 || d.s < 0.05) return;
       const rc = d.r;
-      const rate = (180 + rc * 25) * d.s * (dist < 150 ? 1 : 0.5);
+      const rate = (90 + rc * 12) * d.s * (dist < 150 ? 1 : 0.4);
       let c = (this.carry.get(di) ?? 0) + rate * dt;
       while (c >= 1) {
         c -= 1;
@@ -219,7 +220,7 @@ export class DevilDust {
       const bs = this.base[i];
       // Big haze puffs spread and fade; small specks stay sharp and denser.
       this.aSize[n] = bs * (1 + age * (fine ? 1.5 : 0.2) + (fine ? hAbove * 0.02 : 0));
-      this.aAlpha[n] = (fine ? 0.04 + 0.3 * Math.exp(-bs * 12) : 0.55) * Math.min(1, this.life[i]) * d.s;
+      this.aAlpha[n] = (fine ? 0.06 + 0.35 * Math.exp(-bs * 12) : 0.6) * Math.min(1, this.life[i]) * d.s;
       this.pos[n * 3] = this.pos[k];
       this.pos[n * 3 + 1] = this.pos[k + 1];
       this.pos[n * 3 + 2] = this.pos[k + 2];

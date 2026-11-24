@@ -119,6 +119,7 @@ export class Game {
   private orbit = { yaw: 0, pitch: 0.28, dist: 9 };
   private chasePos = new THREE.Vector3();
   private cabQ = new THREE.Quaternion(0, 0, 0, 0);
+  private cabY = Number.NaN;
   /** Camera shake from wheel and chassis blows (damped spring, felt in the seat). */
   private shake = { a: 0, t: 0, ph: 0 };
   private clock = new THREE.Timer();
@@ -256,9 +257,26 @@ export class Game {
     if (!mars) {
       this.meteors = new Meteors(terrain);
       this.scene.add(this.meteors.points);
+      // Craters made by earlier impacts stay (saved in the browser).
+      try {
+        const saved = JSON.parse(localStorage.getItem('moon-craters') ?? '[]') as number[][];
+        for (const [x, z, r] of saved) {
+          terrain.newCraters.push(x, z, r);
+          this.terrainR.addCrater(x, z, r);
+        }
+      } catch {
+        /* storage unavailable */
+      }
       this.meteors.onImpact = (x, z, r, dist) => {
         terrain.newCraters.push(x, z, r);
         this.terrainR.addCrater(x, z, r);
+        try {
+          const saved = JSON.parse(localStorage.getItem('moon-craters') ?? '[]') as number[][];
+          saved.push([Math.round(x * 10) / 10, Math.round(z * 10) / 10, Math.round(r * 100) / 100]);
+          localStorage.setItem('moon-craters', JSON.stringify(saved.slice(-60)));
+        } catch {
+          /* storage unavailable */
+        }
         const p = this.rover.object.position;
         if (Math.abs(x - p.x) < 70 && Math.abs(z - p.z) < 70) this.physics.updatePatch(p.x, p.z, true);
         this.sky?.impactFlash(this.scene, new THREE.Vector3(x, terrain.height(x, z) + 0.5, z), dist);
@@ -1310,16 +1328,24 @@ export class Game {
       const a = rover.model.cockpitAnchor;
       a.updateMatrixWorld();
       a.getWorldPosition(this.camera.position);
+      // Vertical stabilisation of the eye point (seat damping).
+      if (dt > 0 && Number.isFinite(this.cabY)) this.cabY += (this.camera.position.y - this.cabY) * (1 - Math.exp(-dt / 0.12));
+      else this.cabY = this.camera.position.y;
+      this.camera.position.y = this.cabY;
       // Head stabilisation: the view follows the chassis attitude with a short lag
       // (~80 ms), so suspension buzz over pebbles does not shake the picture, while
       // real pitch and roll on slopes and bumps come through.
       const qT = rover.object.quaternion;
       if (dt <= 0 || this.cabQ.lengthSq() === 0) this.cabQ.copy(qT);
-      else this.cabQ.slerp(qT, 1 - Math.exp(-dt / 0.08));
+      // Stabilised head: ~0.18 s lag filters the chatter of small bumps; the camera
+      // height is smoothed too, so slopes and big lurches still come through.
+      else this.cabQ.slerp(qT, 1 - Math.exp(-dt / 0.18));
       const q = this.cabQ.clone();
       // Jolts: each knock kicks a damped ~9 Hz shake (rocks hard and sharp, bumps soft).
-      for (const k of rover.knocks) this.shake.a = Math.min(0.06, this.shake.a + k.strength * (0.006 + 0.014 * k.hard));
-      this.shake.a *= Math.exp(-dt * 7);
+      // Only real blows on rock or the chassis shake the view; regolith bumps are
+      // absorbed by the seat suspension (cf. the LRV's seat and the crew's own legs).
+      for (const k of rover.knocks) if (k.hard > 0.5 && k.strength > 0.5) this.shake.a = Math.min(0.025, this.shake.a + (k.strength - 0.5) * 0.008);
+      this.shake.a *= Math.exp(-dt * 9);
       this.shake.ph += dt * 57;
       if (this.shake.a > 1e-4) {
         const sa = this.shake.a;
@@ -1355,8 +1381,8 @@ export class Game {
       if (this.chasePos.y < gy) this.chasePos.y = gy;
       this.camera.position.copy(this.chasePos);
       this.camera.up.set(0, 1, 0);
-      for (const k of rover.knocks) this.shake.a = Math.min(0.06, this.shake.a + k.strength * (0.004 + 0.01 * k.hard));
-      this.shake.a *= Math.exp(-dt * 7);
+      for (const k of rover.knocks) if (k.hard > 0.5 && k.strength > 0.5) this.shake.a = Math.min(0.025, this.shake.a + (k.strength - 0.5) * 0.006);
+      this.shake.a *= Math.exp(-dt * 9);
       this.shake.ph += dt * 57;
       this.camera.lookAt(p.x, p.y + 0.8 * this.sizeK + Math.sin(this.shake.ph) * this.shake.a * 2, p.z);
       this.camera.near = 0.2 * this.sizeK;
