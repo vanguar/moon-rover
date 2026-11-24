@@ -65,7 +65,10 @@ export class StormFront {
         varying vec3 vW;
         void main() {
           vUv = uv;
-          vec4 w = modelMatrix * vec4(position, 1.0);
+          // The head of a gravity current leans forward: the top stands ~8 % nearer.
+          vec3 pos = position;
+          pos.xz *= 1.0 - 0.08 * pos.y;
+          vec4 w = modelMatrix * vec4(pos, 1.0);
           vW = w.xyz;
           gl_Position = projectionMatrix * viewMatrix * w;
         }`,
@@ -74,50 +77,71 @@ export class StormFront {
         uniform vec3 uLight, uAmb, uSun, uFogColor, uFlash;
         varying vec2 vUv;
         varying vec3 vW;
-        float h3(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
-        float n3(vec3 x) {
-          vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
-          return mix(mix(mix(h3(i), h3(i + vec3(1,0,0)), f.x), mix(h3(i + vec3(0,1,0)), h3(i + vec3(1,1,0)), f.x), f.y),
-                     mix(mix(h3(i + vec3(0,0,1)), h3(i + vec3(1,0,1)), f.x), mix(h3(i + vec3(0,1,1)), h3(i + vec3(1,1,1)), f.x), f.y), f.z);
+        // Integer hash (PCG3D): exact at any coordinate - the float sin/fract hashes
+        // lose precision at kilometre coordinates and break into square blocks.
+        uvec3 pcg3d(uvec3 v) {
+          v = v * 1664525u + 1013904223u;
+          v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+          v ^= v >> 16u;
+          v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+          return v;
         }
-        // Billows: smooth rounded lobes (cumulus-like fbm), domain-warped so nothing lines up.
-        float billow(vec3 p) {
-          vec3 q = p + vec3(n3(p * 0.5 + 3.0), n3(p * 0.5 + 11.0), 0.0) * 1.2;
-          float s = 0.0, a = 0.5;
-          for (int i = 0; i < 4; i++) { s += a * n3(q); q = q * 2.03 + 5.1; a *= 0.5; }
-          return s / 0.9375;
+        float hh(ivec3 i) { return float(pcg3d(uvec3(i + 65536)).x) * (1.0 / 4294967295.0); }
+        float n3(vec3 x) {
+          vec3 fl = floor(x), f = x - fl;
+          ivec3 i = ivec3(fl);
+          f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(mix(hh(i), hh(i + ivec3(1,0,0)), f.x), mix(hh(i + ivec3(0,1,0)), hh(i + ivec3(1,1,0)), f.x), f.y),
+                     mix(mix(hh(i + ivec3(0,0,1)), hh(i + ivec3(1,0,1)), f.x), mix(hh(i + ivec3(0,1,1)), hh(i + ivec3(1,1,1)), f.x), f.y), f.z);
+        }
+        // Turbulent dust masses: smooth billows, domain-warped (the warp evolves too).
+        float billow(vec3 p, int oct) {
+          vec3 q = p + vec3(n3(p * 0.5 + vec3(3.0, 0.0, 0.0)), n3(p * 0.5 + vec3(11.0, 0.0, 0.0)), 0.0) * 1.3;
+          float s = 0.0, a = 0.5, norm = 0.0;
+          for (int i = 0; i < 5; i++) { if (i >= oct) break; s += a * n3(q); norm += a; q = q * 2.03 + 5.1; a *= 0.5; }
+          return s / norm;
         }
         void main() {
           float ang = ${(-ARC / 2).toFixed(4)} + vUv.x * ${ARC.toFixed(4)};
-          // Metres along the front at its real distance: billows grow and spread outwards
-          // in the view as it comes closer, like a real approaching wall.
+          // Metres along the front at its real distance, metres above the ground.
           float s = ang * uDist;
           float y = vUv.y * ${HEIGHT.toFixed(1)};
           float t = uTime;
-          // Churning and slowly rolling up and over towards the viewer.
-          vec3 p = vec3(s / 420.0, y / 420.0 - t * 0.006, t * 0.015);
-          float b = billow(p);
-          // Lobed top: tall convective towers, lower saddles between them.
-          float top = 0.5 + 0.38 * n3(vec3(s / 1300.0, 0.0, t * 0.003)) + 0.3 * (b - 0.5);
+          // Motion in metres per second, as in a real gust front: the dust boils up at
+          // ~8 m/s, lobes slide along the front, ~400 m eddies renew in ~50 s. Seen from
+          // closer the same motion sweeps more of the view - it looks faster (parallax).
+          vec3 p = vec3((s + t * 3.0) / 420.0, (y - t * 8.0) / 420.0, t * 0.02);
+          float b = billow(p, 5);
+          // Lobes and clefts of the leading edge (gravity-current structure): kilometre-
+          // scale bulges and narrow re-entrant clefts, slowly changing.
+          float lobe = n3(vec3(s / 1400.0, 0.0, t * 0.006));
+          float cleft = smoothstep(0.62, 0.9, n3(vec3(s / 700.0 + 40.0, 0.0, t * 0.01)));
+          float top = 0.42 + 0.42 * lobe - 0.22 * cleft + 0.3 * (b - 0.5);
           float yn = vUv.y;
-          // Opaque body (τ ≫ 1): only the frayed top edge lets light through.
-          float edgeIn = smoothstep(top, top - 0.07, yn);
-          float dens = edgeIn * (0.85 + 0.6 * b);
+          // Dense and opaque low down; a soft, boiling, partly translucent top.
+          float edgeIn = smoothstep(top, top - 0.09, yn);
+          float dens = edgeIn * (0.8 + 0.7 * b) * mix(1.0, 0.75, smoothstep(top - 0.25, top, yn));
           // Ragged arc ends: the front frays out into the haze.
           dens *= smoothstep(0.0, 0.18, vUv.x) * smoothstep(1.0, 0.82, vUv.x);
           float a = clamp(dens, 0.0, 1.0) * uAmount;
           if (a < 0.004) discard;
-          // Cloud lighting: billow normal from the noise gradient, sun from above lights the tops.
-          float e = 0.08;
-          float gx = billow(p + vec3(e, 0.0, 0.0)) - b, gy = billow(p + vec3(0.0, e, 0.0)) - b;
-          vec3 inward = normalize(vec3(-vW.x + cameraPosition.x, 0.0, -vW.z + cameraPosition.z));
+          // Lighting from the billow shape (cheap low-octave gradient): sunlit tops,
+          // shaded undersides and clefts.
+          float e = 0.07;
+          float b2 = billow(p, 2);
+          float gx = billow(p + vec3(e, 0.0, 0.0), 2) - b2, gy = billow(p + vec3(0.0, e, 0.0), 2) - b2;
+          vec3 inward = normalize(vec3(cameraPosition.x - vW.x, 0.0, cameraPosition.z - vW.z));
           vec3 tang = vec3(-inward.z, 0.0, inward.x);
-          vec3 nrm = normalize(inward * 0.6 - tang * gx * 6.0 + vec3(0.0, 1.0, 0.0) * (0.35 - gy * 6.0));
+          vec3 nrm = normalize(inward * 0.6 - tang * gx * 7.0 + vec3(0.0, 1.0, 0.0) * (0.3 - gy * 7.0));
           float lit = max(dot(nrm, uSun), 0.0);
-          // Self-shadowing: deep in the wall and low down it is dark (dust is opaque, τ ≫ 1).
-          float depthDark = mix(0.25, 1.0, smoothstep(top - 0.45, top - 0.02, yn)) * (0.55 + 0.45 * b);
-          vec3 dust = vec3(0.78, 0.42, 0.22);
-          vec3 col = dust * (uLight * lit * 1.6 + uAmb * 1.4) * depthDark;
+          // Self-shadowing: optically thick dust is dark inside and low down; folds darker.
+          float depthDark = mix(0.32, 1.0, smoothstep(top - 0.5, top - 0.02, yn)) * (0.35 + 0.75 * smoothstep(0.2, 0.8, b));
+          // Rolls and plumes inside the wall stay readable up close (turbulent masses).
+          depthDark *= 0.8 + 0.4 * smoothstep(0.3, 0.7, billow(p * 2.7 + vec3(7.0, 0.0, 0.0), 3));
+          vec3 dust = vec3(0.8, 0.43, 0.22);
+          vec3 col = dust * (uLight * lit * 1.7 + uAmb * 1.35) * depthDark;
+          // The dark, sharp base of the wall where it scours the ground.
+          col *= mix(0.55, 1.0, smoothstep(0.0, 0.12, yn));
           // Lightning lighting the cloud from inside.
           float da = uCenter - ang - uFlash.x;
           da = mod(da + 3.14159265, 6.2831853) - 3.14159265;
