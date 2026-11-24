@@ -50,6 +50,7 @@ export class Missions {
         { key: 'm_elbow', target: site('elbow'), done: (c) => c.found.has('elbow') },
         { key: 'm_spur', target: site('spur'), done: (c) => c.found.has('spur') },
         { key: 'm_stgeorge', target: site('stgeorge'), done: (c) => c.found.has('stgeorge') },
+        { key: 'm_rille', target: site('rille'), done: (c) => c.found.has('rille') },
         { key: 'm_home', target: () => ({ x: L.x, z: L.z }), done: (c) => c.atBase },
       ];
     } else if (kind === 'mars') {
@@ -60,6 +61,11 @@ export class Missions {
         { key: 'r_field', target: () => ({ x: L.x + 14, z: L.z - 4 }), reach: 12, done: () => false },
         { key: 'r_delta', target: () => ({ x: L.x - 1900, z: L.z - 450 }), reach: 80, done: () => false },
         { key: 'r_home', target: () => ({ x: L.x, z: L.z }), reach: 25, done: () => false },
+        // Second campaign: the real places of Perseverance's first year.
+        { key: 'r_landing', target: site('landing'), done: (c) => c.found.has('landing') },
+        { key: 'r_rochette', target: site('rochette'), done: (c) => c.found.has('rochette') },
+        { key: 'r_kodiak', target: site('kodiak'), done: (c) => c.found.has('kodiak') },
+        { key: 'r_scarp', target: site('scarp'), done: (c) => c.found.has('scarp') },
       ];
     } else {
       this.steps = [

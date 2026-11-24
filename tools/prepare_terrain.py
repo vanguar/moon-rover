@@ -84,6 +84,9 @@ SITES = {
     "elbow": (26.03, 3.60),
     "stgeorge": (25.96, 3.54),
     "spur": (25.98, 3.67),
+    # Rim of Hadley Rille nearest the LM (station 9a area), found on the DTM: the first
+    # point west of the LM beyond which the ground drops > 60 m within 250 m.
+    "rille": (26.11073, 3.58383),
 }
 
 

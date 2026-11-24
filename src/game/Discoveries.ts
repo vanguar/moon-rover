@@ -25,25 +25,38 @@ const PHOTOS: Record<string, { file: string; frame: string; radius: number }> = 
   elbow: { file: 'elbow.jpg', frame: 'AS15-85-11398…11407 (pan)', radius: 180 },
   stgeorge: { file: 'stgeorge.jpg', frame: 'AS15-85-11451', radius: 1100 },
   spur: { file: 'spur.jpg', frame: 'AS15-90-12227', radius: 120 },
+  rille: { file: 'rille.jpg', frame: 'AS15-82-11110…11116 (pan, station 9a)', radius: 120 },
 };
 
-const KEY = 'moon-rover-journal';
+/** Mars: Perseverance's own photographs of the places (NASA/JPL-Caltech/ASU/MSSS). */
+const PHOTOS_MARS: Record<string, { file: string; frame: string; radius: number }> = {
+  landing: { file: 'mars/landing.jpg', frame: 'PIA24264', radius: 60 },
+  rochette: { file: 'mars/rochette.jpg', frame: 'PIA24840', radius: 60 },
+  kodiak: { file: 'mars/kodiak.jpg', frame: 'PIA24802', radius: 900 },
+  scarp: { file: 'mars/scarp.jpg', frame: 'PIA24813', radius: 250 },
+};
+
+const KEY_MOON = 'moon-rover-journal';
+const KEY_MARS = 'mars-rover-journal';
 
 export class Discoveries {
   readonly sites: Site[] = [];
   found = new Set<string>();
   onFound?: (s: Site) => void;
   private card = document.getElementById('card');
+  private key: string;
 
   constructor(terrain: TerrainData) {
+    this.key = terrain.meta.body === 'mars' ? KEY_MARS : KEY_MOON;
     const base = import.meta.env.BASE_URL;
+    const table = terrain.meta.body === 'mars' ? PHOTOS_MARS : PHOTOS;
     for (const [id, s] of Object.entries(terrain.meta.sites ?? {})) {
-      const p = PHOTOS[id];
+      const p = table[id];
       if (!p) continue;
       this.sites.push({ id, x: s.x, z: s.z, radius: p.radius, photo: `${base}photos/${p.file}`, frame: p.frame });
     }
     try {
-      const v = JSON.parse(localStorage.getItem(KEY) ?? '[]') as string[];
+      const v = JSON.parse(localStorage.getItem(this.key) ?? '[]') as string[];
       for (const id of v) this.found.add(id);
     } catch {
       /* storage unavailable */
@@ -53,7 +66,7 @@ export class Discoveries {
 
   private save(): void {
     try {
-      localStorage.setItem(KEY, JSON.stringify([...this.found]));
+      localStorage.setItem(this.key, JSON.stringify([...this.found]));
     } catch {
       /* storage unavailable */
     }

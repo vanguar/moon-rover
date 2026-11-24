@@ -249,10 +249,9 @@ export class Game {
     if (ortho.image) this.hud.setMapImage(ortho.image as CanvasImageSource);
 
     this.radio = new Radio(() => this.audio.output);
-    if (!mars) {
-      this.finds = new Discoveries(terrain);
-      this.finds.onFound = (site) => this.radio.say(`find_${site.id}`, { delay: 0.5 });
-    }
+    this.finds = new Discoveries(terrain);
+    // Houston comments on finds on the Moon (1.3 light-seconds away), not on Mars.
+    this.finds.onFound = (site) => (mars ? this.toast(t(`site_${site.id}`)) : this.radio.say(`find_${site.id}`, { delay: 0.5 }));
     this.setMission(mars ? (spec.heli ? 'heli' : 'mars') : 'moon');
     if (spec.heli) this.enterHeli();
     this.input.onAction((a) => this.onAction(a));
