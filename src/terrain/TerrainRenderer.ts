@@ -543,7 +543,7 @@ if (wr > 0.0) {
   // Skewed sine: h = sin(φ + 0.55·sin φ) — gentle stoss, steeper lee, continuous slope (no steps).
   float sk = ph + 0.55 * sin(ph);
   float slopeR = cos(sk) * (1.0 + 0.55 * cos(ph));
-  grad += rd * slopeR * 0.06 * wr;
+  grad += rd * slopeR * 0.1 * wr;
   diffuseColor.rgb *= 1.0 + 0.04 * wr * sin(sk);
 }
 // Pebbles and gravel lying on the surface (Jezero floor): two size classes, more on the

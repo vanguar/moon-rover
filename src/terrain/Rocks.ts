@@ -321,17 +321,21 @@ float rockH(vec3 p, vec3 w) {
         t.normal(x, z, this.tmpN, 3);
         const slopeDeg = (Math.acos(Math.min(1, this.tmpN[1])) * 180) / Math.PI;
         // Probability per 64 m² cell: sparse on the plains, dense on steep slopes.
-        const p = 0.004 + 0.12 * THREE.MathUtils.smoothstep(slopeDeg, 10, 30);
+        // Mars: the bedrock pavement (material map) is strewn with blocks and low ledges
+        // of the Máaz lava flows; the sand between them has few.
+        const mat = t.materialAt(x, z);
+        const p = 0.004 + 0.12 * THREE.MathUtils.smoothstep(slopeDeg, 10, 30) + 0.05 * mat;
         if (h > p) continue;
         const rnd = mulberry32(Math.floor(hash2(i, j, 4242) * 4294967296));
         const px = x + (rnd() - 0.5) * BOULDER_GRID, pz = z + (rnd() - 0.5) * BOULDER_GRID;
-        const outcrop = slopeDeg > 24 && rnd() < 0.35;
+        const outcrop = (slopeDeg > 24 && rnd() < 0.35) || (mat > 0.7 && rnd() < 0.45);
         let r: number, sx: number, sy: number, sz: number;
         const q = new THREE.Quaternion();
         if (outcrop) {
           // Slab along the contour, dipping with the slope.
-          r = 2 + rnd() * 4;
-          sx = r * (1.2 + rnd()); sy = r * (0.35 + rnd() * 0.3); sz = r * (0.6 + rnd() * 0.4);
+          r = slopeDeg > 24 ? 2 + rnd() * 4 : 1.2 + rnd() * 2.5;
+          // On the flat pavement: low, wide ledges (layered flows), 20-60 cm proud.
+          sx = r * (1.2 + rnd()); sy = slopeDeg > 24 ? r * (0.35 + rnd() * 0.3) : 0.35 + rnd() * 0.5; sz = r * (0.6 + rnd() * 0.4);
           const yaw = Math.atan2(this.tmpN[0], this.tmpN[2]) + Math.PI / 2;
           const up = new THREE.Vector3(this.tmpN[0], this.tmpN[1], this.tmpN[2]);
           q.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw));
