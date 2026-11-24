@@ -4,6 +4,7 @@ import type { ContactForce, Physics } from '../physics/Physics';
 import type { TerrainData } from '../terrain/TerrainData';
 import { world } from '../world';
 import { applyWear } from './models/wear';
+import { disposeTree } from '../render/dispose';
 import type { RoverModel } from './models/kit';
 import type { RoverSpec } from './specs';
 
@@ -261,10 +262,7 @@ export class Rover {
     w.removeRigidBody(this.body);
     this.units = [];
     this.object.removeFromParent();
-    this.object.traverse((o) => {
-      const m = o as THREE.Mesh;
-      if (m.isMesh) m.geometry.dispose();
-    });
+    disposeTree(this.object);
   }
 
   private chassisQuat(out: THREE.Quaternion): THREE.Quaternion {

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { TerrainData } from '../terrain/TerrainData';
 import { buildIngenuity } from '../rover/models/nasa';
 import { world } from '../world';
+import { disposeTree } from '../render/dispose';
 
 /**
  * Ingenuity Mars Helicopter (NASA/JPL, 2021).
@@ -152,6 +153,9 @@ export class Helicopter {
 
   /** Stop the rotor sound and free the audio nodes (vehicle switched). */
   dispose(): void {
+    disposeTree(this.object);
+    this.dustGeo.dispose();
+    (this.dustMesh.material as THREE.Material).dispose();
     if (!this.audio) return;
     for (const o of this.audio.osc) {
       try {
