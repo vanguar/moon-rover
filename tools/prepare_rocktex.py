@@ -26,7 +26,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 R = os.path.join(ROOT, "raw_data", "marsrocks")
 CROPS = [
     ("PIA19066_MarsCuriosityRover_AlexanderHillsRock_20141123_Fig1.jpg", (430, 300, 650, 520)),
-    ("PIA19066_MarsCuriosityRover_AlexanderHillsRock_20141123_Fig1.jpg", (1610, 390, 1810, 590)),
+    ("PIA19066_MarsCuriosityRover_AlexanderHillsRock_20141123_Fig1.jpg", (1645, 395, 1820, 570)),  # between the annotation arrow (x < 1643) and the black frame
     ("PIA24492.jpg", (330, 260, 780, 710)),
     ("PIA24936.jpg", (800, 900, 1400, 1500)),
 ]

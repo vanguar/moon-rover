@@ -17,6 +17,7 @@ const COLLIDER_SMALL = 0.1;
 const BOULDER_GRID = 8;
 const BOULDER_CELL = 64;
 const BOULDER_VARIANTS = 4;
+const OUTCROP_VARIANTS_MARS = 4;
 /** Boulder probability per BOULDER_GRID cell: base + steep slopes + rocky pavement (each weight ≤ 1). */
 const BOULDER_P0 = 0.004;
 const BOULDER_P_SLOPE = 0.12;
@@ -174,8 +175,52 @@ function slabGeometry(seed: number, tint: RockTint): THREE.BufferGeometry {
   return colorize(g, n, tint);
 }
 
-/** Vertex colours: mottled albedo; on Mars a coat of bright dust on upward faces. */
-function colorize(g: THREE.BufferGeometry, n: (x: number, y: number, z: number) => number, tint: RockTint): THREE.BufferGeometry {
+/**
+ * Mars bedrock plate (Máaz / Séítah outcrops, cf. the Rochette ridge, PIA24840): a low
+ * slab barely proud of the sand, its top flat and gently wavy, its rim rounded by wind
+ * abrasion, its outline an irregular polygon broken along a few joint planes. A pillow
+ * shape (superellipsoid-like: flat faces, rounded edges) with smooth normals - no boxes.
+ * Unit size: x, z within about ±1, y within ±0.5.
+ */
+function plateGeometry(seed: number, tint: RockTint): THREE.BufferGeometry {
+  let g: THREE.BufferGeometry = new THREE.IcosahedronGeometry(1, 4);
+  g.deleteAttribute('uv');
+  g.deleteAttribute('normal');
+  g = mergeVertices(g);
+  const p = g.getAttribute('position') as THREE.BufferAttribute;
+  const rnd = mulberry32(seed);
+  const n = noise3(seed);
+  // Joints: straight fracture edges of the outline (direction, distance from the centre).
+  const joints = Array.from({ length: 4 + Math.floor(rnd() * 3) }, () => ({ a: rnd() * Math.PI * 2, c: 0.5 + rnd() * 0.35 }));
+  const elong = 0.6 + rnd() * 0.35;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i).normalize();
+    const rh = Math.hypot(v.x, v.z), az = Math.atan2(v.z, v.x);
+    // Outline radius: wavy, cut back by the joints (soft minimum: rounded corners).
+    let R = 1 + 0.16 * n(Math.cos(az) * 1.7 + 3, Math.sin(az) * 1.7, 0.5) + 0.05 * n(Math.cos(az) * 6, Math.sin(az) * 6, 2.5);
+    for (const j of joints) {
+      const c = Math.cos(az - j.a);
+      if (c > 0.05) {
+        const lim = j.c / c;
+        R = -Math.log(Math.exp(-R * 18) + Math.exp(-lim * 18)) / 18;
+      }
+    }
+    // Pillow profile: flat top and bottom, rim rounded over ~a third of the height.
+    const fr = Math.pow(rh, 0.16), fy = Math.sign(v.y) * Math.pow(Math.abs(v.y), 0.3);
+    const top = v.y > 0 ? 0.06 * fbm(n, v, 1.4, 2) + 0.02 * fbm(n, v, 7, 2) : 0;
+    const x = rh > 1e-6 ? (v.x / rh) * fr * R : 0, z = rh > 1e-6 ? (v.z / rh) * fr * R * elong : 0;
+    // Edge thickness varies around the rim (spalled flakes, thinner tongues).
+    const rim = 0.75 + 0.25 * n(Math.cos(az) * 3 + 9, Math.sin(az) * 3, 1.5);
+    p.setXYZ(i, x, fy * 0.5 * rim * (0.85 + 0.15 * R) + top, z);
+  }
+  g.computeVertexNormals();
+  // Light-toned tops: the plates hold a thicker, brighter dust coat than loose rocks.
+  return colorize(g, n, { base: tint.base, dust: tint.dust ? tint.dust.clone().multiplyScalar(1.7) : null }, 0.9);
+}
+
+/** Vertex colours: mottled albedo; on Mars a coat of bright dust on upward faces (up to dustMax). */
+function colorize(g: THREE.BufferGeometry, n: (x: number, y: number, z: number) => number, tint: RockTint, dustMax = 0.4): THREE.BufferGeometry {
   const p = g.getAttribute('position') as THREE.BufferAttribute;
   const nr = g.getAttribute('normal') as THREE.BufferAttribute;
   const col = new Float32Array(p.count * 3);
@@ -187,7 +232,7 @@ function colorize(g: THREE.BufferGeometry, n: (x: number, y: number, z: number) 
     if (tint.dust) {
       // Dust settles only on the flatter upper faces, patchily; sides stay dark basalt.
       const up = THREE.MathUtils.smoothstep(nr.getY(i), 0.55, 0.95) * (0.35 + 0.55 * (fbm(n, v, 3, 2) * 0.5 + 0.5));
-      c.lerp(tint.dust, THREE.MathUtils.clamp(up * 0.7, 0, 0.4));
+      c.lerp(tint.dust, THREE.MathUtils.clamp(up * (dustMax > 0.4 ? 1.1 : 0.7), 0, dustMax));
     }
     col.set([c.r, c.g, c.b], i * 3);
   }
@@ -205,7 +250,8 @@ export class Rocks {
   private meshes: THREE.InstancedMesh[] = [];
   private boulderNear: THREE.InstancedMesh[] = [];
   private boulderFar: THREE.InstancedMesh[] = [];
-  private outcropMesh: THREE.InstancedMesh;
+  /** Outcrop shapes: the Moon's bedded slab; on Mars several bedrock plates. */
+  private outcropMeshes: THREE.InstancedMesh[] = [];
   private boulders: Rock[] = [];
   private boulderGrid = new Map<string, number[]>();
   private cellKey = '';
@@ -235,7 +281,7 @@ export class Rocks {
       // vesicles as a bump map, mineral grains, darker pits, and (Moon) a fine dust
       // coat on the upper faces; (Mars) the ochre dust is handled by the vertex colour.
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vRockP;\nvarying vec3 vRockN;\nvarying float vRockSeed;')
+        .replace('#include <common>', '#include <common>\nvarying vec3 vRockP;\nvarying vec3 vRockN;\nvarying float vRockSeed;\nvarying float vRockS;')
         .replace(
           '#include <begin_vertex>',
           `#include <begin_vertex>
@@ -249,7 +295,8 @@ vRockSeed = fract(sin(dot(iT.xz, vec2(12.9898, 78.233))) * 43758.5453);
 #else
 vRockN = normalize(mat3(modelMatrix) * objectNormal);
 #endif
-vRockP = position * rScale;`,
+vRockP = position * rScale;
+vRockS = rScale;`,
         );
       shader.fragmentShader = shader.fragmentShader
         .replace(
@@ -258,6 +305,7 @@ vRockP = position * rScale;`,
 varying vec3 vRockP;
 varying vec3 vRockN;
 varying float vRockSeed;
+varying float vRockS;
 #if ROCK_PHOTO > 0
 uniform sampler2D uRockPhoto;
 // Real rover photographs of Martian rock (2 × 2 atlas), projected triplanarly at
@@ -270,8 +318,19 @@ vec3 photoTap(vec2 p, vec2 tile) {
 vec3 rockPhoto(vec3 p, vec3 w) {
   float s = vRockSeed;
   vec2 tile = vec2(floor(s * 2.0), floor(fract(s * 7.13) * 2.0));
+#if ROCK_MARS > 0
+  // Tile (1, 0), the coarse "Cine" basalt, turns into a speckled carpet on a metre-wide
+  // plate: big rocks take the dusty, finely pitted Jezero rock (0, 0) instead.
+  if (vRockS > 1.2 && tile.x > 0.5 && tile.y < 0.5) tile.x = 0.0;
+#endif
   vec3 o = vec3(s * 17.0, s * 5.0, s * 11.0);
+#if ROCK_MARS > 0
+  // Mars bedrock plates are metres across: stretch the photo with the rock's size
+  // instead of repeating a 0.6 m tile into a visible grid.
+  p = p / (0.6 * clamp(vRockS * 0.7, 1.0, 3.0)) + o;
+#else
   p = p / 0.6 + o;
+#endif
   return photoTap(p.yz, tile) * w.x + photoTap(p.xz, tile) * w.y + photoTap(p.xy, tile) * w.z;
 }
 #endif
@@ -365,10 +424,12 @@ float rockH(vec3 p, vec3 w) {
       this.boulderFar.push(far);
     }
     // Outcrops: bedded slabs (stacked plates breaking along bedding planes).
-    this.outcropMesh = new THREE.InstancedMesh(slabGeometry(5, tint), mat, 800);
-    for (const m of [...this.boulderNear, ...this.boulderFar, this.outcropMesh]) this.prep(m);
+    if (mars) for (let v = 0; v < OUTCROP_VARIANTS_MARS; v++) this.outcropMeshes.push(new THREE.InstancedMesh(plateGeometry(41 + v * 17, tint), mat, 500));
+    else this.outcropMeshes.push(new THREE.InstancedMesh(slabGeometry(5, tint), mat, 800));
+    for (const m of [...this.boulderNear, ...this.boulderFar, ...this.outcropMeshes]) this.prep(m);
     for (const m of this.boulderFar) m.castShadow = false;
     this.placeBoulders();
+    if (this.mars && terrain.meta.sites?.rochette) this.placeArtuby(terrain.meta.sites.rochette.x, terrain.meta.sites.rochette.z);
   }
 
   private capacity(): number {
@@ -420,6 +481,11 @@ float rockH(vec3 p, vec3 w) {
         const rnd = mulberry32(Math.floor(hash2(i, j, 4242) * 4294967296));
         const px = x + (rnd() - 0.5) * BOULDER_GRID, pz = z + (rnd() - 0.5) * BOULDER_GRID;
         const outcrop = (slopeDeg > 24 && rnd() < 0.35) || (mat > 0.7 && rnd() < 0.45);
+        // Mars bedrock on flat ground: a row of low plates along the strike (Rochette ridge).
+        if (outcrop && this.mars && slopeDeg <= 24) {
+          this.placePlateRow(px, pz, rnd);
+          continue;
+        }
         // (Outcrop albedo: weathered, dust-coated rock, close to the soil around it.)
         let r: number, sx: number, sy: number, sz: number;
         const q = new THREE.Quaternion();
@@ -439,12 +505,78 @@ float rockH(vec3 p, vec3 w) {
         }
         // Partially buried; large blocks sink deeper into the regolith.
         const y = t.height(px, pz) - sy * (outcrop ? 0.45 : 0.3);
-        const idx = this.boulders.length;
-        this.boulders.push({ x: px, y, z: pz, r, sx, sy, sz, q, v: Math.floor(rnd() * BOULDER_VARIANTS), albedo: outcrop ? (this.mars ? 0.75 : 0.5) + rnd() * 0.2 : 0.85 + rnd() * 0.4, outcrop });
-        const key = `${Math.floor(px / BOULDER_CELL)},${Math.floor(pz / BOULDER_CELL)}`;
-        if (!this.boulderGrid.has(key)) this.boulderGrid.set(key, []);
-        this.boulderGrid.get(key)!.push(idx);
+        this.addBoulder({ x: px, y, z: pz, r, sx, sy, sz, q, v: Math.floor(rnd() * BOULDER_VARIANTS), albedo: outcrop ? (this.mars ? 0.75 : 0.5) + rnd() * 0.2 : 0.85 + rnd() * 0.4, outcrop });
       }
+    }
+  }
+
+  /**
+   * The Artuby ridge at Rochette (the first cores, Sol 190, PIA24840): a long band of
+   * light, dust-coated plates breaking out of the ground, with Rochette itself - a
+   * ~1.5 m lumpy block of altered basalt, its faces cleaner and greyer - lying beside
+   * it, and loose blocks shed from the ridge. Fixed seed: always the same scene.
+   */
+  private placeArtuby(cx: number, cz: number): void {
+    const t = this.terrain;
+    const rnd = mulberry32(190);
+    const strike = THREE.MathUtils.degToRad(25);
+    const dx = Math.cos(strike), dz = Math.sin(strike);
+    for (let k = -6; k <= 6; k++) {
+      const a = k * 4.5 + (rnd() - 0.5) * 2, side = (rnd() - 0.5) * 2.5 - 3;
+      this.placePlateRow(cx + dx * a - dz * side, cz + dz * a + dx * side, rnd, strike + (rnd() - 0.5) * 0.3);
+    }
+    const Y = new THREE.Vector3(0, 1, 0);
+    // v 2-3 on Mars are the faceted, freshly broken shapes (Rochette's look in PIA24840).
+    const block = (x: number, z: number, r: number, albedo: number, v = Math.floor(rnd() * 2)) => {
+      const sx = r * (1.3 + 0.3 * rnd()), sy = r * (0.6 + 0.15 * rnd()), sz = r * (0.75 + 0.2 * rnd());
+      const q = new THREE.Quaternion().setFromAxisAngle(Y, strike + (rnd() - 0.5) * 1.2).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler((rnd() - 0.5) * 0.3, 0, (rnd() - 0.5) * 0.3)));
+      this.addBoulder({ x, y: t.height(x, z) - sy * 0.3, z, r, sx, sy, sz, q, v, albedo, outcrop: false });
+    };
+    // Rochette, on the rover's side of the ridge.
+    block(cx + dz * 1.5, cz - dx * 1.5, 0.75, 2.6, 2);
+    for (let k = 0; k < 14; k++) {
+      const a = (rnd() - 0.5) * 50, side = -1 - rnd() * 9;
+      block(cx + dx * a - dz * side, cz + dz * a + dx * side, 0.15 + 0.4 * rnd() * rnd(), 0.9 + rnd() * 0.4);
+    }
+  }
+
+  private addBoulder(b: Rock): void {
+    const key = `${Math.floor(b.x / BOULDER_CELL)},${Math.floor(b.z / BOULDER_CELL)}`;
+    if (!this.boulderGrid.has(key)) this.boulderGrid.set(key, []);
+    this.boulderGrid.get(key)!.push(this.boulders.length);
+    this.boulders.push(b);
+  }
+
+  /**
+   * A broken-up bedrock exposure on Mars: 2-5 low plates (0.25-0.6 m thick, half
+   * buried) strung along the strike with sand between them, each following the
+   * ground's tilt, as along the Rochette ridge and across the Máaz pavement.
+   */
+  placePlateRow(x0: number, z0: number, rnd: () => number, strike = rnd() * Math.PI): void {
+    const t = this.terrain;
+    const dx = Math.cos(strike), dz = Math.sin(strike);
+    const count = 2 + Math.floor(rnd() * 4);
+    const r0 = 0.7 + rnd() * 1.3;
+    const albedo = 1.05 + rnd() * 0.25;
+    // The bedding dips: the plates of one row lean the same way (tilted ledges).
+    const dip = (rnd() - 0.5) * 0.35;
+    let along = -r0 * count * 0.5, prev = 0;
+    const up = new THREE.Vector3(), Y = new THREE.Vector3(0, 1, 0);
+    for (let k = 0; k < count; k++) {
+      const r = r0 * (0.55 + 0.6 * rnd());
+      along += (prev + r) * (0.75 + 0.35 * rnd());
+      prev = r;
+      const side = (rnd() - 0.5) * 0.6 * r0;
+      const x = x0 + dx * along - dz * side, z = z0 + dz * along + dx * side;
+      if (!t.inside(x, z)) continue;
+      t.normal(x, z, this.tmpN, 1.5);
+      up.set(this.tmpN[0], this.tmpN[1], this.tmpN[2]);
+      const q = new THREE.Quaternion()
+        .setFromUnitVectors(Y, up)
+        .multiply(new THREE.Quaternion().setFromAxisAngle(Y, -strike + (rnd() - 0.5) * 0.6))
+        .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), dip + (rnd() - 0.5) * 0.15));
+      const sx = r * (0.9 + 0.3 * rnd()), sz = r * (0.75 + 0.3 * rnd()), sy = 0.25 + rnd() * 0.35;
+      this.addBoulder({ x, y: t.height(x, z) - sy * 0.45, z, r, sx, sy, sz, q, v: Math.floor(rnd() * OUTCROP_VARIANTS_MARS), albedo: albedo + (rnd() - 0.5) * 0.08, outcrop: true });
     }
   }
 
@@ -576,7 +708,7 @@ float rockH(vec3 p, vec3 w) {
     const rad = Math.ceil(range / BOULDER_CELL);
     const m4 = new THREE.Matrix4(), p = new THREE.Vector3(), s = new THREE.Vector3(), col = new THREE.Color();
     const nNear = new Array(BOULDER_VARIANTS).fill(0), nFar = new Array(BOULDER_VARIANTS).fill(0);
-    let nOut = 0;
+    const nOut = new Array(this.outcropMeshes.length).fill(0);
     const keepCol = new Set<number>();
     for (let dz = -rad; dz <= rad; dz++)
       for (let dx = -rad; dx <= rad; dx++) {
@@ -589,9 +721,10 @@ float rockH(vec3 p, vec3 w) {
           m4.compose(p.set(b.x, b.y, b.z), b.q, s.set(b.sx, b.sy, b.sz));
           col.setScalar(b.albedo);
           if (b.outcrop) {
-            if (nOut < this.outcropMesh.instanceMatrix.count) {
-              this.outcropMesh.setMatrixAt(nOut, m4);
-              this.outcropMesh.setColorAt(nOut++, col);
+            const o = b.v % this.outcropMeshes.length, om = this.outcropMeshes[o];
+            if (nOut[o] < om.instanceMatrix.count) {
+              om.setMatrixAt(nOut[o], m4);
+              om.setColorAt(nOut[o]++, col);
             }
           } else if (d < 160 && nNear[b.v] < this.boulderNear[b.v].instanceMatrix.count) {
             this.boulderNear[b.v].setMatrixAt(nNear[b.v], m4);
@@ -606,7 +739,7 @@ float rockH(vec3 p, vec3 w) {
           }
         }
       }
-    const all: [THREE.InstancedMesh, number][] = [[this.outcropMesh, nOut]];
+    const all: [THREE.InstancedMesh, number][] = this.outcropMeshes.map((m, o) => [m, nOut[o]]);
     for (let v = 0; v < BOULDER_VARIANTS; v++) all.push([this.boulderNear[v], nNear[v]], [this.boulderFar[v], nFar[v]]);
     for (const [m, n] of all) {
       m.count = n;
@@ -650,6 +783,6 @@ float rockH(vec3 p, vec3 w) {
 
   count(): number {
     const sum = (l: THREE.InstancedMesh[]) => l.reduce((a, m) => a + m.count, 0);
-    return sum(this.meshes) + sum(this.boulderNear) + sum(this.boulderFar) + this.outcropMesh.count;
+    return sum(this.meshes) + sum(this.boulderNear) + sum(this.boulderFar) + sum(this.outcropMeshes);
   }
 }
