@@ -247,11 +247,12 @@ export class Sky {
    * Moon: meteoroids arrive unseen at 20–70 km/s and flash briefly on impact —
    * visible only where the ground is dark (in shadow).
    */
-  impactFlash(scene: THREE.Scene, pos: THREE.Vector3, dist: number): void {
+  /** Impact flash at pos, seen from dist m; size scales the glow (a meteoroid strike in view is bigger). */
+  impactFlash(scene: THREE.Scene, pos: THREE.Vector3, dist: number, size = 1): void {
     const mat = new THREE.SpriteMaterial({ map: this.flashTex, color: 0xfff1dc, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
     const sprite = new THREE.Sprite(mat);
     sprite.position.copy(pos);
-    sprite.scale.setScalar(Math.max(0.6, dist * 0.004));
+    sprite.scale.setScalar(Math.max(0.6, dist * 0.004) * size);
     scene.add(sprite);
     this.flashes.push({ sprite, t: 0, peak: 1.5 + Math.random() * 3 });
   }

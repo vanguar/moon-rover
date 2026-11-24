@@ -13,10 +13,13 @@ import type { TerrainData } from '../terrain/TerrainData';
  * rim and a bright, immature ejecta blanket that rays out to a few diameters.
  *
  * Rate: on the real Moon a crater ≥ 1 m forms somewhere in an 8 × 8 km area only
- * every few years; the game shows one every few minutes (sizes 0.6-12 m, power
- * law: small ones far more often) - a game liberty, noted in docs/REALISM.md.
+ * every few years; the game shows one every couple of minutes (sizes 0.6-12 m, power
+ * law: small ones far more often), always in view - a game liberty, as is the short
+ * bright streak of the falling body (in vacuum it would not glow): both in docs/REALISM.md.
  */
 const N = 4000;
+/** Visible fall of the impactor before it strikes, s. */
+const FALL_TIME = 0.6;
 
 export interface FreshCrater {
   x: number;
@@ -35,7 +38,17 @@ export class Meteors {
   private geo: THREE.BufferGeometry;
   private aSize: Float32Array;
   private cursor = 0;
-  private timer = 40 + Math.random() * 60;
+  private timer = 25 + Math.random() * 35;
+  /** Impactors on their way down: start and end points, elapsed time, crater radius. */
+  private falling: { from: THREE.Vector3; to: THREE.Vector3; t: number; r: number }[] = [];
+  /** Streaks of the falling bodies: a fading tail and a bright head per body. */
+  readonly streaks: THREE.LineSegments;
+  private streakPos = new Float32Array(8 * 6);
+  private streakCol = new Float32Array(8 * 6);
+  /** Glowing heads of the falling bodies (a 1-pixel line alone is lost at a few hundred metres). */
+  readonly heads: THREE.Points;
+  private headPos = new Float32Array(8 * 3);
+  private ndc = new THREE.Vector3();
   /** Called when a crater forms (terrain update, flash, sound, radio). */
   onImpact?: (x: number, z: number, r: number, dist: number) => void;
 
@@ -48,15 +61,41 @@ export class Meteors {
       uniforms: { uColor: { value: new THREE.Color(0.5, 0.49, 0.47) }, uScale: { value: 700 } },
       vertexShader: `attribute float aSize; uniform float uScale;
         void main() { vec4 mv = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = clamp(aSize * uScale / max(-mv.z, 0.1), 1.0, 40.0); gl_Position = projectionMatrix * mv; }`,
+          gl_PointSize = clamp(aSize * uScale / max(-mv.z, 0.1), 2.0, 40.0); gl_Position = projectionMatrix * mv; }`,
       fragmentShader: `uniform vec3 uColor;
-        void main() { vec2 d = gl_PointCoord - 0.5; if (dot(d, d) > 0.25) discard; gl_FragColor = vec4(uColor, 1.0);
+        void main() { vec2 d = gl_PointCoord - 0.5; if (dot(d, d) > 0.25) discard; gl_FragColor = vec4(uColor * 1.3, 1.0); // fresh, immature regolith is brighter
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
         }`,
     });
     this.points = new THREE.Points(this.geo, mat);
     this.points.frustumCulled = false;
+
+    const sg = new THREE.BufferGeometry();
+    sg.setAttribute('position', new THREE.BufferAttribute(this.streakPos, 3).setUsage(THREE.DynamicDrawUsage));
+    sg.setAttribute('color', new THREE.BufferAttribute(this.streakCol, 3).setUsage(THREE.DynamicDrawUsage));
+    sg.setDrawRange(0, 0);
+    this.streaks = new THREE.LineSegments(
+      sg,
+      new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }),
+    );
+    this.streaks.frustumCulled = false;
+
+    const hg = new THREE.BufferGeometry();
+    hg.setAttribute('position', new THREE.BufferAttribute(this.headPos, 3).setUsage(THREE.DynamicDrawUsage));
+    hg.setDrawRange(0, 0);
+    this.heads = new THREE.Points(
+      hg,
+      new THREE.ShaderMaterial({
+        vertexShader: 'void main() { gl_PointSize = 9.0; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+        fragmentShader: `void main() { float r = length(gl_PointCoord - 0.5) * 2.0; float a = exp(-r * r * 4.0);
+          gl_FragColor = vec4(vec3(1.0, 0.95, 0.85) * a * 1.6, a); }`,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    );
+    this.heads.frustumCulled = false;
   }
 
   setLight(c: THREE.Color): void {
@@ -87,18 +126,52 @@ export class Meteors {
     this.onImpact?.(x, z, r, Math.hypot(x - fromX, z - fromZ));
   }
 
-  update(dt: number, around: THREE.Vector3, camDir: THREE.Vector3): void {
+  /**
+   * Start the visible fall of an impactor onto (x, z), watched from `eye`; it strikes
+   * FALL_TIME later. The fall starts ~19° above the target as seen from the eye (inside
+   * the view) and arrives from one side at 35–65°, so it crosses the screen diagonally.
+   */
+  launch(x: number, z: number, r: number, eye: THREE.Vector3): void {
+    const to = new THREE.Vector3(x, this.terrain.height(x, z), z);
+    const dx = x - eye.x, dz = z - eye.z, dist = Math.hypot(dx, dz) || 1;
+    const height = Math.min(400, Math.max(40, dist * 0.35));
+    const el = ((35 + Math.random() * 30) * Math.PI) / 180;
+    const side = Math.random() < 0.5 ? -1 : 1;
+    // Mostly across the line of sight, a little away from the eye.
+    const ax = (-dz / dist) * side + (dx / dist) * 0.4, az = (dx / dist) * side + (dz / dist) * 0.4;
+    const k = height / Math.tan(el) / Math.hypot(ax, az);
+    const from = new THREE.Vector3(x + ax * k, to.y + height, z + az * k);
+    this.falling.push({ from, to, t: 0, r });
+  }
+
+  /** Pick an impact point in the camera's view, 80–450 m away, inside the map. */
+  private pickTarget(around: THREE.Vector3, camera: THREE.Camera): [number, number] | null {
+    const fwd = camera.getWorldDirection(this.ndc);
+    const base = Math.atan2(fwd.x, fwd.z);
+    for (let i = 0; i < 12; i++) {
+      const a = base + (Math.random() - 0.5) * 0.7;
+      const d = 80 + Math.random() * 370;
+      const x = around.x + Math.sin(a) * d, z = around.z + Math.cos(a) * d;
+      if (!this.terrain.inside(x, z)) continue;
+      // The crater and the lower part of the fall must be on screen.
+      const p = this.ndc.set(x, this.terrain.height(x, z) + 2, z).project(camera);
+      if (p.z < 1 && Math.abs(p.x) < 0.85 && p.y > -0.9 && p.y < 0.6) return [x, z];
+    }
+    return null;
+  }
+
+  update(dt: number, around: THREE.Vector3, camera: THREE.Camera): void {
     this.timer -= dt;
     if (this.timer <= 0) {
-      this.timer = 120 + Math.random() * 240;
-      // Size: cumulative N(>D) ∝ D^-2 between 0.6 and 12 m crater radius.
-      const r = Math.min(12, 0.6 * Math.pow(1 - Math.random() * 0.995, -0.5));
-      // Somewhere ahead of the camera, 120-1200 m away, inside the map.
-      const a = Math.atan2(camDir.x, camDir.z) + (Math.random() - 0.5) * 1.4;
-      const d = 120 + Math.random() * 1080;
-      const x = around.x + Math.sin(a) * d, z = around.z + Math.cos(a) * d;
-      if (this.terrain.inside(x, z)) this.strike(x, z, r, around.x, around.z);
+      const target = this.pickTarget(around, camera);
+      // Nothing suitable in view (looking at the sky, map edge): try again shortly.
+      this.timer = target ? 75 + Math.random() * 125 : 3;
+      if (target) {
+        // Size: cumulative N(>D) ∝ D^-2 between 0.6 and 12 m crater radius.
+        this.launch(target[0], target[1], Math.min(12, 0.6 * Math.pow(1 - Math.random() * 0.995, -0.5)), camera.position);
+      }
     }
+    this.updateFalling(dt, around);
     for (const c of this.fresh) c.age += dt;
     const g = 1.62;
     const t = this.terrain;
@@ -128,5 +201,38 @@ export class Meteors {
     this.geo.setDrawRange(0, n);
     (this.geo.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
     (this.geo.getAttribute('aSize') as THREE.BufferAttribute).needsUpdate = true;
+  }
+
+  private updateFalling(dt: number, around: THREE.Vector3): void {
+    let k = 0;
+    for (let i = this.falling.length - 1; i >= 0; i--) {
+      const f = this.falling[i];
+      f.t += dt;
+      if (f.t >= FALL_TIME) {
+        this.falling.splice(i, 1);
+        this.strike(f.to.x, f.to.z, f.r, around.x, around.z);
+        continue;
+      }
+      if (k >= 8) continue;
+      // Head along the straight path; the tail is the last ~40 % of the way, fading out.
+      const u = f.t / FALL_TIME, tail = Math.max(0, u - 0.35);
+      const P = this.streakPos, C = this.streakCol, o = k * 6;
+      P[o] = f.from.x + (f.to.x - f.from.x) * u;
+      P[o + 1] = f.from.y + (f.to.y - f.from.y) * u;
+      P[o + 2] = f.from.z + (f.to.z - f.from.z) * u;
+      P[o + 3] = f.from.x + (f.to.x - f.from.x) * tail;
+      P[o + 4] = f.from.y + (f.to.y - f.from.y) * tail;
+      P[o + 5] = f.from.z + (f.to.z - f.from.z) * tail;
+      C.set([2.4, 2.25, 2.0, 0, 0, 0], o);
+      this.headPos.set([P[o], P[o + 1], P[o + 2]], k * 3);
+      k++;
+    }
+    const g = this.streaks.geometry;
+    g.setDrawRange(0, k * 2);
+    (g.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
+    (g.getAttribute('color') as THREE.BufferAttribute).needsUpdate = true;
+    const hg = this.heads.geometry;
+    hg.setDrawRange(0, k);
+    (hg.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
   }
 }

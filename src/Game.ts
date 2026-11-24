@@ -256,7 +256,7 @@ export class Game {
     this.radio = new Radio(() => this.audio.output);
     if (!mars) {
       this.meteors = new Meteors(terrain);
-      this.scene.add(this.meteors.points);
+      this.scene.add(this.meteors.points, this.meteors.streaks, this.meteors.heads);
       // Craters made by earlier impacts stay (saved in the browser).
       try {
         const saved = JSON.parse(localStorage.getItem('moon-craters') ?? '[]') as number[][];
@@ -279,7 +279,7 @@ export class Game {
         }
         const p = this.rover.object.position;
         if (Math.abs(x - p.x) < 70 && Math.abs(z - p.z) < 70) this.physics.updatePatch(p.x, p.z, true);
-        this.sky?.impactFlash(this.scene, new THREE.Vector3(x, terrain.height(x, z) + 0.5, z), dist);
+        this.sky?.impactFlash(this.scene, new THREE.Vector3(x, terrain.height(x, z) + 0.5, z), dist, 2 + r * 0.4);
         // No sound through vacuum; a close impact is felt through the ground.
         if (dist < 400) this.shake.a = Math.min(0.06, this.shake.a + (r / Math.max(dist, 20)) * 0.6);
         this.radio.say(r > 4 ? 'impactBig' : 'impact', { repeat: true, delay: 1 });
@@ -789,7 +789,7 @@ export class Game {
     this.updateEnvironment(dt);
     this.updateSun(p);
     this.updateImpacts(dt);
-    if (this.meteors) this.meteors.update(dt, this.rover.object.position, this.camera.getWorldDirection(new THREE.Vector3()));
+    if (this.meteors) this.meteors.update(dt, this.rover.object.position, this.camera);
     this.updateEnergy(dt);
     this.radio.update(dt);
     this.updateMission();
