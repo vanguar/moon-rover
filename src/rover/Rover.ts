@@ -65,6 +65,10 @@ export class Rover {
    */
   wheelDamage: number[] = [];
   bodyDamage = 0;
+  /** Electronics damage 0..1 (lightning in a storm front): slower drive, less solar power. */
+  electronics = 0;
+  /** Seconds the drive stays dead after a discharge (controllers rebooting). */
+  stall = 0;
   /** Index of the wheel that just took damage (for warnings), −1 none. */
   lastHit = -1;
   private hitAt: number[] = [];
@@ -321,7 +325,8 @@ export class Rover {
     const fwd = this.forwardVector(this.tv);
     const speed = lv.x * fwd.x + lv.y * fwd.y + lv.z * fwd.z;
     this.speed = speed;
-    const vmax = this.maxSpeed * (1 - 0.45 * this.bodyDamage);
+    const vmax = this.maxSpeed * (1 - 0.45 * this.bodyDamage) * (1 - 0.5 * this.electronics);
+    this.stall = Math.max(0, this.stall - dt);
 
     // Steering servos: rate-limited; front and rear axles steer opposite (double Ackermann).
     const steerLimit = spec.maxSteer * (1 - 0.55 * Math.min(1, Math.abs(speed) / vmax));
@@ -329,11 +334,13 @@ export class Rover {
     this.steerAngle += THREE.MathUtils.clamp(target - this.steerAngle, -1.6 * dt, 1.6 * dt);
 
     let drive = 0, brake = 0;
-    if (input.throttle > 0.01) {
+    if (this.stall > 0) {
+      // Motor controllers rebooting: no drive, the brakes hold.
+    } else if (input.throttle > 0.01) {
       if (speed < -0.3 * vmax / 6) brake = input.throttle;
       else drive = input.throttle;
     }
-    if (input.brake > 0.01) {
+    if (input.brake > 0.01 && this.stall <= 0) {
       if (speed > 0.3 * vmax / 6) brake = Math.max(brake, input.brake);
       else drive = -input.brake * 0.6;
     }
@@ -390,7 +397,7 @@ export class Rover {
 
     // Energy budget: panels work only in sunlight (terrain shadow test by the game).
     const up = this.upVector(this.tv);
-    this.solar = spec.solarW * this.solarScale * (1 - this.panelDust) * Math.max(0, up.dot(this.sunDir)) * this.sunLit;
+    this.solar = spec.solarW * this.solarScale * (1 - this.panelDust) * (1 - 0.6 * this.electronics) * Math.max(0, up.dot(this.sunDir)) * this.sunLit;
     const copper = this.motorLoad * 150 * (spec.mass / 620);
     const motorW = mech / MOTOR_EFF + copper;
     // Electronics thermal balance (box ~15 kJ/K, 0.4 m² radiator, ε 0.85): heated by its own
@@ -598,6 +605,8 @@ export class Rover {
   repair(): void {
     this.wheelDamage = [];
     this.bodyDamage = 0;
+    this.electronics = 0;
+    this.stall = 0;
     this.lastHit = -1;
   }
 

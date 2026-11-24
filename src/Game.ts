@@ -45,6 +45,18 @@ export interface GameExtras {
   rockPhoto?: THREE.Texture;
 }
 
+/** three.js ACESFilmicToneMapping on the CPU (linear in, tone-mapped linear out). */
+function acesFilmic(c: THREE.Color, exposure: number): THREE.Color {
+  const k = exposure / 0.6;
+  const r = c.r * k, g = c.g * k, b = c.b * k;
+  // ACESInputMat (columns as in the GLSL).
+  const i = [0.59719 * r + 0.35458 * g + 0.04823 * b, 0.076 * r + 0.90834 * g + 0.01566 * b, 0.0284 * r + 0.13383 * g + 0.83777 * b];
+  const f = i.map((v) => (v * (v + 0.0245786) - 0.000090537) / (v * (0.983729 * v + 0.432951) + 0.238081));
+  const o = [1.60475 * f[0] - 0.53108 * f[1] - 0.07367 * f[2], -0.10208 * f[0] + 1.10813 * f[1] - 0.00605 * f[2], -0.00327 * f[0] - 0.07276 * f[1] + 1.07602 * f[2]];
+  const sat = (v: number) => Math.min(1, Math.max(0, v));
+  return new THREE.Color(sat(o[0]), sat(o[1]), sat(o[2]));
+}
+
 /** Sun irradiance in scene units; everything else is relative to it. */
 const SUN_INTENSITY = 9;
 const LEVELS: QualityLevel[] = ['low', 'medium', 'high', 'ultra'];
@@ -246,6 +258,21 @@ export class Game {
       const lvl = quality.level === 'low' ? 0.35 : quality.level === 'medium' ? 0.6 : 1;
       this.weather = new MarsWeather(terrain, this.sunDir, lvl);
       this.weather.setMode(weatherMode);
+      // Lightning in a storm front: a direct hit damages the electronics (a reason to
+      // keep out of a front's way); a near miss now and then too.
+      this.weather.onStrike = (_x, _z, dist) => {
+        const r = this.rover;
+        this.shake.a = Math.min(0.05, this.shake.a + 0.4 / Math.max(dist, 4));
+        if (this.heli) return;
+        if (dist < 12) {
+          r.electronics = Math.min(1, r.electronics + 0.15 + Math.random() * 0.3);
+          r.stall = 2 + Math.random() * 2;
+          this.toast(t('strikeHit'));
+        } else if (dist < 40 && Math.random() < 0.3) {
+          r.electronics = Math.min(1, r.electronics + 0.05);
+          this.toast(t('strikeNear'));
+        }
+      };
       this.scene.add(this.weather.group);
       this.updateAtmosphere(0);
     }
@@ -1190,7 +1217,8 @@ export class Game {
     const eTot = this.sun.intensity * sinEl + Math.PI * (skyL.r + skyL.g + skyL.b) / 3;
     this.hemi.color.copy(skyL).multiplyScalar(Math.PI);
     this.hemi.groundColor.setRGB(0.3, 0.19, 0.12).multiplyScalar(eTot * 0.5);
-    this.hemi.intensity = 1;
+    // Lightning in an approaching storm front briefly lights the landscape.
+    this.hemi.intensity = 1 + w.front.flash * 0.9;
     // Ruts: sky light vs. the direct Sun decides how dark the shaded rut wall is.
     this.tracks.setAmbient(Math.max(0.05, (Math.PI * (skyL.r + skyL.g + skyL.b)) / 3 / Math.max(this.sun.intensity, 0.05)));
     // Aerial perspective: fog colour = sky near the horizon in the view direction.
@@ -1198,7 +1226,10 @@ export class Game {
     fwd.y = 0.04;
     const fogC = ms.colorAt(fwd.normalize(), new THREE.Color()).multiplyScalar(bright * 0.92);
     const fog = this.scene.fog as THREE.FogExp2;
-    fog.color.copy(fogC);
+    // three.js mixes the fog in after tone mapping (only converting its colour to sRGB),
+    // while the sky behind is exposed and tone-mapped: pass the fog colour through the
+    // same curve, or hazy distance turns into a dark brown band instead of the sky.
+    fog.color.copy(acesFilmic(fogC, this.renderer.toneMappingExposure));
     // Inside a devil or a storm front the dust closes in around the rover: the haze
     // thickens smoothly with proximity (devilNear eases in from 3 radii), no edge.
     const inDevil = w.devilNear * w.devilNear * (3 - 2 * w.devilNear);

@@ -114,6 +114,7 @@ export class Hud {
     const hurt = rover.wheelDamage.filter((d) => d > 0.3 && d < 1).length;
     if (dead) { warns.push(`${t('wWheelDead')} ×${dead}`); level = 2; }
     else if (hurt) { warns.push(`${t('wWheelHurt')} ×${hurt}`); level = Math.max(level, 1); }
+    if (rover.electronics > 0.02) { warns.push(`${t('wElec')} ${Math.round(rover.electronics * 100)}%`); level = Math.max(level, rover.electronics > 0.6 || rover.stall > 0 ? 2 : 1); }
     if (rover.bodyDamage > 0.3) { warns.push(`${t('wBody')} ${Math.round(rover.bodyDamage * 100)}%`); level = Math.max(level, 1); }
     if (rover.battery <= 0) { warns.push(t('wBattEmpty')); level = 2; }
     else if (rover.battery < 0.15) { warns.push(t('wBattLow')); level = Math.max(level, 1); }

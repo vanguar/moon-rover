@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { TerrainData } from '../terrain/TerrainData';
 import { mulberry32 } from '../terrain/TerrainData';
 import { DevilDust } from './DevilDust';
+import { StormFront } from './StormFront';
 
 export type WeatherMode = 'auto' | 'calm' | 'devils' | 'storm';
 
@@ -26,6 +27,10 @@ interface Devil {
 }
 
 const MAX_DEVILS = 8;
+/** Storm front: first seen this far out, m; speed, m/s; the storm sets in over its last metres. */
+const FRONT_START = 4500;
+const FRONT_SPEED = 22;
+const FRONT_ARRIVE = 500;
 const BLOW_N = 2600;
 const SHEETS = 14;
 
@@ -75,7 +80,17 @@ export class MarsWeather {
   private rnd = mulberry32(2021);
   private time = 0;
   private stormTimer = 240 + Math.random() * 240;
-  private stormPhase: 'calm' | 'rising' | 'peak' | 'fading' = 'calm';
+  private stormPhase: 'calm' | 'approach' | 'peak' | 'fading' = 'calm';
+  /** The storm's leading edge: a wall of dust coming in from the side. */
+  readonly front: StormFront;
+  /** Front distance from the rover, m, and the world angle it comes from. */
+  private frontDist = 0;
+  private frontAng = 0;
+  /** Camera heading (world angle of the view direction), for where the storm appears. */
+  private camAng = 0;
+  private strikeTimer = 3;
+  /** Lightning struck the ground at (x, z), dist metres from the rover. */
+  onStrike?: (x: number, z: number, dist: number) => void;
   private stormT = 0;
   private spawnTimer = 3;
   private gustPh = Math.random() * 100;
@@ -354,6 +369,11 @@ export class MarsWeather {
       depthWrite: false,
       side: THREE.DoubleSide,
     });
+    this.front = new StormFront({
+      uLight: this.devilU.uLight, uAmb: this.devilU.uAmb, uSun: this.devilU.uSun,
+      uFogColor: this.devilU.uFogColor, uFogDensity: this.devilU.uFogDensity,
+    });
+    this.group.add(this.front.group);
     this.sheets = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), sheetMat, SHEETS);
     this.sheets.frustumCulled = false;
     this.sheets.renderOrder = 3;
@@ -362,7 +382,7 @@ export class MarsWeather {
 
   setMode(m: WeatherMode): void {
     this.mode = m;
-    if (m === 'storm') { this.stormPhase = 'rising'; this.stormT = 0; }
+    if (m === 'storm' && this.stormPhase !== 'approach' && this.stormPhase !== 'peak') this.startFront();
     if (m === 'calm' || m === 'devils') { if (this.stormPhase !== 'calm') { this.stormPhase = 'fading'; this.stormT = 0; } }
   }
 
@@ -387,12 +407,14 @@ export class MarsWeather {
     // Automatic weather: an occasional regional storm every several minutes of driving.
     if (this.mode === 'auto' && this.stormPhase === 'calm') {
       this.stormTimer -= dt;
-      if (this.stormTimer <= 0) { this.stormPhase = 'rising'; this.stormT = 0; }
+      if (this.stormTimer <= 0) this.startFront();
     }
     this.stormT += dt;
-    if (this.stormPhase === 'rising') {
-      this.storm = Math.min(1, this.stormT / 45);
-      if (this.storm >= 1) { this.stormPhase = 'peak'; this.stormT = 0; }
+    if (this.stormPhase === 'approach') {
+      // The front rolls in at ~22 m/s; the storm proper begins as its edge reaches the rover.
+      this.frontDist -= FRONT_SPEED * dt;
+      this.storm = THREE.MathUtils.smoothstep(-this.frontDist, -FRONT_ARRIVE, 150);
+      if (this.frontDist < -150) { this.stormPhase = 'peak'; this.stormT = 0; this.storm = 1; }
     } else if (this.stormPhase === 'peak') {
       this.storm = 1;
       if (this.mode === 'auto' && this.stormT > 120 + this.rnd() * 90) { this.stormPhase = 'fading'; this.stormT = 0; }
@@ -400,7 +422,7 @@ export class MarsWeather {
       this.storm = Math.max(0, 1 - this.stormT / 60);
       if (this.storm <= 0) { this.stormPhase = 'calm'; this.stormTimer = 300 + this.rnd() * 300; }
     }
-    if (this.mode === 'storm' && this.stormPhase === 'calm') { this.stormPhase = 'rising'; this.stormT = 0; }
+    if (this.mode === 'storm' && this.stormPhase === 'calm') this.startFront();
     const s = this.storm * this.storm * (3 - 2 * this.storm);
     this.tau = 0.62 + s * 3.6;
     // Fallout builds over a few minutes of storm, then is slowly blown off again.
@@ -409,8 +431,24 @@ export class MarsWeather {
     this.gustPh += dt;
     const gust = 1 + 0.35 * Math.sin(this.gustPh * 0.31) + 0.2 * Math.sin(this.gustPh * 1.13 + 2) + 0.12 * Math.sin(this.gustPh * 2.9);
     const speed = (5 + s * 16) * gust;
-    const dir = Math.atan2(this.baseWind.z, this.baseWind.x) + Math.sin(this.gustPh * 0.05) * 0.3;
+    // In a storm the wind veers unpredictably (turbulent gusts on several time scales).
+    const veer = s * (0.5 * Math.sin(this.gustPh * 0.23 + 1) + 0.3 * Math.sin(this.gustPh * 0.61) + 0.18 * Math.sin(this.gustPh * 1.7 + 4));
+    const dir = Math.atan2(this.baseWind.z, this.baseWind.x) + Math.sin(this.gustPh * 0.05) * 0.3 + veer;
     this.wind.set(Math.cos(dir) * speed, 0, Math.sin(dir) * speed);
+  }
+
+  /**
+   * A storm is born out on the plain, off to one side of where the camera looks (so it
+   * can be watched coming), FRONT_START metres away; the wind turns to blow from it.
+   */
+  private startFront(): void {
+    this.stormPhase = 'approach';
+    this.stormT = 0;
+    const side = this.rnd() < 0.5 ? -1 : 1;
+    this.frontAng = this.camAng + side * (0.45 + this.rnd() * 0.5);
+    this.frontDist = FRONT_START;
+    const ws = Math.hypot(this.baseWind.x, this.baseWind.z) || 3;
+    this.baseWind.set(-Math.cos(this.frontAng) * ws, 0, -Math.sin(this.frontAng) * ws);
   }
 
   private spawnDevil(cx: number, cz: number): void {
@@ -487,6 +525,27 @@ export class MarsWeather {
 
     // Blowing dust around the camera: wraps in an 80 m box.
     const cam = camera.position;
+    const fwd = camera.getWorldDirection(p);
+    this.camAng = Math.atan2(fwd.z, fwd.x);
+    // The front: fades in far out, fades as it passes over (inside, the storm haze takes over).
+    const approaching = this.stormPhase === 'approach';
+    const wallAmt = approaching ? (1 - THREE.MathUtils.smoothstep(this.frontDist, FRONT_START - 600, FRONT_START)) * THREE.MathUtils.smoothstep(this.frontDist, -100, 250) : 0;
+    this.front.update(dt, cam, this.terrain.height(cam.x, cam.z), Math.max(this.frontDist, 1), this.frontAng, wallAmt, this.rnd);
+    // Inside the front zone (its leading 350 m and the first ~40 s of the storm) lightning
+    // strikes the ground around the rover - now and then the rover itself.
+    const inFront = (approaching && Math.abs(this.frontDist) < 350) || (this.stormPhase === 'peak' && this.stormT < 40);
+    if (inFront) {
+      this.strikeTimer -= dt;
+      if (this.strikeTimer <= 0) {
+        this.strikeTimer = 3 + this.rnd() * 9;
+        // Distance: mostly tens to hundreds of metres; ~1 in 6 close enough to hit the rover.
+        const d = this.rnd() < 0.17 ? this.rnd() * 10 : 15 + Math.pow(this.rnd(), 1.5) * 260;
+        const a = this.rnd() * Math.PI * 2;
+        const x = rover.x + Math.cos(a) * d, z = rover.z + Math.sin(a) * d;
+        this.front.strike(x, z, this.terrain.height(x, z), cam, this.rnd);
+        this.onStrike?.(x, z, d);
+      }
+    } else this.strikeTimer = 2 + this.rnd() * 4;
     const amt = Math.min(1, 0.06 + this.storm * 1.1 + this.devilNear * 0.8);
     this.blowU.uAmount.value = amt;
     (this.blowU.uWind.value as THREE.Vector3).copy(this.wind);
@@ -495,8 +554,10 @@ export class MarsWeather {
     for (let i = 0; i < nb; i++) {
       const k = i * 3, s = this.blowSeed[i];
       const sp = 0.6 + 0.8 * s;
-      this.blowPos[k] += this.wind.x * sp * dt + Math.sin(this.time * 3 + i) * dt * 0.6;
-      this.blowPos[k + 2] += this.wind.z * sp * dt + Math.cos(this.time * 2.7 + i) * dt * 0.6;
+      // Turbulent swirl, much stronger in a storm: grains do not all fly the same way.
+      const sw = 0.6 + this.storm * 4;
+      this.blowPos[k] += this.wind.x * sp * dt + (Math.sin(this.time * 3 + i) + Math.sin(this.time * 0.8 + i * 0.37)) * dt * sw;
+      this.blowPos[k + 2] += this.wind.z * sp * dt + (Math.cos(this.time * 2.7 + i) + Math.cos(this.time * 0.9 + i * 0.53)) * dt * sw;
       this.blowPos[k + 1] += Math.sin(this.time * 1.9 + i * 1.3) * dt * 0.4;
       let x = this.blowPos[k] - cam.x, z = this.blowPos[k + 2] - cam.z;
       if (x > B / 2) x -= B; else if (x < -B / 2) x += B;

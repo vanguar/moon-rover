@@ -558,10 +558,17 @@ if (uStorm.x > 0.02) {
   vec2 wd = uWind / ws;
   vec2 wn = vec2(-wd.y, wd.x);
   float along = dot(vWorldP.xz, wd), across = dot(vWorldP.xz, wn);
+  // Bounded domain warp (metres): the streams bend and braid instead of running as
+  // straight ruled lines; broad, blurry streaks plus gusts that come and go.
+  vec2 wq = vWorldP.xz * 0.03;
+  float warp = (lnoised(wq).x - 0.5) * 14.0 + (lnoised(wq * 2.7 + 9.0).x - 0.5) * 5.0;
+  across += warp;
+  along += warp * 0.6;
   float t = uStorm.z;
-  float s1 = lnoised(vec2(along * 0.35 - t * ws * 0.35, across * 3.0)).x;
-  float s2 = lnoised(vec2(along * 0.9 - t * ws * 0.9 + 17.0, across * 7.0)).x;
-  float streak = (s1 - 0.5) * 0.65 + (s2 - 0.5) * 0.35;
+  float s1 = lnoised(vec2(along * 0.35 - t * ws * 0.35, across * 1.4)).x;
+  float s2 = lnoised(vec2(along * 0.9 - t * ws * 0.9 + 17.0, across * 3.0)).x;
+  float gustP = lnoised(vec2(along * 0.02 - t * ws * 0.02, across * 0.03 + 5.0)).x;
+  float streak = ((s1 - 0.5) * 0.65 + (s2 - 0.5) * 0.35) * (0.4 + 1.2 * gustP);
   float wS = uStorm.x * clamp(1.4 - fp * 0.6, 0.0, 1.0);
   diffuseColor.rgb *= 1.0 + streak * 0.55 * wS;
   // Moving sand blurs the fine ripple relief.
