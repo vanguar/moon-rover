@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import type { TerrainData } from '../terrain/TerrainData';
 import { mulberry32 } from '../terrain/TerrainData';
+import { DevilDust } from './DevilDust';
 
 export type WeatherMode = 'auto' | 'calm' | 'devils' | 'storm';
 
 interface Devil {
+  id: number;
   x: number;
   z: number;
   vx: number;
@@ -53,6 +55,9 @@ export class MarsWeather {
   /** Distance to the nearest active devil, m. */
   devilDist = Infinity;
   private devils: Devil[] = [];
+  private devilId = 0;
+  /** Particles at the devils' feet and their dark tracks. */
+  readonly feet: DevilDust;
   private devilMesh: THREE.InstancedMesh;
   private devilParams: THREE.InstancedBufferAttribute;
   private devilU: Record<string, THREE.IUniform>;
@@ -122,8 +127,10 @@ export class MarsWeather {
         float hg(float g, float c) { return (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * c, 1.5); }
         // Column radius as a fraction of the bounding radius, by height fraction.
         float radiusAt(float y) {
-          float skirt = 1.0 - smoothstep(0.0, 0.06, y);
-          return mix(0.42, 0.75, smoothstep(0.0, 1.0, y)) + 0.25 * skirt;
+          // Debris skirt at the foot (the inflow layer), a narrow waist, then a column
+          // widening upward as it entrains air.
+          float skirt = 1.0 - smoothstep(0.0, 0.07, y);
+          return mix(0.38, 0.8, smoothstep(0.05, 1.0, y)) + 0.75 * skirt * skirt;
         }
         void main() {
           // Bounding cylinder radius R = 3.6 × the column radius rc (room for the bent, swaying axis).
@@ -164,12 +171,22 @@ export class MarsWeather {
             float core = smoothstep(rr * 1.05, rr * 0.2, r) * 0.35;
             float ang = atan(q.y, q.x);
             // Rotating, rising spiral streaks: dust is carried round (~2.5 rad/s) and lifted.
-            float sw = ang - vP.z * (uTime * 2.5 - y * 7.0);
-            float nz = n3(vec3(cos(sw) * 2.6, sin(sw) * 2.6, y * 13.0 - uTime * 1.9) + vP.y * 13.0);
-            float nz2 = n3(vec3(cos(sw * 2.0) * 4.0, sin(sw * 2.0) * 4.0, y * 31.0 - uTime * 3.1) + vP.y * 7.0);
-            nz = 0.25 + 0.75 * nz * (0.55 + 0.45 * nz2) * n3(vec3(q / rc * 0.8, y * 5.0 - uTime * 0.7) + vP.y);
+            // Angular speed falls with radius and height (Rankine: Ω ∝ 1/r² outside the core).
+            float omega = 3.2 / (0.6 + r * r) * (1.0 - 0.5 * y);
+            float sw = ang - vP.z * (uTime * omega - y * 9.0);
+            // Upper column: laminar — a few smooth helical dust sheets winding up the wall.
+            float helix = 0.5 + 0.5 * sin(sw * 3.0 + y * 22.0 * vP.z);
+            float lamN = mix(0.55, 1.0, smoothstep(0.25, 0.9, helix)) * (0.75 + 0.25 * n3(vec3(cos(sw), sin(sw), y * 4.0 - uTime * 0.6) * 1.5 + vP.y * 13.0));
+            // Foot: turbulent — fast, small, intermittent eddies and bursts of debris.
+            float tA = n3(vec3(cos(sw) * 5.0, sin(sw) * 5.0, y * 60.0 - uTime * 6.0) + vP.y * 7.0);
+            float tB = n3(vec3(q / rc * 3.0, y * 40.0 - uTime * 4.5) + vP.y * 3.0);
+            float tC = n3(vec3(q / rc * 7.0 + uTime * 1.3, y * 90.0) + vP.y);
+            float turbN = smoothstep(0.25, 0.85, tA * 0.5 + tB * 0.35 + tC * 0.25) * 1.4;
+            float lam = smoothstep(0.06, 0.3, y);
+            float nz = mix(turbN, lamN, lam) * (0.6 + 0.4 * n3(vec3(q / rc * 0.8, y * 5.0 - uTime * 0.7) + vP.y));
             float dens = (wall + core) * nz * (1.0 - smoothstep(0.55, 1.0, y)) * (0.35 + 0.65 * (1.0 - y));
-            dens += (1.0 - smoothstep(0.0, 0.05, y)) * smoothstep(1.0, 0.3, r) * 0.6 * nz;
+            // Dense debris skirt hugging the ground, wider than the column.
+            dens += (1.0 - smoothstep(0.0, 0.07, y)) * smoothstep(1.6, 0.4, r) * 0.9 * nz;
             dens *= vP.x * 1.3 / max(rc * 0.3, 0.6);
             float lit = 0.55 + 0.45 * dot(normalize(q + 1e-4), sunH);
             // Martian dust: single-scattering albedo ~0.9 in red, lower in blue.
@@ -200,6 +217,8 @@ export class MarsWeather {
     this.devilMesh.frustumCulled = false;
     this.devilMesh.renderOrder = 3;
     this.group.add(this.devilMesh);
+    this.feet = new DevilDust(terrain);
+    this.group.add(this.feet.points, this.feet.track);
 
     // ---- Blowing sand and dust: streaks in a box around the camera, advected by the wind.
     const n = Math.round(BLOW_N * quality);
@@ -350,6 +369,7 @@ export class MarsWeather {
   /** Light colours for the dust (sun-lit and sky-lit parts), linear. */
   setLighting(sun: THREE.Color, amb: THREE.Color, fog: THREE.Color, fogDensity: number): void {
     (this.devilU.uLight.value as THREE.Color).copy(sun);
+    this.feet.setLight(new THREE.Color(0.92, 0.66, 0.46).multiply(sun.clone().multiplyScalar(0.55).add(amb)));
     (this.devilU.uAmb.value as THREE.Color).copy(amb);
     (this.devilU.uFogColor.value as THREE.Color).copy(fog);
     this.devilU.uFogDensity.value = fogDensity;
@@ -385,11 +405,15 @@ export class MarsWeather {
   }
 
   private spawnDevil(cx: number, cz: number): void {
-    const a = this.rnd() * Math.PI * 2;
-    const d = 250 + this.rnd() * 2200;
-    const r = 4 + Math.pow(this.rnd(), 2) * 40;
+    // Mostly upwind (they drift toward the rover), 150–1200 m out; now and then close.
+    const wl = Math.hypot(this.wind.x, this.wind.z) || 1;
+    const up = Math.atan2(-this.wind.z / wl, -this.wind.x / wl);
+    const a = up + (this.rnd() - 0.5) * 2.4;
+    const d = this.rnd() < 0.25 ? 60 + this.rnd() * 120 : 150 + this.rnd() * 1050;
+    const r = 3 + Math.pow(this.rnd(), 2) * 30;
     const drift = 0.5 + this.rnd();
     this.devils.push({
+      id: this.devilId++,
       x: cx + Math.cos(a) * d, z: cz + Math.sin(a) * d,
       vx: this.wind.x * drift, vz: this.wind.z * drift,
       r, h: r * (8 + this.rnd() * 14), life: 50 + this.rnd() * 160, age: 0,
@@ -403,10 +427,10 @@ export class MarsWeather {
     const devilsOn = this.mode === 'devils' || (this.mode === 'auto' && this.storm < 0.3);
     // Dust devils: steady population while it is calm and convective.
     this.spawnTimer -= dt;
-    const want = devilsOn ? (this.mode === 'devils' ? 6 : 3) : 0;
+    const want = devilsOn ? (this.mode === 'devils' ? 7 : 4) : 0;
     if (this.spawnTimer <= 0 && this.devils.length < want) {
       this.spawnDevil(rover.x, rover.z);
-      this.spawnTimer = this.mode === 'devils' ? 4 + this.rnd() * 6 : 15 + this.rnd() * 25;
+      this.spawnTimer = this.mode === 'devils' ? 3 + this.rnd() * 5 : 8 + this.rnd() * 14;
     }
     this.devilNear = 0;
     this.devilDist = Infinity;
@@ -441,6 +465,7 @@ export class MarsWeather {
     this.devilMesh.count = n;
     this.devilMesh.instanceMatrix.needsUpdate = true;
     this.devilParams.needsUpdate = true;
+    this.feet.update(dt, this.devils, camera.position);
     this.devilU.uTime.value = this.time;
     const wl = Math.hypot(this.wind.x, this.wind.z) || 1;
     (this.devilU.uWindDir.value as THREE.Vector2).set(this.wind.x / wl, this.wind.z / wl);
