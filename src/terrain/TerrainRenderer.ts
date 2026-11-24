@@ -398,8 +398,9 @@ if (uDetRect.w > 0.5) {
       // Cast shadows of the metre-scale relief: integrate the height along the Sun
       // direction from the slopes (dh = slope · dir · ds) and compare with the ray.
       float tanEl = 1.0 / max(uSunShadow.z, 0.03);
-      float rise = 0.0, lit = 1.0, ds = 0.5;
-      for (int k = 1; k <= uFive * 3; k++) {
+      float rise = 0.0, lit = 1.0, ds = 1.0;
+      // 6 steps of 1 m (the slope data is 1 m): ~2 ms on an integrated GPU, near the rover only.
+      if (fpD < texM * 2.5) for (int k = 1; k <= uFive + uOne; k++) {
         float dist = float(k) * ds;
         float okS;
         vec2 sl2 = detSlopeAt(vWorldP.xz + uSunShadow.xy * dist, okS);
@@ -461,11 +462,18 @@ float alb = clamp(ortho * 0.9 + albedoVar * 0.08, 0.02, 1.0);
 // Seen from the ground the plain is evener than in the orbital image (the albedo
 // contrast of dust vs. sand is compressed by the low view angle and forward scattering).
 alb = clamp(0.135 + (alb - 0.135) * 0.8, 0.015, 1.0);
-vec3 darkSoil = vec3(0.8, 0.6, 0.48), brightDust = vec3(1.3, 0.8, 0.5);
-diffuseColor.rgb = alb * mix(darkSoil, brightDust, smoothstep(0.05, 0.3, alb)) * 1.9;
+// Two materials, not light and shadow: dark basaltic sand is nearly neutral grey
+// (slightly cool), bright ferric dust is a warm butterscotch. The fraction follows the
+// albedo relative to its surroundings, so every dark patch also changes hue.
+float aLocal = textureLod(uOrtho, mapUv, 5.0).r * 0.9;
+float dustF = smoothstep(0.82, 1.18, alb / max(aLocal, 0.01));
+vec3 darkSoil = vec3(0.66, 0.6, 0.57), brightDust = vec3(1.3, 0.84, 0.54);
+// Brightness difference kept smaller than in the orbital photo; the hue carries it.
+float albM = mix(aLocal, alb, 0.75);
+diffuseColor.rgb = albM * mix(darkSoil, brightDust, dustF) * 1.9;
 // Wind ripples (~12 cm wavelength) across the sand, faded with distance; they lie on the dark sand.
 // Sand covers the dark (low-albedo) areas; dust and pavement the bright ones.
-float sandy = smoothstep(0.17, 0.09, alb);
+float sandy = 1.0 - dustF;
 float wr = clamp(1.6 - fp * 9.0, 0.0, 1.0) * sandy;
 if (wr > 0.0) {
   // Asymmetric wind ripples (gentle stoss, steep lee), wavelength ~12 cm, crests wander.

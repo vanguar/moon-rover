@@ -171,6 +171,7 @@ export class Rocks {
   private tmpN = [0, 0, 0];
   private abundance: number;
   private mars: boolean;
+  private gravelMeshes: THREE.InstancedMesh[] = [];
 
   constructor(private terrain: TerrainData, private physics: Physics, quality: QualitySettings) {
     this.q = quality;
@@ -264,6 +265,11 @@ float rockH(vec3 p, vec3 w) {
       const m = new THREE.InstancedMesh(rockGeometry(100 + v * 7, 2, tint), mat, this.capacity());
       this.prep(m);
       this.meshes.push(m);
+      // Gravel: the same shapes at a quarter of the triangles (they are a few cm on screen).
+      const gm = new THREE.InstancedMesh(rockGeometry(100 + v * 7, 1, tint), mat, Math.ceil((9 * CELL * CELL * GRAVEL.mars * 1.2) / VARIANTS) + 32);
+      this.prep(gm);
+      gm.castShadow = false;
+      this.gravelMeshes.push(gm);
     }
     for (let v = 0; v < BOULDER_VARIANTS; v++) {
       this.boulderNear.push(new THREE.InstancedMesh(rockGeometry(311 + v * 13, 4, tint), mat, 600));
@@ -279,7 +285,7 @@ float rockH(vec3 p, vec3 w) {
 
   private capacity(): number {
     // + the gravel layer of the 3 × 3 cells around the rover.
-    return Math.ceil(this.q.maxRocks / VARIANTS) + Math.ceil((9 * CELL * CELL * GRAVEL.mars * 1.2) / VARIANTS) + 64;
+    return Math.ceil(this.q.maxRocks / VARIANTS) + 64;
   }
 
   private prep(m: THREE.InstancedMesh): void {
@@ -401,6 +407,7 @@ float rockH(vec3 p, vec3 w) {
 
     const rad = Math.ceil(this.q.rockRadius / CELL);
     const counts = new Array(VARIANTS).fill(0);
+    const gCounts = new Array(VARIANTS).fill(0);
     const cap = this.meshes[0].instanceMatrix.count;
     const m4 = new THREE.Matrix4(), p = new THREE.Vector3(), s = new THREE.Vector3(), col = new THREE.Color();
     const keep = new Set<string>();
@@ -414,7 +421,18 @@ float rockH(vec3 p, vec3 w) {
     cells.sort((a, b) => a[2] - b[2]);
     for (const [ix, iz, d2] of cells) {
       const near1 = Math.abs(ix - cx) <= 1 && Math.abs(iz - cz) <= 1;
-      const rocks = near1 ? this.cellRocks(ix, iz).concat(this.cellGravel(ix, iz)) : this.cellRocks(ix, iz);
+      const rocks = this.cellRocks(ix, iz);
+      if (near1) {
+        for (const r of this.cellGravel(ix, iz)) {
+          const gm = this.gravelMeshes[r.v];
+          const c = gCounts[r.v];
+          if (c >= gm.instanceMatrix.count) continue;
+          m4.compose(p.set(r.x, r.y, r.z), r.q, s.set(r.sx, r.sy, r.sz));
+          gm.setMatrixAt(c, m4);
+          gm.setColorAt(c, col.setScalar(r.albedo));
+          gCounts[r.v] = c + 1;
+        }
+      }
       const far = Math.sqrt(d2) * CELL;
       for (const r of rocks) {
         if (r.r < far * 0.0012) continue;
@@ -432,11 +450,15 @@ float rockH(vec3 p, vec3 w) {
         keep.add(k);
         if (!this.colliders.has(k)) {
           const min = adj ? COLLIDER_SMALL : COLLIDER_BIG;
-          this.colliders.set(k, rocks.filter((r) => r.r >= min && r.r > 0.12).map((r) => this.makeCollider(r)));
+          this.colliders.set(k, rocks.filter((r) => r.r >= min && r.r >= min).map((r) => this.makeCollider(r)));
         }
       }
     }
     for (let v = 0; v < VARIANTS; v++) {
+      const gm = this.gravelMeshes[v];
+      gm.count = gCounts[v];
+      gm.instanceMatrix.needsUpdate = true;
+      if (gm.instanceColor) gm.instanceColor.needsUpdate = true;
       this.meshes[v].count = counts[v];
       this.meshes[v].instanceMatrix.needsUpdate = true;
       this.meshes[v].instanceColor!.needsUpdate = true;

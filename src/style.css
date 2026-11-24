@@ -382,3 +382,17 @@ body.mobile #mission { top: 8px; left: 8px; font-size: 12px; max-width: 46vw; pa
 .jrow span { display: grid; }
 .jrow small { opacity: 0.6; }
 body.heli #mission { top: auto; bottom: 150px; }
+
+/* ===== Navigator chevron (lies on the ground ahead, points to the mission target) ===== */
+#navarrow {
+  position: fixed; left: 50%; bottom: 190px; width: 120px; margin-left: -60px; z-index: 5; pointer-events: none;
+  display: grid; justify-items: center; perspective: 420px; opacity: 0.42; transition: opacity 0.4s;
+}
+#navarrow svg { width: 92px; height: 110px; transform: rotateX(58deg) rotateZ(var(--rot, 0deg)); transition: transform 0.12s linear;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5)); }
+#navarrow path { fill: rgba(120, 210, 255, 0.55); stroke: rgba(255, 255, 255, 0.75); stroke-width: 3; stroke-linejoin: round; }
+#navarrow span { margin-top: -18px; font: 600 14px/1 ui-monospace, Menlo, Consolas, monospace; color: #fff; text-shadow: 0 1px 4px #000; }
+#navarrow.near path { fill: rgba(255, 196, 107, 0.6); }
+#navarrow.off { opacity: 0; }
+body.mobile #navarrow { bottom: 120px; transform: scale(0.8); }
+body.cab #navarrow { bottom: 42%; }

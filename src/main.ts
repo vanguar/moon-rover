@@ -369,6 +369,7 @@ function setupMenu(game: Game): void {
 
   const showGameUi = (on: boolean) => {
     $('#mission').classList.toggle('hidden', !on);
+    $('#navarrow').classList.toggle('hidden', !on);
     hud.classList.toggle('hidden', !on);
     toolbar.classList.toggle('hidden', !on);
     touch.classList.toggle('hidden', !on || !isMobile);

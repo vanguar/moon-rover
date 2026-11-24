@@ -31,6 +31,8 @@ export class Missions {
   private arrow: HTMLElement | null = null;
   private text: HTMLElement | null = null;
   private dist: HTMLElement | null = null;
+  private nav = document.getElementById('navarrow');
+  private navText = this.nav?.querySelector('span') ?? null;
   onStep?: (key: string, finished: boolean) => void;
 
   constructor(terrain: TerrainData, kind: 'moon' | 'mars' | 'heli') {
@@ -151,6 +153,7 @@ export class Missions {
     if (!tg) {
       this.arrow.style.visibility = 'hidden';
       this.dist.textContent = '';
+      this.nav?.classList.add('off');
       return;
     }
     const dx = tg.x - c.roverPos.x, dz = tg.z - c.roverPos.z;
@@ -159,6 +162,14 @@ export class Missions {
     if (brg < 0) brg += 360;
     this.arrow.style.visibility = 'visible';
     this.arrow.style.transform = `rotate(${brg - cameraHeadingDeg}deg)`;
+    // Big translucent chevron on the road ahead, as in a car navigator.
+    if (this.nav && this.navText) {
+      const rel = ((brg - cameraHeadingDeg + 540) % 360) - 180;
+      this.nav.classList.toggle('off', false);
+      this.nav.style.setProperty('--rot', `${rel}deg`);
+      this.nav.classList.toggle('near', d < 60);
+      this.navText.textContent = d < 1000 ? `${d.toFixed(0)} ${t('hM')}` : `${(d / 1000).toFixed(1)} ${t('hKm')}`;
+    }
     this.dist.textContent = `${d < 1000 ? `${d.toFixed(0)} ${t('hM')}` : `${(d / 1000).toFixed(2)} ${t('hKm')}`} · ${Math.round(brg).toString().padStart(3, '0')}°`;
   }
 
