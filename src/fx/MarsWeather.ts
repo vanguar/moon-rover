@@ -19,6 +19,8 @@ interface Devil {
   spin: number;
   /** Downwind bend of the column top (wind shear). */
   bend: number;
+  /** Own course off the ambient wind, rad: devils are steered by local convection too. */
+  course: number;
   /** Envelope 0..1 (forms, lives, decays). */
   s: number;
 }
@@ -425,6 +427,7 @@ export class MarsWeather {
       vx: this.wind.x * drift, vz: this.wind.z * drift,
       r, h: r * (8 + this.rnd() * 14), life: 50 + this.rnd() * 160, age: 0,
       seed: this.rnd(), spin: this.rnd() < 0.5 ? 1 : -1, s: 0, bend: 0.25 + this.rnd() * 0.6,
+      course: (this.rnd() - 0.5) * 1.2,
     });
   }
 
@@ -448,10 +451,14 @@ export class MarsWeather {
       d.age += dt;
       const fadeIn = Math.min(1, d.age / 12), fadeOut = Math.min(1, (d.life - d.age) / 15);
       d.s = Math.max(0, Math.min(fadeIn, fadeOut)) * (devilsOn ? 1 : Math.max(0, 1 - this.storm * 3));
-      // Drift with the ambient wind plus a slow meander.
-      // Devils travel with the ambient wind (Perseverance saw 3–10 m/s) and wander off course.
-      d.vx += (this.wind.x * 1.3 - d.vx) * dt * 0.15 + Math.sin(this.time * 0.21 + d.seed * 20) * dt * 1.2;
-      d.vz += (this.wind.z * 1.3 - d.vz) * dt * 0.15 + Math.cos(this.time * 0.17 + d.seed * 30) * dt * 1.2;
+      // Devils travel roughly with the ambient wind (Perseverance saw 3–10 m/s) but each on
+      // its own course, wandering on several time scales: their tracks curve and cross
+      // instead of running in parallel (cf. HiRISE images of devil tracks).
+      const wander = d.course + 0.55 * Math.sin(this.time * 0.11 + d.seed * 40) + 0.3 * Math.sin(this.time * 0.37 + d.seed * 71);
+      const cw = Math.cos(wander), sw = Math.sin(wander);
+      const tx = (this.wind.x * cw - this.wind.z * sw) * 1.3, tz = (this.wind.x * sw + this.wind.z * cw) * 1.3;
+      d.vx += (tx - d.vx) * dt * 0.3 + Math.sin(this.time * 0.9 + d.seed * 20) * dt * 1.5;
+      d.vz += (tz - d.vz) * dt * 0.3 + Math.cos(this.time * 0.7 + d.seed * 30) * dt * 1.5;
       d.x += d.vx * dt;
       d.z += d.vz * dt;
       const dist = Math.hypot(d.x - rover.x, d.z - rover.z);

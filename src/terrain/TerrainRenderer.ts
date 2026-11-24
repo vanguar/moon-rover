@@ -575,7 +575,9 @@ diffuseColor.rgb = mix(diffuseColor.rgb, vec3(dot(diffuseColor.rgb, vec3(0.33)))
 // Wind ripples (~12 cm wavelength) across the sand, faded with distance; they lie on the dark sand.
 // Sand covers the dark (low-albedo) areas; dust and pavement the bright ones.
 float sandy = 1.0 - dustF;
-float wr = clamp(1.6 - fp * 9.0, 0.0, 1.0) * sandy;
+// Gone before a pixel spans half a wavelength: drawn further out the 12 cm sine aliases
+// into broad, regular moire bands running to the horizon.
+float wr = (1.0 - smoothstep(0.025, 0.06, fp)) * sandy;
 if (wr > 0.0) {
   // Asymmetric wind ripples (gentle stoss, steep lee), wavelength ~12 cm, crests wander.
   vec2 rd = vec2(0.94, 0.34);

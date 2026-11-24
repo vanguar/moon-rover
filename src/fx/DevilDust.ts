@@ -20,6 +20,10 @@ import type { TerrainData } from '../terrain/TerrainData';
 // Kept modest: big soft sprites close to the camera cost a lot of fill rate.
 const N = 1200;
 const TRACK_N = 1400;
+/** Track ribbon cells across: a band tens of metres wide must follow the ground. */
+const TRACK_K = 4;
+/** Vertices per track segment: a row of TRACK_K + 1 at its start and at its end. */
+const TRACK_V = 2 * (TRACK_K + 1);
 
 interface DevilIn {
   id: number;
@@ -47,8 +51,8 @@ export class DevilDust {
   private aAlpha: Float32Array;
   private cursor = 0;
   private carry = new Map<number, number>();
-  private tPos = new Float32Array(TRACK_N * 4 * 3);
-  private tAlpha = new Float32Array(TRACK_N * 4);
+  private tPos = new Float32Array(TRACK_N * TRACK_V * 3);
+  private tAlpha = new Float32Array(TRACK_N * TRACK_V);
   private tHead = 0;
   private lastTrack = new Map<number, { x: number; z: number; age: number; along: number; edge?: number[] }>();
   private trackGeo: THREE.BufferGeometry;
@@ -82,12 +86,14 @@ export class DevilDust {
     this.trackGeo = new THREE.BufferGeometry();
     this.trackGeo.setAttribute('position', new THREE.BufferAttribute(this.tPos, 3).setUsage(THREE.DynamicDrawUsage));
     this.trackGeo.setAttribute('aA', new THREE.BufferAttribute(this.tAlpha, 1).setUsage(THREE.DynamicDrawUsage));
-    const uv = new Float32Array(TRACK_N * 4 * 2);
-    const idx = new Uint32Array(TRACK_N * 6);
+    const uv = new Float32Array(TRACK_N * TRACK_V * 2);
+    const idx = new Uint32Array(TRACK_N * TRACK_K * 6);
     for (let q = 0; q < TRACK_N; q++) {
-      uv.set([0, 0, 1, 0, 0, 1, 1, 1], q * 8);
-      const v = q * 4;
-      idx.set([v, v + 2, v + 1, v + 1, v + 2, v + 3], q * 6);
+      const v = q * TRACK_V;
+      for (let k = 0; k < TRACK_K; k++) {
+        const a = v + k, b = v + TRACK_K + 1 + k;
+        idx.set([a, b, a + 1, a + 1, b, b + 1], (q * TRACK_K + k) * 6);
+      }
     }
     this.trackGeo.setAttribute('uv', new THREE.BufferAttribute(uv, 2).setUsage(THREE.DynamicDrawUsage));
     this.trackGeo.setIndex(new THREE.BufferAttribute(idx, 1));
@@ -103,14 +109,16 @@ export class DevilDust {
         void main() {
           // vUv.x: across the track (0..1), vUv.y: metres along the devil's path.
           float a = vUv.y, c = vUv.x * 2.0 - 1.0;
-          // Ragged, wandering edges - the vortex swept a wavering band, not a strip.
+          // Ragged, wandering, diffuse edges - the vortex swept a wavering band, not a strip.
           float wob = (n(vec2(a * 0.12, 1.0)) - 0.5) * 0.5 + (n(vec2(a * 0.5, 7.0)) - 0.5) * 0.25;
-          float width = 0.75 + 0.35 * n(vec2(a * 0.07, 3.0));
-          float edge = smoothstep(width, width * 0.35, abs(c + wob));
+          float width = 0.6 + 0.4 * n(vec2(a * 0.07, 3.0));
+          float edge = smoothstep(width, width * 0.1, abs(c + wob));
+          // Intermittent: where the vortex weakened or lost contact the scour fades out.
+          float patchy = mix(0.3, 1.0, smoothstep(0.25, 0.6, n(vec2(a * 0.025, 11.0))));
           // Cycloidal scour loops from the rotation while the devil drifts.
           float loops = 0.65 + 0.35 * smoothstep(0.2, 0.9, sin(a * 1.3 + c * 2.6 + 1.5 * sin(a * 0.4)));
           float speck = 0.7 + 0.3 * n(vec2(a * 2.3, c * 5.0));
-          float k = 1.0 - 0.24 * vA * edge * loops * speck;
+          float k = 1.0 - 0.24 * vA * edge * loops * speck * patchy;
           gl_FragColor = vec4(vec3(k * 0.5), 1.0); }`,
       uniforms: { uCurvK: { value: 0.5 / 3389500 } },
       transparent: true,
@@ -259,22 +267,32 @@ export class DevilDust {
     const q = this.tHead;
     this.tHead = (this.tHead + 1) % TRACK_N;
     const t = this.terrain;
-    // Start where the previous segment ended (same edge points): no gaps, no overlaps.
-    const pe = last.edge ?? [last.x + sx, last.z + sz, last.x - sx, last.z - sz];
-    const pts = [[pe[0], pe[1]], [pe[2], pe[3]], [d.x + sx, d.z + sz], [d.x - sx, d.z - sz]];
-    last.edge = [d.x + sx, d.z + sz, d.x - sx, d.z - sz];
-    // Consecutive segments share their edge points and a continuous "along"
-    // coordinate, so the band has no seams.
+    // A row of points across the band, from one edge (+side) to the other.
+    const row = (x: number, z: number) => {
+      const r: number[] = [];
+      for (let k = 0; k <= TRACK_K; k++) {
+        const f = 1 - (2 * k) / TRACK_K;
+        r.push(x + sx * f, z + sz * f);
+      }
+      return r;
+    };
+    // Start where the previous segment ended (same row of points): no gaps, no overlaps.
+    const start = last.edge ?? row(last.x, last.z);
+    const end = row(d.x, d.z);
+    last.edge = end;
+    // Consecutive segments share their rows and a continuous "along" coordinate,
+    // so the band has no seams.
     const a0 = last.along, a1 = last.along + len;
     const uvA = this.trackGeo.getAttribute('uv') as THREE.BufferAttribute;
-    pts.forEach(([x, z], k) => {
-      this.tPos.set([x, t.height(x, z) + 0.03, z], (q * 4 + k) * 3);
-      this.tAlpha[q * 4 + k] = d.s;
-      uvA.setXY(q * 4 + k, k % 2, k < 2 ? a0 : a1);
-    });
+    for (let k = 0; k < TRACK_V; k++) {
+      const src = k <= TRACK_K ? start : end, c = k % (TRACK_K + 1);
+      const x = src[c * 2], z = src[c * 2 + 1], vi = q * TRACK_V + k;
+      this.tPos.set([x, t.height(x, z) + 0.03, z], vi * 3);
+      this.tAlpha[vi] = d.s;
+      uvA.setXY(vi, c / TRACK_K, k <= TRACK_K ? a0 : a1);
+    }
     uvA.needsUpdate = true;
     last.along = a1;
-    // Keep the UV across the ribbon: vertices 0/2 one edge, 1/3 the other.
     (this.trackGeo.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
     (this.trackGeo.getAttribute('aA') as THREE.BufferAttribute).needsUpdate = true;
     last.x = d.x;
