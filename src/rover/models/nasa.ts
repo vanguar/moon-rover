@@ -169,6 +169,21 @@ export function buildPerseveranceGlb(): RoverModel | null {
   const centres = PERSE_GLB_WHEELS.map(([x, z]) => new THREE.Vector3(x, PERSE_WHEEL_Y, z));
   const wheelNode = scene.getObjectByName('Wheels_objs');
   const parts = wheelNode ? splitWheels(wheelNode, centres, 0.42) : centres.map(() => new THREE.Group());
+  // The centres above are approximate; a wheel spinning about a point off its own
+  // axis wobbles. Re-centre each wheel's geometry on its real hub (bounding-box centre
+  // in the axle-normal plane) so it turns true about the physics wheel's axle.
+  for (const part of parts) {
+    const bb = new THREE.Box3().setFromObject(part);
+    if (bb.isEmpty()) continue;
+    const c = bb.getCenter(new THREE.Vector3());
+    part.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(part.matrixWorld).invert();
+    c.applyMatrix4(inv);
+    part.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) m.geometry.translate(0, -c.y, -c.z);
+    });
+  }
   const wheels: WheelVisual[] = PERSE_GLB_WHEELS.map(([x, z], i) => {
     const steer = new THREE.Group();
     steer.position.set(x, PERSE_GLB_AXLE, z);

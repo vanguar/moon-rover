@@ -1,9 +1,16 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { InstrumentPanel } from './InstrumentPanel';
 import { approach, bakeByMaterial, canvasTex, type RoverAnimState, type RoverModel, type WheelVisual } from './models/kit';
 
 export const WHEEL_VIS_R = 0.409;
+
+/** Box with rounded edges (real panels and boxes have bent edges and radii, not knife edges). */
+function rbox(w: number, h: number, d: number): THREE.BufferGeometry {
+  const r = Math.min(0.025, Math.min(w, h, d) * 0.3);
+  return r < 0.002 ? new THREE.BoxGeometry(w, h, d) : new RoundedBoxGeometry(w, h, d, 3, r);
+}
 /** LRV: four wheels, wheelbase 2.29 m, track 1.83 m. */
 export const LRV_WHEELS: [number, number][] = [[0.915, 1.145], [-0.915, 1.145], [0.915, -1.145], [-0.915, -1.145]];
 
@@ -85,7 +92,7 @@ export function buildLrvModel(): RoverModel {
   };
   const tube = (a: THREE.Vector3, b: THREE.Vector3, r: number, mat: THREE.Material, parent: THREE.Object3D = root) => {
     const d = new THREE.Vector3().subVectors(b, a);
-    const m = add(new THREE.CylinderGeometry(r, r, d.length(), 8), mat, (a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2, parent);
+    const m = add(new THREE.CylinderGeometry(r, r, d.length(), 16), mat, (a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2, parent);
     m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize());
     return m;
   };
@@ -94,7 +101,7 @@ export function buildLrvModel(): RoverModel {
   // ---- Chassis: aluminium tube frame in three sections, floor panels.
   for (const sx of [-0.62, 0.62]) tube(V(sx, -0.08, -1.55), V(sx, -0.08, 1.55), 0.025, alu);
   for (const z of [-1.55, -0.75, 0, 0.75, 1.55]) tube(V(-0.66, -0.08, z), V(0.66, -0.08, z), 0.02, alu);
-  add(new THREE.BoxGeometry(1.2, 0.012, 1.4), anod, 0, -0.1, -0.05);
+  add(rbox(1.2, 0.012, 1.4), anod, 0, -0.1, -0.05);
   // Suspension wishbones and dampers to each wheel.
   for (const [x, z] of LRV_WHEELS) {
     const sx = Math.sign(x);
@@ -104,15 +111,15 @@ export function buildLrvModel(): RoverModel {
   }
 
   // ---- Forward chassis: batteries & signal processor in MLI, LCRU on the front.
-  add(new THREE.BoxGeometry(1.1, 0.26, 0.55), gold, 0, 0.06, 1.2);
-  add(new THREE.BoxGeometry(0.45, 0.2, 0.42), mylar, 0.3, 0.29, 1.18);
-  add(new THREE.BoxGeometry(0.45, 0.2, 0.42), mylar, -0.3, 0.29, 1.18);
+  add(rbox(1.1, 0.26, 0.55), gold, 0, 0.06, 1.2);
+  add(rbox(0.45, 0.2, 0.42), mylar, 0.3, 0.29, 1.18);
+  add(rbox(0.45, 0.2, 0.42), mylar, -0.3, 0.29, 1.18);
   // Battery radiator mirrors (second-surface mirrors -> strong sun glints).
-  add(new THREE.BoxGeometry(0.4, 0.01, 0.37), mirror, 0.3, 0.395, 1.18);
-  add(new THREE.BoxGeometry(0.4, 0.01, 0.37), mirror, -0.3, 0.395, 1.18);
+  add(rbox(0.4, 0.01, 0.37), mirror, 0.3, 0.395, 1.18);
+  add(rbox(0.4, 0.01, 0.37), mirror, -0.3, 0.395, 1.18);
   // LCRU communications relay.
-  add(new THREE.BoxGeometry(0.55, 0.32, 0.24), whitePaint, 0, 0.36, 1.5);
-  add(new THREE.BoxGeometry(0.5, 0.012, 0.2), mirror, 0, 0.525, 1.5);
+  add(rbox(0.55, 0.32, 0.24), whitePaint, 0, 0.36, 1.5);
+  add(rbox(0.5, 0.012, 0.2), mirror, 0, 0.525, 1.5);
   // Low-gain helical antenna (front right, outboard).
   tube(V(-0.68, 0.3, 1.35), V(-0.7, 1.0, 1.36), 0.012, alu);
   add(new THREE.CylinderGeometry(0.035, 0.035, 0.5, 10), mylar, -0.7, 1.25, 1.36);
@@ -140,8 +147,8 @@ export function buildLrvModel(): RoverModel {
   tvBody.position.set(0, 0.1, 0);
   tvBody.rotation.x = 0.1;
   tvHead.add(tvBody);
-  add(new THREE.BoxGeometry(0.13, 0.12, 0.3), whitePaint, 0, 0, 0, tvBody);
-  add(new THREE.BoxGeometry(0.135, 0.004, 0.25), mirror, 0, 0.062, -0.01, tvBody);
+  add(rbox(0.13, 0.12, 0.3), whitePaint, 0, 0, 0, tvBody);
+  add(rbox(0.135, 0.004, 0.25), mirror, 0, 0.062, -0.01, tvBody);
   const barrel = add(new THREE.CylinderGeometry(0.035, 0.035, 0.12, 16), black, 0, 0, 0.2, tvBody);
   barrel.rotation.x = Math.PI / 2;
   const hood = add(new THREE.CylinderGeometry(0.055, 0.04, 0.08, 16, 1, true), black, 0, 0, 0.29, tvBody);
@@ -151,8 +158,8 @@ export function buildLrvModel(): RoverModel {
 
   // ---- Centre chassis: two seats (tubular frames + nylon webbing), footrests.
   for (const sx of [0.4, -0.4]) {
-    add(new THREE.BoxGeometry(0.48, 0.012, 0.46), webbing, sx, 0.2, -0.32);
-    const back = add(new THREE.BoxGeometry(0.48, 0.5, 0.012), webbing, sx, 0.47, -0.6);
+    add(rbox(0.48, 0.012, 0.46), webbing, sx, 0.2, -0.32);
+    const back = add(rbox(0.48, 0.5, 0.012), webbing, sx, 0.47, -0.6);
     back.rotation.x = 0.22;
     tube(V(sx - 0.25, 0.2, -0.1), V(sx - 0.25, 0.2, -0.56), 0.014, alu);
     tube(V(sx + 0.25, 0.2, -0.1), V(sx + 0.25, 0.2, -0.56), 0.014, alu);
@@ -160,7 +167,7 @@ export function buildLrvModel(): RoverModel {
     tube(V(sx + 0.25, 0.2, -0.56), V(sx + 0.25, 0.72, -0.66), 0.014, alu);
     tube(V(sx - 0.25, 0.72, -0.66), V(sx + 0.25, 0.72, -0.66), 0.014, alu);
     for (const leg of [-0.22, 0.22]) tube(V(sx + leg, -0.08, -0.12), V(sx + leg, 0.2, -0.12), 0.014, alu);
-    add(new THREE.BoxGeometry(0.36, 0.02, 0.18), anod, sx, -0.02, 0.38).rotation.x = -0.5;
+    add(rbox(0.36, 0.02, 0.18), anod, sx, -0.02, 0.38).rotation.x = -0.5;
     tube(V(sx - 0.22, 0.25, -0.45), V(sx + 0.2, 0.3, -0.2), 0.012, webbing);
   }
   // Armrest between the seats, carrying the hand controller.
@@ -168,7 +175,7 @@ export function buildLrvModel(): RoverModel {
   const stick = new THREE.Group();
   stick.position.set(0.12, 0.38, 0.0);
   root.add(stick);
-  add(new THREE.BoxGeometry(0.08, 0.05, 0.1), anod, 0, -0.03, 0, stick);
+  add(rbox(0.08, 0.05, 0.1), anod, 0, -0.03, 0, stick);
   add(new THREE.CylinderGeometry(0.014, 0.014, 0.2), black, 0, 0.1, 0, stick);
   const tbar = add(new THREE.CylinderGeometry(0.016, 0.016, 0.14), black, 0, 0.2, 0, stick);
   tbar.rotation.z = Math.PI / 2;
@@ -182,9 +189,9 @@ export function buildLrvModel(): RoverModel {
   root.add(panel.group);
 
   // ---- Aft chassis: tool & sample pallet, sample bags, gnomon and tongs.
-  add(new THREE.BoxGeometry(1.3, 0.3, 0.55), gold, 0, 0.08, -1.3);
-  add(new THREE.BoxGeometry(1.25, 0.04, 0.5), alu, 0, 0.25, -1.3);
-  for (const [x, z] of [[-0.35, -1.25], [0.0, -1.35], [0.35, -1.25]] as const) add(new THREE.BoxGeometry(0.28, 0.3, 0.2), webbing, x, 0.42, z);
+  add(rbox(1.3, 0.3, 0.55), gold, 0, 0.08, -1.3);
+  add(rbox(1.25, 0.04, 0.5), alu, 0, 0.25, -1.3);
+  for (const [x, z] of [[-0.35, -1.25], [0.0, -1.35], [0.35, -1.25]] as const) add(rbox(0.28, 0.3, 0.2), webbing, x, 0.42, z);
   tube(V(0.55, 0.25, -1.5), V(0.62, 1.2, -1.6), 0.01, alu);
   tube(V(-0.5, 0.25, -1.55), V(-0.55, 0.95, -1.6), 0.008, alu);
 
@@ -197,16 +204,16 @@ export function buildLrvModel(): RoverModel {
   weave.repeat.set(40, 3); // 0.83 mm zinc-coated piano wire, woven in a fine diamond pattern
   const tireGeo = new THREE.CylinderGeometry(WHEEL_VIS_R, WHEEL_VIS_R, 0.23, 72, 3, true);
   tireGeo.rotateZ(Math.PI / 2);
-  const bumpGeo = new THREE.CylinderGeometry(0.31, 0.31, 0.18, 32, 1, true);
+  const bumpGeo = new THREE.CylinderGeometry(0.31, 0.31, 0.18, 64, 1, true);
   bumpGeo.rotateZ(Math.PI / 2);
-  const flangeGeo = new THREE.TorusGeometry(WHEEL_VIS_R - 0.004, 0.01, 6, 72);
+  const flangeGeo = new THREE.TorusGeometry(WHEEL_VIS_R - 0.004, 0.01, 8, 96);
   flangeGeo.rotateY(Math.PI / 2);
   const hubDisc = new THREE.LatheGeometry(
     [new THREE.Vector2(0.001, 0.06), new THREE.Vector2(0.1, 0.055), new THREE.Vector2(0.2, 0.03), new THREE.Vector2(0.3, 0.0), new THREE.Vector2(0.39, -0.02)],
-    32,
+    64,
   );
   hubDisc.rotateZ(-Math.PI / 2);
-  const driveGeo = new THREE.CylinderGeometry(0.11, 0.11, 0.16, 20);
+  const driveGeo = new THREE.CylinderGeometry(0.11, 0.11, 0.16, 40);
   driveGeo.rotateZ(Math.PI / 2);
   // V-shaped chevron: two titanium strips across the tread.
   const chevGeo = (() => {
@@ -263,7 +270,7 @@ export function buildLrvModel(): RoverModel {
     const blur = add(blurGeo, blurMat, 0, 0, 0, steer);
     blur.castShadow = false;
     // Fender covering the top 150° of the wheel.
-    const f = add(new THREE.CylinderGeometry(0.47, 0.47, 0.32, 24, 1, true, Math.PI * 0.08, Math.PI * 0.84), fenderMat, x, -0.33, z);
+    const f = add(new THREE.CylinderGeometry(0.47, 0.47, 0.32, 48, 1, true, Math.PI * 0.08, Math.PI * 0.84), fenderMat, x, -0.33, z);
     f.rotation.set(0, 0, Math.PI / 2);
     return { steer, spin, uniforms, blurMat, chevronMat };
   });
@@ -271,7 +278,7 @@ export function buildLrvModel(): RoverModel {
   // ---- Headlights (not on the real LRV; a game concession) at the front corners.
   const lights: THREE.SpotLight[] = [];
   for (const sx of [0.5, -0.5]) {
-    add(new THREE.BoxGeometry(0.14, 0.09, 0.07), black, sx, 0.2, 1.5);
+    add(rbox(0.14, 0.09, 0.07), black, sx, 0.2, 1.5);
     const l = add(new THREE.CircleGeometry(0.04, 16), lampMat, sx, 0.2, 1.536);
     l.castShadow = false;
     const s = new THREE.SpotLight(0xfff2d8, 0, 120, 0.5, 0.55, 2);
