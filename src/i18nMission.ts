@@ -2,6 +2,8 @@
 type Dict = Record<string, string>;
 
 const ru: Dict = {
+  radio_impact: 'Наши сейсмометры ALSEP зафиксировали удар метеорита рядом с вами. Видите свежий кратер?',
+  radio_impactBig: 'Сильный удар! Сейсмометр зашкалило. Метеорит упал совсем рядом — будьте осторожны.',
   wWheelHurt: 'КОЛЕСО ПОВРЕЖДЕНО',
   wWheelDead: 'КОЛЕСО ВЫШЛО ИЗ СТРОЯ',
   wBody: 'ПОВРЕЖДЕНИЕ РАМЫ',
@@ -122,6 +124,8 @@ const ru: Dict = {
 };
 
 const uk: Dict = {
+  radio_impact: 'Наші сейсмометри ALSEP зафіксували удар метеорита поруч із вами. Бачите свіжий кратер?',
+  radio_impactBig: 'Сильний удар! Сейсмометр зашкалило. Метеорит упав зовсім поруч.',
   wWheelHurt: 'КОЛЕСО ПОШКОДЖЕНО',
   wWheelDead: 'КОЛЕСО ВИЙШЛО З ЛАДУ',
   wBody: 'ПОШКОДЖЕННЯ РАМИ',
@@ -238,6 +242,8 @@ const uk: Dict = {
 };
 
 const en: Dict = {
+  radio_impact: 'Our ALSEP seismometers recorded an impact near you. Can you see a fresh crater?',
+  radio_impactBig: 'Big impact! The seismometer went off scale. It hit very close to you - be careful.',
   wWheelHurt: 'WHEEL DAMAGED',
   wWheelDead: 'WHEEL FAILED',
   wBody: 'FRAME DAMAGE',

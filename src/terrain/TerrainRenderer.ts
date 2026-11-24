@@ -44,6 +44,7 @@ export class TerrainRenderer {
     uDetSlots: { value: Float32Array };
     uDetRes: { value: number };
     uDetSlopes: { value: number };
+    uFresh: { value: Float32Array };
   };
   private chunks = new Map<string, Chunk>();
   private workers: Worker[] = [];
@@ -103,6 +104,7 @@ export class TerrainRenderer {
       uDetSlots: { value: new Float32Array(9).fill(-1) },
       uDetRes: { value: 512 },
       uDetSlopes: { value: 0 },
+      uFresh: { value: new Float32Array(36).fill(-1e6) },
     };
     const u = this.uniforms;
     // Mars: material map and fractured-pavement relief (the same data as the physics).
@@ -148,6 +150,7 @@ export class TerrainRenderer {
         uDetSlots: u.uDetSlots,
         uDetRes: u.uDetRes,
         uDetSlopes: u.uDetSlopes,
+        uFresh: u.uFresh,
         uMat: { value: matTex },
         uPave: { value: paveTex },
       });
@@ -203,6 +206,7 @@ uniform vec4 uDetRect;
 uniform float uDetSlots[9];
 uniform float uDetRes;
 uniform float uDetSlopes;
+uniform vec3 uFresh[12];
 uniform sampler2D uMat;
 uniform sampler2D uPave;
 const float PAVE_SIZE = 64.0;
@@ -627,6 +631,18 @@ float aMean = textureLod(uOrtho, mapUv, 7.0).r * 0.9;
 float aRel = alb / max(aMean, 0.01);
 alb = aMean * (aRel < 1.35 ? aRel : 1.35 + (aRel - 1.35) * 0.35);
 diffuseColor.rgb = regolith * alb;
+// Fresh craters from impacts during play: bright, immature ejecta out to ~3 radii,
+// broken into rays; the bowl floor bright too (fresh material is ~1.5-2x brighter).
+for (int k = 0; k < 12; k++) {
+  vec3 fc = uFresh[k];
+  vec2 dv = vWorldP.xz - fc.xy;
+  float q = length(dv) / max(fc.z, 0.1);
+  if (q > 4.0) continue;
+  float ang = atan(dv.y, dv.x);
+  float rays = 0.55 + 0.45 * pow(abs(sin(ang * 7.0 + fc.x) * sin(ang * 3.0 + fc.y)), 0.5);
+  float halo = q < 1.0 ? 0.8 : exp(-(q - 1.0) * 1.3) * rays;
+  diffuseColor.rgb *= 1.0 + 0.9 * halo;
+}
 // Sun geometry for sub-pixel cast shadows.
 vec2 s2 = uSunShadow.xy;
 float cotEl = uSunShadow.z;
@@ -756,6 +772,20 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`,
   setShadowMaps(near: THREE.Texture, far: THREE.Texture | null): void {
     this.uniforms.uBaked.value = near;
     if (far) this.uniforms.uFarShadow.value = far;
+  }
+
+  /** A new crater: tell the workers and rebuild the chunks it touches. */
+  addCrater(x: number, z: number, r: number): void {
+    for (const w of this.workers) w.postMessage({ type: 'crater', x, z, r });
+    const reach = r * 3 + 2;
+    for (const c of this.chunks.values()) {
+      const cx = c.ix * CHUNK, cz = c.iz * CHUNK;
+      if (Math.abs(x - cx) < CHUNK / 2 + reach && Math.abs(z - cz) < CHUNK / 2 + reach) c.level = -1;
+    }
+    // Bright immature ejecta around fresh craters (up to 12, newest last).
+    const f = this.uniforms.uFresh.value;
+    f.copyWithin(0, 3);
+    f.set([x, z, r], f.length - 3);
   }
 
   /** Attach the streamed full-resolution photo tiles. */

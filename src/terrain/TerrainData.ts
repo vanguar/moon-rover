@@ -244,7 +244,31 @@ export class TerrainData {
     return sum;
   }
 
+  /** Craters formed during play (meteoroid impacts): [x, z, R] each, fresh profile. */
+  readonly newCraters: number[] = [];
+
+  /** Fresh crater profile: bowl depth 0.2 D, sharp raised rim, ejecta apron. */
+  private newCraterOffset(x: number, z: number): number {
+    const c = this.newCraters;
+    let off = 0;
+    for (let k = 0; k < c.length; k += 3) {
+      const dx = x - c[k], dz = z - c[k + 1], R = c[k + 2];
+      const d2 = dx * dx + dz * dz;
+      if (d2 > 9 * R * R) continue;
+      const q = Math.sqrt(d2) / R;
+      const depth = 0.4 * R, rim = 0.08 * R;
+      if (q < 1) off += -depth * (1 - q * q) + rim * q * q * q * q;
+      else off += rim * Math.pow(q, -3);
+    }
+    return off;
+  }
+
   craterOffset(x: number, z: number): number {
+    if (this.newCraters.length) return this.staticCraterOffset(x, z) + this.newCraterOffset(x, z);
+    return this.staticCraterOffset(x, z);
+  }
+
+  private staticCraterOffset(x: number, z: number): number {
     const cx = Math.floor((x + this.halfX) / HASH_CELL);
     const cz = Math.floor((z + this.halfZ) / HASH_CELL);
     if (cx < 0 || cz < 0 || cx >= this.cellsX || cz >= this.cellsX) return 0;

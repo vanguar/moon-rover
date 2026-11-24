@@ -21,6 +21,7 @@ import { buildLunarModule } from './rover/models/nasa';
 import { ROVERS, type RoverSpec } from './rover/specs';
 import { Helicopter } from './heli/Helicopter';
 import { Radio } from './audio/Radio';
+import { Meteors } from './fx/Meteors';
 import { Discoveries } from './game/Discoveries';
 import { Missions } from './game/Missions';
 import { buildAlsep } from './game/Hardware';
@@ -86,6 +87,7 @@ export class Game {
   heli: Helicopter | null = null;
   private heliHud: HTMLElement | null = null;
   readonly radio: Radio;
+  private meteors: Meteors | null = null;
   readonly finds: Discoveries | null = null;
   mission!: Missions;
   private heliMaxDist = 0;
@@ -251,6 +253,20 @@ export class Game {
     if (ortho.image) this.hud.setMapImage(ortho.image as CanvasImageSource);
 
     this.radio = new Radio(() => this.audio.output);
+    if (!mars) {
+      this.meteors = new Meteors(terrain);
+      this.scene.add(this.meteors.points);
+      this.meteors.onImpact = (x, z, r, dist) => {
+        terrain.newCraters.push(x, z, r);
+        this.terrainR.addCrater(x, z, r);
+        const p = this.rover.object.position;
+        if (Math.abs(x - p.x) < 70 && Math.abs(z - p.z) < 70) this.physics.updatePatch(p.x, p.z, true);
+        this.sky?.impactFlash(this.scene, new THREE.Vector3(x, terrain.height(x, z) + 0.5, z), dist);
+        // No sound through vacuum; a close impact is felt through the ground.
+        if (dist < 400) this.shake.a = Math.min(0.06, this.shake.a + (r / Math.max(dist, 20)) * 0.6);
+        this.radio.say(r > 4 ? 'impactBig' : 'impact', { repeat: true, delay: 1 });
+      };
+    }
     this.finds = new Discoveries(terrain);
     // Houston comments on finds on the Moon (1.3 light-seconds away), not on Mars.
     this.finds.onFound = (site) => (mars ? this.toast(t(`site_${site.id}`)) : this.radio.say(`find_${site.id}`, { delay: 0.5 }));
@@ -755,6 +771,7 @@ export class Game {
     this.updateEnvironment(dt);
     this.updateSun(p);
     this.updateImpacts(dt);
+    if (this.meteors) this.meteors.update(dt, this.rover.object.position, this.camera.getWorldDirection(new THREE.Vector3()));
     this.updateEnergy(dt);
     this.radio.update(dt);
     this.updateMission();

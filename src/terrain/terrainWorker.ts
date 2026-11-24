@@ -37,6 +37,10 @@ self.onmessage = (e: MessageEvent) => {
     terrain = new TerrainData(msg.meta as TerrainMeta, msg.heights as Uint16Array, msg.far ?? null, msg.material ?? null, msg.pave ?? null, msg.dtmW ?? null);
     return;
   }
+  if (msg.type === 'crater' && terrain) {
+    terrain.newCraters.push(msg.x, msg.z, msg.r);
+    return;
+  }
   if (msg.type === 'build' && terrain) {
     const r = build(terrain, msg as BuildRequest);
     (self as unknown as Worker).postMessage(r, [r.positions.buffer, r.normals.buffer, r.morph.buffer]);
