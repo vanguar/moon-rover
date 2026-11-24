@@ -119,7 +119,7 @@ export class TerrainRenderer {
       paveTex.needsUpdate = true;
     }
     this.material = makeLunar(new THREE.MeshLambertMaterial({ color: 0xffffff }), 'terrain', (shader) => {
-      shader.defines = { ...(shader.defines ?? {}), CRATERLETS: this.craterletLevel(), MARS: this.mars ? 1 : 0, PAVE: paveTex ? 1 : 0 };
+      shader.defines = { ...(shader.defines ?? {}), CRATERLETS: this.craterletLevel(), CRATER_SHADOWS: this.q.level === 'low' ? 0 : 1, MARS: this.mars ? 1 : 0, PAVE: paveTex ? 1 : 0 };
       Object.assign(shader.uniforms, {
         uOrtho: { value: ortho },
         uBaked: u.uBaked,
@@ -656,7 +656,7 @@ float cotEl = uSunShadow.z;
 microLit = 1.0;
 // Cast shadows inside craterlets (9 cells × 5 march steps): 2 m field from Medium up,
 // the 0.7 m field on Ultra.
-#if CRATERLETS > 0
+#if CRATERLETS > 0 && CRATER_SHADOWS > 0
 if (wc1 > 0.0) microLit = min(microLit, mix(1.0, craterShadow(vWorldP.xz, 2.2, 11.0, s2, 1.0 / cotEl), wc1));
 #endif
 #if CRATERLETS > 2
@@ -744,7 +744,10 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`,
 
   private craterletLevel(): number {
     if (this.mars) return this.q.level === 'low' || this.q.level === 'medium' ? 0 : 1;
-    return this.q.level === 'low' ? 0 : this.q.level === 'medium' ? 1 : this.q.level === 'high' ? 2 : 3;
+    // The 2 m craterlets are the Moon's surface itself: on every level (Low draws them
+    // without their cast shadows, CRATER_SHADOWS), so a lower automatic quality does
+    // not wipe the small craters off the ground.
+    return this.q.level === 'low' || this.q.level === 'medium' ? 1 : this.q.level === 'high' ? 2 : 3;
   }
 
   /** 2 m slope map of the DTM (RG8: dh/dx, dh/dz) for per-pixel normals at distance. */
@@ -838,7 +841,7 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`,
     this.uniforms.uRtRange.value = q.shadowRange;
     this.uniforms.uLodD.value.set(...(q.lodDistances as [number, number, number, number]));
     for (const c of this.chunks.values()) c.level = -1; // force rebuild at new LOD
-    this.material.customProgramCacheKey = () => `lunar-terrain-${this.craterletLevel()}`;
+    this.material.customProgramCacheKey = () => `lunar-terrain-${this.craterletLevel()}-${this.q.level === 'low' ? 0 : 1}`;
     this.material.needsUpdate = true;
   }
 
