@@ -150,6 +150,21 @@ export class Helicopter {
     this.audio = { osc, gain };
   }
 
+  /** Stop the rotor sound and free the audio nodes (vehicle switched). */
+  dispose(): void {
+    if (!this.audio) return;
+    for (const o of this.audio.osc) {
+      try {
+        o.stop();
+      } catch {
+        /* already stopped */
+      }
+      o.disconnect();
+    }
+    this.audio.gain.disconnect();
+    this.audio = null;
+  }
+
   /** Start the autonomous flight: take off, fly a loop like flights 3–4, return, land. */
   startAuto(): void {
     if (this.phase === 'crashed') return;

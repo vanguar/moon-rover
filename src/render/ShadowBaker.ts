@@ -11,9 +11,10 @@ import type { TerrainData } from '../terrain/TerrainData';
  * (≈ 0.9 cm per metre of distance to the occluder).
  *
  * The work is split into horizontal bands rendered over several frames; a new pass
- * starts whenever the Sun has moved more than 0.1° (12 s at ×60 time).
+ * starts whenever the Sun has moved more than 0.2° (24 s at ×60 time).
  */
-const BANDS = 64;
+// A pass is split into many thin bands, one per frame (~0.3 ms each on an iGPU).
+const BANDS = 256;
 
 const VERT = /* glsl */ `
 varying vec2 vUv;
@@ -104,7 +105,7 @@ export class ShadowBaker {
   /** Called when a full pass is complete (the masks are consistent with the Sun). */
   onComplete?: () => void;
 
-  constructor(private renderer: THREE.WebGLRenderer, terrain: TerrainData, mobile: boolean) {
+  constructor(private renderer: THREE.WebGLRenderer, terrain: TerrainData, mobile: boolean, hiRes = false) {
     // Window heights at half resolution (4 m), max-pooled so thin ridges still cast shadows.
     const k = mobile ? 4 : 2;
     const n = Math.floor(terrain.w / k);
@@ -136,7 +137,7 @@ export class ShadowBaker {
     }
     const opts = { type: THREE.UnsignedByteType, format: THREE.RedFormat, depthBuffer: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter } as const;
     // Output mask: 2 m per texel on desktop (4 m on phones); bicubic sampling in the terrain shader.
-    const size = mobile ? 2048 : 4096;
+    const size = mobile ? 1024 : hiRes ? 4096 : 2048;
     this.near = new THREE.WebGLRenderTarget(size, size, opts);
     this.near.texture.wrapS = this.near.texture.wrapT = THREE.ClampToEdgeWrapping;
     this.far = f ? new THREE.WebGLRenderTarget(mobile ? 512 : 1024, mobile ? 512 : 1024, opts) : null;
@@ -166,7 +167,7 @@ export class ShadowBaker {
 
   /** Request shadows for a new Sun direction (ignored for tiny moves). */
   setSun(dir: THREE.Vector3, force = false): void {
-    if (!force && dir.angleTo(this.baked) < 1.75e-3 && this.band >= BANDS) return;
+    if (!force && dir.angleTo(this.baked) < 3.5e-3 && this.band >= BANDS) return;
     if (!force && this.band < BANDS) return; // finish the pass in progress first
     this.pending.copy(dir);
     this.band = 0;

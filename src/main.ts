@@ -175,6 +175,7 @@ async function boot(): Promise<void> {
   // Live scene behind the title screen (sky, weather and the rover's moving parts keep going).
   game.render();
   mark('first frame');
+  game.setMenuOpen(true);
   game.renderer.setAnimationLoop(() => game.idleFrame());
   setupMenu(game);
 }
@@ -378,6 +379,7 @@ function setupMenu(game: Game): void {
   const openMenu = () => {
     if (!started) return;
     game.setPaused(true);
+    game.setMenuOpen(true);
     menu.classList.remove('hidden');
     if (document.querySelector('.mtab.on')?.getAttribute('data-mt') === 'garage') garage.start();
     showGameUi(false);
@@ -389,6 +391,7 @@ function setupMenu(game: Game): void {
   const play = async () => {
     playing = true;
     menu.classList.add('hidden');
+    game.setMenuOpen(false);
     garage.stop();
     showGameUi(true);
     void game.audio.start(settings.volume);

@@ -113,7 +113,6 @@ export class Game {
   private cabQ = new THREE.Quaternion(0, 0, 0, 0);
   private clock = new THREE.Timer();
   private fpsAcc = { t: 0, n: 0, fps: 60 };
-  private perf = { t: 0, frames: 0, cooldown: 10, strikes: 0 };
   private sunTexel = 1;
   /** Fixed camera for reference shots (tools/shots.mjs): position, azimuth/pitch in degrees, fov. */
   debugCam: { x: number; z: number; h: number; az: number; pitch: number; fov: number } | null = null;
@@ -135,6 +134,7 @@ export class Game {
     const mars = W.id === 'mars';
     setSurfacePhotometry(W.id, W.radius);
     this.q = quality;
+    this.drs.maxLevel = quality.level;
     this.autoQuality = auto;
     this.renderer = new THREE.WebGLRenderer({ antialias: !isMobile || window.devicePixelRatio < 2, powerPreference: 'high-performance', stencil: false });
     this.renderer.setPixelRatio(quality.pixelRatio);
@@ -200,7 +200,7 @@ export class Game {
     this.terrainR.setSun(this.sunDir);
     if (!mars) {
       // Terrain shadows follow the Sun: recomputed on the GPU (see ShadowBaker).
-      this.baker = new ShadowBaker(this.renderer, terrain, isMobile);
+      this.baker = new ShadowBaker(this.renderer, terrain, isMobile, quality.level === 'high' || quality.level === 'ultra');
       this.baker.setSun(this.sunDir, true);
       this.baker.bakeAll();
       this.terrainR.setShadowMaps(this.baker.near.texture, this.baker.far?.texture ?? null);
@@ -316,6 +316,7 @@ export class Game {
   private exitHeli(): void {
     if (!this.heli) return;
     this.scene.remove(this.heli.object, this.heli.dustObject);
+    this.heli.dispose();
     this.heli = null;
     this.input.heliMode = false;
     this.audio.setRoverMuted(false);
@@ -633,7 +634,11 @@ export class Game {
   setQuality(level: QualityLevel, auto: boolean): void {
     this.autoQuality = auto;
     this.q = makeQuality(level);
-    this.renderer.setPixelRatio(this.q.pixelRatio);
+    if (!auto) {
+      this.drs.scale = 1;
+      this.drs.maxLevel = level;
+    }
+    this.renderer.setPixelRatio(this.q.pixelRatio * this.drs.scale);
     this.configureShadow();
     this.setupComposer();
     this.terrainR.setQuality(this.q);
@@ -669,8 +674,23 @@ export class Game {
     this.weather?.setMode(m);
   }
 
+  private menuOpen = false;
+  private idleTick = 0;
+  /**
+   * The menu is open: the live background is rendered at 60 % resolution and
+   * 30 fps (it sits behind the blurred menu), leaving the GPU to the menu itself
+   * and the rover previews.
+   */
+  setMenuOpen(open: boolean): void {
+    if (open === this.menuOpen) return;
+    this.menuOpen = open;
+    this.renderer.setPixelRatio(this.q.pixelRatio * this.drs.scale * (open ? 0.6 : 1));
+    this.resize();
+  }
+
   /** Title screen / pause: keep the world alive (sky, weather, moving parts) without driving. */
   idleFrame(): void {
+    if (this.menuOpen && (this.idleTick++ & 1)) return;
     this.clock.update();
     const dt = Math.min(this.clock.getDelta(), 0.1);
     this.time += dt;
@@ -694,6 +714,7 @@ export class Game {
     this.clock.update();
     const dt = Math.min(this.clock.getDelta(), 0.1);
     if (this.paused) {
+      if (this.menuOpen && (this.idleTick++ & 1)) return;
       this.time += dt;
       this.animateRover(dt, true);
       this.updateEnvironment(dt);
@@ -1157,31 +1178,68 @@ export class Game {
     this.camera.updateMatrixWorld();
   }
 
+  /**
+   * Dynamic resolution: keeps the frame rate steady instead of the image sharpness.
+   * Every 0.5 s the share of late frames (longer than 1.25 × the target period) is
+   * measured; the internal render resolution drops by 10 % at once when frames are
+   * late and creeps back up by 5 % after a few calm seconds. Only if the resolution
+   * is already at its floor does Auto quality step down a level (shadows, draw
+   * distance, rocks), and it steps back up after a long calm spell.
+   */
   private adaptQuality(dt: number): void {
-    if (!this.autoQuality) return;
-    this.perf.t += dt;
-    this.perf.frames++;
-    this.perf.cooldown -= dt;
-    if (this.perf.t < 3) return;
-    const fps = this.perf.frames / this.perf.t;
-    this.perf.t = 0;
-    this.perf.frames = 0;
-    if (this.perf.cooldown > 0) return;
-    const target = isMobile ? 28 : 45;
-    this.perf.strikes = fps < target ? this.perf.strikes + 1 : 0;
-    if (this.perf.strikes >= 2) {
-      this.perf.strikes = 0;
-      const pr = this.renderer.getPixelRatio();
-      if (pr > 0.75) {
-        this.renderer.setPixelRatio(Math.max(0.75, pr - 0.25));
-        this.resize();
-      } else {
+    const d = this.drs;
+    d.warm -= dt;
+    if (dt > 0.25 || d.warm > 0) return; // tab switch, loading
+    // Display refresh: the shortest frame intervals seen recently (60, 90, 120, 144 Hz).
+    d.minDt = Math.min(d.minDt * 1.0005 + 1e-6, dt);
+    const period = Math.max(d.minDt, isMobile ? 1 / 30 : 1 / 58);
+    d.t += dt;
+    d.n++;
+    if (dt > period * 1.25) d.late++;
+    if (d.t < 0.5) return;
+    const lateFrac = d.late / d.n;
+    d.t = 0;
+    d.n = 0;
+    d.late = 0;
+    const maxScale = 1, minScale = isMobile ? 0.5 : 0.6;
+    let scale = d.scale;
+    if (lateFrac > 0.12) {
+      d.calm = 0;
+      if (scale > minScale + 1e-3) scale = Math.max(minScale, scale - 0.1);
+      else if (this.autoQuality && ++d.floorHits >= 4) {
+        d.floorHits = 0;
         const i = LEVELS.indexOf(this.q.level);
-        if (i > 0) this.setQuality(LEVELS[i - 1], true);
+        if (i > 0) {
+          this.setQuality(LEVELS[i - 1], true);
+          scale = 0.85;
+          d.downAt = this.time;
+        }
       }
-      this.perf.cooldown = 4;
+    } else if (lateFrac < 0.02) {
+      d.floorHits = 0;
+      d.calm += 0.5;
+      if (d.calm >= 3 && scale < maxScale) {
+        scale = Math.min(maxScale, scale + 0.05);
+        d.calm = 0;
+      } else if (this.autoQuality && scale >= maxScale && d.calm >= 30 && this.time - d.downAt > 60) {
+        // A long calm at full resolution: try the next quality level up again.
+        const i = LEVELS.indexOf(this.q.level);
+        if (i >= 0 && i < LEVELS.indexOf(d.maxLevel)) {
+          this.setQuality(LEVELS[i + 1], true);
+          scale = 0.8;
+        }
+        d.calm = 0;
+      }
+    }
+    if (Math.abs(scale - d.scale) > 1e-3) {
+      d.scale = scale;
+      this.renderer.setPixelRatio(this.q.pixelRatio * scale);
+      this.resize();
     }
   }
+
+  /** Dynamic-resolution state (see adaptQuality). */
+  private drs = { t: 0, n: 0, late: 0, scale: 1, calm: 0, floorHits: 0, warm: 4, minDt: 1 / 60, downAt: -1e9, maxLevel: 'high' as QualityLevel };
 
   private readMask(baked: THREE.Texture): Uint8Array | null {
     try {
@@ -1227,6 +1285,12 @@ export class Game {
     const [x, z] = this.startPoint();
     this.physics.updatePatch(x, z, true);
     this.rover.placeAt(x, z, START_YAW);
+    if (this.heli) {
+      // A fresh helicopter on the airfield next to the rover's start.
+      const heliOn = true;
+      this.exitHeli();
+      if (heliOn) this.enterHeli();
+    }
     this.rover.battery = 1;
     this.rover.panelDust = 0;
     this.rover.parkBrake = false;
