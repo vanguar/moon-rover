@@ -409,3 +409,9 @@ body.mobile #toolbar .tb { width: 38px; height: 38px; border-radius: 10px; }
 body.mobile #toolbar .tb svg { width: 20px; height: 20px; }
 body.mobile #toolbar .tb.menu { margin-inline-start: 0; }
 body.mobile #hud { right: calc(138px + var(--safe-r)); }
+
+/* ===== Author footer (title screen) ===== */
+.author { font-size: 13px; color: var(--dim); margin: 6px 0 0; line-height: 1.5; }
+.author b { color: #e8edf2; font-weight: 600; }
+.author a { color: #9fd3ff; text-decoration: none; }
+.author a:hover { text-decoration: underline; }

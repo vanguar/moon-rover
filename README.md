@@ -34,6 +34,8 @@
 
 **Играть:** https://vanguar.github.io/moon-rover/
 
+**Автор и разработчик:** Volodymyr Zadorozhnyi · [obivan.ua@gmail.com](mailto:obivan.ua@gmail.com)
+
 Стек: Vite + TypeScript + Three.js, физика — Rapier (`@dimforge/rapier3d-compat`).
 
 ## Запуск

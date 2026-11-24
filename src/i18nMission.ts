@@ -2,6 +2,7 @@
 type Dict = Record<string, string>;
 
 const ru: Dict = {
+  authorLabel: 'Автор и разработчик',
   m_drive_touch: 'Проверка систем: проедьте 25 м (педаль «ГАЗ», джойстик — руль)',
   r_drive_touch: 'Проверка ходовой: проедьте 30 м (педаль «ГАЗ», джойстик — руль)',
   h_hover_touch: 'Взлёт: коснитесь джойстика или педали и дождитесь висения на 3 м',
@@ -82,6 +83,7 @@ const ru: Dict = {
 };
 
 const uk: Dict = {
+  authorLabel: 'Автор і розробник',
   m_drive_touch: 'Перевірка систем: проїдьте 25 м (педаль «ГАЗ», джойстик — кермо)',
   r_drive_touch: 'Перевірка ходової: проїдьте 30 м (педаль «ГАЗ», джойстик — кермо)',
   h_hover_touch: 'Зліт: торкніться джойстика або педалі й дочекайтеся висіння на 3 м',
@@ -159,6 +161,7 @@ const uk: Dict = {
 };
 
 const en: Dict = {
+  authorLabel: 'Author and developer',
   m_drive_touch: 'Systems check: drive 25 m (GAS pedal, joystick — steering)',
   r_drive_touch: 'Drive system check: drive 30 m (GAS pedal, joystick — steering)',
   h_hover_touch: 'Take off: touch the joystick or a pedal and wait for the 3 m hover',
@@ -238,4 +241,11 @@ const en: Dict = {
   site_spur_fact: 'Station 7. Scott and Irwin found the Genesis Rock here (sample 15415) — anorthosite about 4 billion years old, a piece of the ancient lunar crust.',
 };
 
-export const MISSION_STRINGS: Record<string, Dict> = { ru, uk, en };
+export const MISSION_STRINGS: Record<string, Dict> = {
+  ru,
+  uk,
+  en,
+  de: { authorLabel: 'Autor und Entwickler' },
+  ar: { authorLabel: 'المؤلف والمطوّر' },
+  zh: { authorLabel: '作者与开发者' },
+};
