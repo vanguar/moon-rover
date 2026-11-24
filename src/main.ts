@@ -6,7 +6,6 @@ import { Game } from './Game';
 import type { WeatherMode } from './fx/MarsWeather';
 import { detectLang, LANGS, setLang, setVariant, t, type Lang } from './i18n';
 import type { Action } from './input/Input';
-import { Physics } from './physics/Physics';
 import { loadNasaModel } from './rover/models/nasa';
 import { ROVERS, roversFor } from './rover/specs';
 import { loadTerrainData } from './terrain/TerrainData';
@@ -126,6 +125,9 @@ const mark = (what: string) => console.info(`[load] ${what} ${((performance.now(
 
 async function boot(): Promise<void> {
   loadText.textContent = t('loading');
+  // The physics engine (Rapier, ~4 MB with its WebAssembly) is a separate chunk,
+  // downloaded in parallel with the terrain data instead of before anything shows.
+  const physicsModule = import('./physics/Physics');
   const D = `${BASE}${W.dataDir}`;
   const moon = W.id === 'moon';
   const bin = (name: string) =>
@@ -148,6 +150,7 @@ async function boot(): Promise<void> {
   // Official NASA models (LM at the Apollo site; Perseverance and Ingenuity on Mars).
   await Promise.all((moon ? (['lm'] as const) : (['perseverance', 'ingenuity'] as const)).map((m) => loadNasaModel(m).catch((e) => console.warn('[models]', m, e))));
   loadText.textContent = t('loadPhysics');
+  const { Physics } = await physicsModule;
   const physics = await Physics.create(terrain);
   mark('physics');
 

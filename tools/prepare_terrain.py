@@ -120,18 +120,6 @@ def sample_sldem(lat, lon):
     return ndimage.map_coordinates(sub, [r - r0, c - c0], order=3, mode="nearest")
 
 
-def roughness_noise(shape, target_std, seed=1971):
-    """Seeded fractal noise with a k^-2.2 spectrum between 4 and 120 m wavelengths."""
-    rng = np.random.default_rng(seed)
-    n = rng.standard_normal(shape)
-    fy = np.fft.fftfreq(shape[0], d=PX)[:, None]
-    fx = np.fft.rfftfreq(shape[1], d=PX)[None, :]
-    k = np.sqrt(fx * fx + fy * fy)
-    amp = np.where((k > 1 / 120) & (k < 1 / 4), (k + 1e-9) ** -1.1, 0.0)
-    f = np.fft.irfft2(np.fft.rfft2(n) * amp, s=shape)
-    return f / f.std() * target_std
-
-
 def merge_sldem(h, valid, lat, lon):
     sl = sample_sldem(lat, lon)
     # Smoothly varying vertical offset DTM - SLDEM, extrapolated outside the strip.
@@ -145,13 +133,15 @@ def merge_sldem(h, valid, lat, lon):
     # DTM roughness below SLDEM resolution: std of DTM minus its 60 m low-pass.
     hp = (h - ndimage.gaussian_filter(np.where(valid, h, base), 15))[valid]
     rough = float(np.std(hp[np.abs(hp) < np.percentile(np.abs(hp), 99)]))
-    synth = base + roughness_noise(h.shape, rough)
+    # The roughness (DTM-like spectrum) is NOT stored: incompressible noise was 40 % of
+    # the heightmap download. The game adds the same seeded roughness at run time where
+    # the DTM weight is < 1 (TerrainData.synthRough), for the mesh and the physics alike.
     dist = ndimage.distance_transform_edt(valid) * PX
     w = np.clip(dist / BLEND_M, 0, 1)
     w = w * w * (3 - 2 * w)
-    out = np.where(valid, h * w + synth * (1 - w), synth)
+    out = np.where(valid, h * w + base * (1 - w), base)
     print(f"SLDEM merge: DTM-SLDEM offset mean {diff[valid].mean():.1f} m, roughness std {rough:.2f} m")
-    return out, w
+    return out, w, rough
 
 
 def read_ortho(transform, shape):
@@ -292,7 +282,7 @@ def main():
     zz, xx = np.meshgrid(coords, coords, indexing="ij")
     lat = lat_c - np.degrees(zz / MOON_R)
     lon = lon_c + np.degrees(xx / (MOON_R * COS_SP))
-    h, wdtm = merge_sldem(h, valid, lat, lon)
+    h, wdtm, rough = merge_sldem(h, valid, lat, lon)
 
     hmin, hmax = float(h.min()), float(h.max())
     print(f"Height range: {hmin:.1f} .. {hmax:.1f} m")
@@ -303,6 +293,8 @@ def main():
     Image.fromarray(q, mode="I;16").save(os.path.join(OUT, "heightmap.png"), optimize=True)
     # DTM weight (1 = measured at 2 m, 0 = SLDEM + synthetic detail), for docs and debugging.
     Image.fromarray((wdtm[::4, ::4] * 255).astype(np.uint8)).save(os.path.join(RAW, "dtm_weight.png"))
+    # DTM weight for the run-time roughness (1000², a few kB).
+    Image.fromarray((wdtm[::4, ::4] * 255).astype(np.uint8)).save(os.path.join(OUT, "dtm_weight.png"), optimize=True)
 
     ortho = read_ortho(transform, (SIZE, SIZE))
     ortho = synth_albedo(ortho, valid)
@@ -342,6 +334,7 @@ def main():
         "minHeight": hmin,
         "maxHeight": hmax,
         "heightStep": HSTEP,
+        "synthRough": {"file": "dtm_weight.png", "n": SIZE // 4, "std": round(rough, 3)},
         "centerLat": lat_c,
         "centerLon": lon_c,
         "projection": {"radius": MOON_R, "standardParallel": 26.0},
@@ -356,8 +349,9 @@ def main():
     old = os.path.join(OUT, "terrain.json")
     if os.path.exists(old):
         prev = json.load(open(old, encoding="utf-8"))
-        if "galaxy" in prev:
-            meta["galaxy"] = prev["galaxy"]
+        for k in ("galaxy", "detail"):  # written by prepare_sky.py / prepare_detail.py
+            if k in prev:
+                meta[k] = prev[k]
     with open(old, "w") as f:
         json.dump(meta, f, indent=2)
     for k, v in sites.items():

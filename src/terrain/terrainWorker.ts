@@ -34,7 +34,7 @@ export interface BuildResult {
 self.onmessage = (e: MessageEvent) => {
   const msg = e.data;
   if (msg.type === 'init') {
-    terrain = new TerrainData(msg.meta as TerrainMeta, msg.heights as Uint16Array, msg.far ?? null, msg.material ?? null, msg.pave ?? null);
+    terrain = new TerrainData(msg.meta as TerrainMeta, msg.heights as Uint16Array, msg.far ?? null, msg.material ?? null, msg.pave ?? null, msg.dtmW ?? null);
     return;
   }
   if (msg.type === 'build' && terrain) {

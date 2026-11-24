@@ -27,11 +27,36 @@ import { VitePWA } from 'vite-plugin-pwa';
 // GitHub Pages serves the site from /<repo>/; override with BASE_PATH for other hosts.
 const base = process.env.BASE_PATH ?? '/moon-rover/';
 
+const DATA_VERSION = dataVersion();
+
+/**
+ * Start the big terrain downloads from the HTML itself, before the game code has
+ * even arrived (they used to begin only after ~1 MB of JS was fetched and run).
+ * The URLs carry the same ?v= hash as the game's own requests, so the game picks
+ * up these responses instead of downloading again.
+ */
+function preloadData() {
+  return {
+    name: 'preload-data',
+    transformIndexHtml(html: string) {
+      const script = `<script>(function(){try{
+var q=new URLSearchParams(location.search).get('world'),w=q;
+if(!w){try{w=(JSON.parse(localStorage.getItem('moon-rover-settings')||'{}').world)}catch(e){}}
+var d=w==='mars'?'data/mars/':'data/',v='?v=${DATA_VERSION}';
+function l(f,as){var e=document.createElement('link');e.rel='preload';e.as=as;e.href=d+f+v;e.crossOrigin='anonymous';if(as==='fetch')e.setAttribute('fetchpriority','high');document.head.appendChild(e)}
+l('terrain.json','fetch');l('heightmap.png','fetch');l('ortho.jpg','image');l('ortho_hi.jpg','image');l('shadow.png','image');
+}catch(e){}})();</script>`;
+      return html.replace('<head>', `<head>
+    ${script}`);
+    },
+  };
+}
+
 export default defineConfig({
   base,
   define: {
     // Build stamp shown on the title screen (which version is really running).
-    __DATA_VERSION__: JSON.stringify(dataVersion()),
+    __DATA_VERSION__: JSON.stringify(DATA_VERSION),
     __APP_BUILD__: JSON.stringify(new Date().toISOString().slice(0, 16).replace('T', ' ')),
   },
   build: {
@@ -40,6 +65,7 @@ export default defineConfig({
   },
   worker: { format: 'es' },
   plugins: [
+    preloadData(),
     VitePWA({
       // Own service worker (src/sw.ts): network-first page, see the comment there.
       // The output keeps the name sw.js so phones with the old worker pick it up as an update.

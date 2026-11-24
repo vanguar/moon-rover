@@ -8,6 +8,11 @@
   "minHeight": -2242.03076171875,
   "maxHeight": -1325.91076171875,
   "heightStep": 0.04,
+  "synthRough": {
+    "file": "dtm_weight.png",
+    "n": 1000,
+    "std": 0.874
+  },
   "centerLat": 26.08102300497751,
   "centerLon": 3.6097752833678953,
   "projection": {
@@ -86,9 +91,9 @@
     "n": 501,
     "spacing": 112.0,
     "size": 56000.0,
-    "min": -724.2802969808426,
-    "max": 4415.685004085486,
-    "offset": 1.7064247159130446,
+    "min": -724.2802988308472,
+    "max": 4415.685002235481,
+    "offset": 1.7064228659087348,
     "source": "SLDEM2015 (LOLA + SELENE TC), 512 px/deg"
   },
   "detail": {

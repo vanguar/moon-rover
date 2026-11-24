@@ -30,6 +30,8 @@ export interface TerrainMeta {
   detail?: { x0: number; z0: number; tile: number; res: number; tiles: string[]; slopes?: boolean };
   /** Surface material map (Mars): 255 = rocky pavement, 0 = sand. */
   material?: { file: string; n: number; pave?: string };
+  /** Run-time roughness where the DTM is missing (SLDEM-filled edges): weight map + std, m. */
+  synthRough?: { file: string; n: number; std: number };
   centerLat: number;
   centerLon: number;
   landing: { x: number; z: number };
@@ -65,6 +67,26 @@ export function hash2(x: number, y: number, seed = 0): number {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
+/** Smooth value noise on an integer lattice (C1, quintic fade). */
+function vnoise(x: number, z: number, seed: number): number {
+  const i = Math.floor(x), j = Math.floor(z);
+  const fx = x - i, fz = z - j;
+  const u = fx * fx * fx * (fx * (fx * 6 - 15) + 10), v = fz * fz * fz * (fz * (fz * 6 - 15) + 10);
+  const a = hash2(i, j, seed), b = hash2(i + 1, j, seed), c = hash2(i, j + 1, seed), d = hash2(i + 1, j + 1, seed);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v - 0.5;
+}
+
+/** Roughness octaves 120 m … 4 m, amplitude ∝ λ^1.1 (the DTM's k^-2.2 power spectrum). */
+function roughRaw(x: number, z: number): number {
+  let s = 0, lam = 120, k = 0;
+  while (lam >= 4) {
+    s += vnoise(x / lam + k * 13.7, z / lam - k * 7.1, 900 + k) * Math.pow(lam, 1.1);
+    lam *= 0.5;
+    k++;
+  }
+  return s;
+}
+
 const CRATER_SEED = 1971; // Apollo 15 year
 const CRATER_COUNT = 5500;
 const CRATER_RMIN = 1.2;
@@ -89,10 +111,24 @@ export class TerrainData {
 
   /** Material map over the window (0 sand .. 255 pavement) and the pavement pattern. */
   readonly material: Uint8Array | null;
+  /** DTM weight (0 = SLDEM fill .. 255 = measured DTM) for the run-time roughness. */
+  readonly dtmW: Uint8Array | null;
+  private roughK = 0;
   readonly pave: Uint8Array | null;
 
-  constructor(meta: TerrainMeta, heights: Uint16Array, far: FarGrid | null = null, material: Uint8Array | null = null, pave: Uint8Array | null = null) {
+  constructor(meta: TerrainMeta, heights: Uint16Array, far: FarGrid | null = null, material: Uint8Array | null = null, pave: Uint8Array | null = null, dtmW: Uint8Array | null = null) {
     this.material = material;
+    this.dtmW = dtmW;
+    if (dtmW && meta.synthRough) {
+      // Normalise the octave sum to the DTM's measured roughness (std over random points).
+      let s2 = 0;
+      const r = mulberry32(77);
+      for (let i = 0; i < 4096; i++) {
+        const v = roughRaw((r() - 0.5) * 8000, (r() - 0.5) * 8000);
+        s2 += v * v;
+      }
+      this.roughK = meta.synthRough.std / Math.sqrt(s2 / 4096);
+    }
     this.pave = material ? (pave ?? buildPavement()) : null;
     this.meta = meta;
     this.heights = heights;
@@ -273,6 +309,19 @@ export class TerrainData {
     return (a + (b - a) * fu + (c - a) * fv + (a - b - c + d) * fu * fv) / 255;
   }
 
+  /** Seeded DTM-like roughness (4–120 m) where the DTM is missing, weighted by 1 − DTM weight. */
+  synthRough(x: number, z: number): number {
+    const m = this.dtmW;
+    if (!m || !this.roughK) return 0;
+    const n = this.meta.synthRough!.n;
+    const u = ((x + this.halfX) / this.meta.sizeX) * n - 0.5, v = ((z + this.halfZ) / this.meta.sizeZ) * n - 0.5;
+    const i = Math.max(0, Math.min(n - 2, Math.floor(u))), j = Math.max(0, Math.min(n - 2, Math.floor(v)));
+    const fu = Math.min(1, Math.max(0, u - i)), fv = Math.min(1, Math.max(0, v - j));
+    const a = m[j * n + i], b = m[j * n + i + 1], c = m[(j + 1) * n + i], d = m[(j + 1) * n + i + 1];
+    const w = (a + (b - a) * fu + (c - a) * fv + (a - b - c + d) * fu * fv) / 255;
+    return w >= 0.999 ? 0 : (1 - w) * roughRaw(x, z) * this.roughK;
+  }
+
   /** Centimetre relief of the fractured pavement plates, weighted by the material. */
   microOffset(x: number, z: number): number {
     if (!this.pave) return 0;
@@ -287,7 +336,7 @@ export class TerrainData {
     }
     const w = this.dtmWeight(x, z);
     if (w <= 0) return this.farHeight(x, z);
-    const near = this.dtmHeight(x, z) + this.craterOffset(x, z) + this.microOffset(x, z);
+    const near = this.dtmHeight(x, z) + this.craterOffset(x, z) + this.microOffset(x, z) + this.synthRough(x, z);
     return w >= 1 ? near : near * w + this.farHeight(x, z) * (1 - w);
   }
 
@@ -370,5 +419,21 @@ export async function loadTerrainData(base: string, onProgress?: (f: number) => 
       pave = null;
     }
   }
-  return new TerrainData(meta, heights, far, material, pave);
+  let dtmW: Uint8Array | null = null;
+  if (meta.synthRough) {
+    try {
+      const r = await fetch(dataUrl(`${base}${meta.synthRough.file}`));
+      const bmp = await createImageBitmap(await r.blob(), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
+      const n = meta.synthRough.n;
+      const c = new OffscreenCanvas(n, n);
+      const g = c.getContext('2d', { willReadFrequently: true })!;
+      g.drawImage(bmp, 0, 0, n, n);
+      const d = g.getImageData(0, 0, n, n).data;
+      dtmW = new Uint8Array(n * n);
+      for (let i = 0; i < dtmW.length; i++) dtmW[i] = d[i * 4];
+    } catch {
+      dtmW = null;
+    }
+  }
+  return new TerrainData(meta, heights, far, material, pave, dtmW);
 }

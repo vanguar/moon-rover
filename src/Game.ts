@@ -12,7 +12,7 @@ import { Sky } from './fx/Sky';
 import { Tracks } from './fx/Tracks';
 import { Hud } from './hud/Hud';
 import { Input } from './input/Input';
-import { Physics } from './physics/Physics';
+import type { Physics } from './physics/Physics';
 import { APOLLO15_EVA1, lunarSky } from './astro/ephemeris';
 import { setSurfacePhotometry } from './render/lunar';
 import { ShadowBaker } from './render/ShadowBaker';

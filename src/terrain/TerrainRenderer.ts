@@ -712,7 +712,7 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`,
     const nWorkers = Math.max(1, Math.min(3, (navigator.hardwareConcurrency || 2) - 1));
     for (let i = 0; i < nWorkers; i++) {
       const w = new Worker(new URL('./terrainWorker.ts', import.meta.url), { type: 'module' });
-      w.postMessage({ type: 'init', meta, heights: terrain.heights, far: terrain.far, material: terrain.material, pave: terrain.pave });
+      w.postMessage({ type: 'init', meta, heights: terrain.heights, far: terrain.far, material: terrain.material, pave: terrain.pave, dtmW: terrain.dtmW });
       w.onmessage = (e: MessageEvent<BuildResult>) => this.onBuilt(i, e.data);
       this.workers.push(w);
       this.busy.push(0);
