@@ -16,7 +16,15 @@ import * as THREE from 'three';
 const ARC = THREE.MathUtils.degToRad(220);
 /** Wall height, m (billow tops vary around it). */
 const HEIGHT = 2200;
-const BOLT_SEGS = 160;
+const BOLT_SEGS = 480;
+
+/** Return-stroke times of one flash, s: 3-5 strokes 30-80 ms apart (typical of cloud-to-ground lightning). */
+function strokes(rnd: () => number): number[] {
+  const out = [0];
+  const n = 2 + Math.floor(rnd() * 3);
+  for (let i = 0; i < n; i++) out.push(out[out.length - 1] + 0.03 + rnd() * 0.05);
+  return out;
+}
 
 interface Flash {
   t: number;
@@ -27,6 +35,8 @@ interface Flash {
   ground: boolean;
   /** Strike point on the ground (strikes inside the front zone), with its ground height. */
   at?: { x: number; z: number; gy: number };
+  /** Cloud-to-ground channel, built once: [x0, y0, z0, x1, y1, z1, level] per segment (0 main, 1-2 branches). */
+  segs?: number[];
 }
 
 export class StormFront {
@@ -193,15 +203,19 @@ export class StormFront {
             vec3 toCam = cameraPosition - position;
             vec3 side = normalize(cross(dir, toCam) + 1e-5);
             // At least ~2.5 px wide at any distance; the core is a few dm across up close.
-            float w = max(0.35, length(toCam) * 0.0022);
+            // The quad is 6 core widths across: a bright core (a few dm up close, >= ~2 px)
+            // inside a soft halo of light scattered by the dusty air.
+            float w = max(0.35, length(toCam) * 0.0022) * 6.0;
             vS = aSide; vB = aB;
             gl_Position = projectionMatrix * viewMatrix * vec4(position + side * aSide * w, 1.0);
           }`,
         fragmentShader: /* glsl */ `
           varying float vS; varying float vB;
           void main() {
-            float core = exp(-vS * vS * 6.0);
-            gl_FragColor = vec4(vec3(0.85, 0.8, 1.0) * vB * (0.6 + 2.4 * core), 1.0);
+            float x = vS * 6.0;
+            float core = exp(-x * x * 2.5), halo = exp(-x * x * 0.09);
+            // White-violet core (the hot channel), warm halo (scattered by Martian dust).
+            gl_FragColor = vec4((vec3(0.92, 0.9, 1.0) * core * 3.2 + vec3(1.0, 0.7, 0.48) * halo * 0.35) * vB, 1.0);
           }`,
         transparent: true,
         blending: THREE.AdditiveBlending,
@@ -217,8 +231,7 @@ export class StormFront {
 
   /** A cloud-to-ground discharge at (x, z) with ground height gy - inside the front zone. */
   strike(x: number, z: number, gy: number, cam: THREE.Vector3, rnd: () => number): void {
-    const pulses = [0, ...Array.from({ length: 1 + Math.floor(rnd() * 3) }, () => 0.05 + rnd() * 0.25)];
-    this.flashes.push({ t: 0, pulses, ang: Math.atan2(z - cam.z, x - cam.x), h: 350 + rnd() * 450, ground: true, at: { x, z, gy } });
+    this.flashes.push({ t: 0, pulses: strokes(rnd), ang: Math.atan2(z - cam.z, x - cam.x), h: 350 + rnd() * 450, ground: true, at: { x, z, gy } });
   }
 
   /**
@@ -251,7 +264,7 @@ export class StormFront {
     if (this.nextFlash <= 0 && amount > 0.3) {
       const near = THREE.MathUtils.clamp(1 - dist / 4500, 0, 1);
       this.nextFlash = (1.2 + rnd() * 5) * (1.6 - near);
-      const pulses = Array.from({ length: 1 + Math.floor(rnd() * 3) }, () => rnd() * 0.25);
+      const pulses = strokes(rnd);
       this.flashes.push({ t: 0, pulses, ang: center + (rnd() - 0.5) * 1.6, h: 500 + rnd() * 1100, ground: rnd() < 0.35 });
     }
     let fl = 0, best: Flash | null = null;
@@ -278,44 +291,93 @@ export class StormFront {
     this.flash = lvl;
     if (best) (u.uFlash.value as THREE.Vector3).set(best.ang, best.h, lvl);
     else (u.uFlash.value as THREE.Vector3).z = 0;
-    if (best?.ground && fl > 0.05) this.drawBolt(best, cam, groundY, dist, lvl);
+    if (best?.ground) this.drawBolt(best, cam, groundY, dist, best.at ? 1 : amount);
     else this.bolt.geometry.setDrawRange(0, 0);
   }
 
-  /** A jagged channel from the cloud to the ground with a few branches (seeded per flash). */
-  private drawBolt(f: Flash, cam: THREE.Vector3, groundY: number, dist: number, k: number): void {
-    let seed = Math.floor((f.ang * 1000 + f.h) * 7919) >>> 0;
+  /**
+   * A cloud-to-ground channel: the main path by recursive midpoint displacement
+   * (tortuous on every scale, kilometres down to metres), with downward-forking
+   * branches from its upper two thirds and a few sub-branches; only the main
+   * channel reaches the ground. Built once per flash.
+   */
+  private buildChannel(top: THREE.Vector3, bottom: THREE.Vector3, seed: number): number[] {
+    let st = seed >>> 0;
     const r = () => {
-      seed = (seed * 1664525 + 1013904223) >>> 0;
-      return seed / 4294967296;
+      st = (st * 1664525 + 1013904223) >>> 0;
+      return st / 4294967296;
     };
-    const d = Math.max(dist - 150, 100);
-    const ox = f.at ? f.at.x : cam.x + Math.cos(f.ang) * d, oz = f.at ? f.at.z : cam.z + Math.sin(f.ang) * d;
-    if (f.at) groundY = f.at.gy;
-    const tx = -Math.sin(f.ang), tz = Math.cos(f.ang);
+    const gauss = () => (r() + r() + r() - 1.5) * 1.15;
+    const out: number[] = [];
+    const v = new THREE.Vector3(), perp = new THREE.Vector3();
+    const path = (a: THREE.Vector3, b: THREE.Vector3, depth: number, rough: number): THREE.Vector3[] => {
+      if (depth === 0) return [a, b];
+      const len = a.distanceTo(b);
+      v.subVectors(b, a).normalize();
+      perp.set(gauss(), gauss() * 0.3, gauss()).addScaledVector(v, -perp.dot(v));
+      const m = a.clone().lerp(b, 0.5 + (r() - 0.5) * 0.2).addScaledVector(perp, len * rough);
+      return [...path(a, m, depth - 1, rough).slice(0, -1), ...path(m, b, depth - 1, rough)];
+    };
+    const emit = (pts: THREE.Vector3[], level: number) => {
+      for (let i = 1; i < pts.length; i++) out.push(pts[i - 1].x, pts[i - 1].y, pts[i - 1].z, pts[i].x, pts[i].y, pts[i].z, level);
+    };
+    const main = path(top, bottom, 7, 0.2);
+    emit(main, 0);
+    const branch = (from: THREE.Vector3, dir: THREE.Vector3, len: number, level: number) => {
+      const end = from.clone().addScaledVector(dir, len);
+      const pts = path(from, end, level === 1 ? 5 : 3, 0.22);
+      emit(pts, level);
+      if (level === 1)
+        for (let i = 2; i < pts.length - 2; i++)
+          if (r() < 0.06) {
+            const d2 = new THREE.Vector3(gauss(), -0.8 - r(), gauss()).normalize();
+            branch(pts[i], d2, len * (0.2 + 0.3 * r()), 2);
+          }
+    };
+    for (let i = 4; i < main.length * 0.68; i++) {
+      if (r() > 0.1) continue;
+      const p = main[i], down = (p.y - bottom.y);
+      const d = new THREE.Vector3(gauss(), -0.6 - r() * 0.8, gauss()).normalize();
+      branch(p, d, down * (0.15 + 0.35 * r()), 1);
+    }
+    return out;
+  }
+
+  /**
+   * Draw a flash's channel at time f.t: each return stroke lights the main channel
+   * brightly for ~60 µs-ms (drawn over ~60 ms, as the eye and a camera see it);
+   * the branches only with the first stroke (later strokes follow the main channel);
+   * between strokes the continuing current keeps it faintly lit.
+   */
+  private drawBolt(f: Flash, cam: THREE.Vector3, groundY: number, dist: number, amount: number): void {
+    if (!f.segs) {
+      const d = Math.max(dist - 150, 100);
+      const ox = f.at ? f.at.x : cam.x + Math.cos(f.ang) * d, oz = f.at ? f.at.z : cam.z + Math.sin(f.ang) * d;
+      const gy = f.at ? f.at.gy : groundY;
+      const top = new THREE.Vector3(ox + (Math.sin(f.h) * 0.25) * f.h, gy + f.h, oz + (Math.cos(f.h) * 0.25) * f.h);
+      f.segs = this.buildChannel(top, new THREE.Vector3(ox, gy - 2, oz), Math.floor((f.ang * 1000 + f.h) * 7919));
+    }
+    // Stroke and continuing-current brightness of the main channel and of the branches.
+    let main = 0, br = 0;
+    for (let i = 0; i < f.pulses.length; i++) {
+      const tt = f.t - f.pulses[i];
+      if (tt < 0) continue;
+      const stroke = Math.exp(-tt / 0.045) * (tt < 0.004 ? tt / 0.004 : 1) * (i === 0 ? 1 : 0.75);
+      main = Math.max(main, stroke + 0.12 * Math.exp(-tt / 0.18));
+      if (i === 0) br = stroke;
+    }
+    const P = this.boltPos, O = this.boltOther, B = this.boltB, S = f.segs;
     let n = 0;
-    const P = this.boltPos, O = this.boltOther, B = this.boltB;
-    const seg = (x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, b: number) => {
-      if (n >= BOLT_SEGS) return;
+    for (let k = 0; k < S.length && n < BOLT_SEGS; k += 7) {
+      const lvl = S[k + 6], b = (lvl === 0 ? main : br * (lvl === 1 ? 0.45 : 0.22)) * amount;
+      if (b < 0.01) continue;
+      const x0 = S[k], y0 = S[k + 1], z0 = S[k + 2], x1 = S[k + 3], y1 = S[k + 4], z1 = S[k + 5];
       // Quad corners: start ±side, end ±side; each knows the other end for its direction.
       P.set([x0, y0, z0, x0, y0, z0, x1, y1, z1, x1, y1, z1], n * 12);
       O.set([x1, y1, z1, x1, y1, z1, x1 * 2 - x0, y1 * 2 - y0, z1 * 2 - z0, x1 * 2 - x0, y1 * 2 - y0, z1 * 2 - z0], n * 12);
-      B.fill(b, n * 4, n * 4 + 4);
+      B.fill(b * (lvl === 0 ? 1 : 0.8), n * 4, n * 4 + 4);
       n++;
-    };
-    const channel = (x: number, y: number, z: number, bottom: number, bright: number, depth: number) => {
-      const steps = depth === 0 ? 40 : 12;
-      const dy = (y - bottom) / steps;
-      for (let i = 0; i < steps; i++) {
-        const lat = (r() - 0.5) * dy * 1.4;
-        const nx = x + tx * lat + (r() - 0.5) * dy * 0.4, nz = z + tz * lat + (r() - 0.5) * dy * 0.4, ny = y - dy * (0.6 + 0.8 * r());
-        seg(x, y, z, nx, Math.max(ny, bottom), nz, bright);
-        if (depth < 1 && r() < 0.12) channel(nx, ny, nz, ny - dy * (4 + r() * 6), bright * 0.45, depth + 1);
-        x = nx; y = Math.max(ny, bottom); z = nz;
-        if (y <= bottom) break;
-      }
-    };
-    channel(ox, groundY + f.h, oz, groundY - 20, k, 0);
+    }
     const g = this.bolt.geometry;
     g.setDrawRange(0, n * 6);
     for (const a of ['position', 'aOther', 'aB']) (g.getAttribute(a) as THREE.BufferAttribute).needsUpdate = true;
