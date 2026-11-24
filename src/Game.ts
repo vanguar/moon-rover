@@ -41,6 +41,8 @@ export interface GameExtras {
   farShadow?: THREE.Texture;
   farAlbedo?: THREE.Texture;
   milkyWay?: THREE.Texture;
+  /** Atlas of real photographs of rock surfaces (rover / Apollo frames; prepare_rocktex.py). */
+  rockPhoto?: THREE.Texture;
 }
 
 /** Sun irradiance in scene units; everything else is relative to it. */
@@ -218,7 +220,7 @@ export class Game {
       this.far.setNearRadius(quality.drawDistance - 250);
       this.scene.add(this.far.mesh);
     }
-    this.rocks = new Rocks(terrain, physics, quality);
+    this.rocks = new Rocks(terrain, physics, quality, extras.rockPhoto);
     this.scene.add(this.rocks.group);
 
     // Moon: start ~45 m west of the LM, facing the rille (west).

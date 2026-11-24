@@ -132,7 +132,7 @@ async function boot(): Promise<void> {
   const moon = W.id === 'moon';
   const bin = (name: string) =>
     fetch(dataUrl(`${D}${name}`)).then((r) => (r.ok ? r.arrayBuffer() : null)).then((b) => (b ? new Float32Array(b) : undefined)).catch(() => undefined);
-  const [terrain, ortho, baked, orthoHi, stars, constellations, farShadow, farAlbedo, milkyWay] = await Promise.all([
+  const [terrain, ortho, baked, orthoHi, stars, constellations, farShadow, farAlbedo, milkyWay, rockPhoto] = await Promise.all([
     loadTerrainData(D, (f) => {
       progress.height = f;
       showProgress();
@@ -145,7 +145,12 @@ async function boot(): Promise<void> {
     loadTexture(dataUrl(`${D}far_shadow.png`), 'other').catch(() => undefined),
     moon ? Promise.resolve(undefined) : loadTexture(dataUrl(`${D}far_albedo.jpg`), 'other').catch(() => undefined),
     moon ? loadTexture(dataUrl(`${D}milkyway.jpg`), 'other').catch(() => undefined) : Promise.resolve(undefined),
+    loadTexture(dataUrl(`${D}rocks.jpg`), 'other').catch(() => undefined),
   ]);
+  if (rockPhoto) {
+    rockPhoto.colorSpace = THREE.SRGBColorSpace;
+    rockPhoto.anisotropy = 4;
+  }
   mark('data');
   // Official NASA models (LM at the Apollo site; Perseverance and Ingenuity on Mars).
   await Promise.all((moon ? (['lm'] as const) : (['perseverance', 'ingenuity'] as const)).map((m) => loadNasaModel(m).catch((e) => console.warn('[models]', m, e))));
@@ -157,7 +162,7 @@ async function boot(): Promise<void> {
   const level: QualityLevel = settings.quality === 'auto' ? autoQuality() : settings.quality;
   const list = roversFor(W.id);
   const spec = list.find((r) => r.id === settings.rover[W.id]) ?? list[0];
-  const game = new Game($('#app'), terrain, physics, ortho, baked, makeQuality(level), settings.quality === 'auto', { stars, orthoHi, constellations, farShadow, farAlbedo, milkyWay }, spec, settings.weather);
+  const game = new Game($('#app'), terrain, physics, ortho, baked, makeQuality(level), settings.quality === 'auto', { stars, orthoHi, constellations, farShadow, farAlbedo, milkyWay, rockPhoto }, spec, settings.weather);
   (window as unknown as { game: Game; ROVERS_: unknown }).game = game;
   (window as unknown as { ROVERS_: unknown }).ROVERS_ = ROVERS;
   mark('game');

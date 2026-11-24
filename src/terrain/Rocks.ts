@@ -109,7 +109,7 @@ function angularGeometry(seed: number, tint: RockTint): THREE.BufferGeometry {
   const n = noise3(seed);
   const pts: THREE.Vector3[] = [];
   const el = new THREE.Vector3(0.8 + rnd() * 0.5, 0.45 + rnd() * 0.45, 0.7 + rnd() * 0.5);
-  const count = 10 + Math.floor(rnd() * 9);
+  const count = 16 + Math.floor(rnd() * 14);
   for (let i = 0; i < count; i++) {
     const v = new THREE.Vector3(rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1).normalize();
     v.multiplyScalar(0.75 + 0.35 * rnd()).multiply(el);
@@ -132,29 +132,35 @@ function slabGeometry(seed: number, tint: RockTint): THREE.BufferGeometry {
   const rnd = mulberry32(seed);
   const n = noise3(seed);
   const parts: THREE.BufferGeometry[] = [];
-  const layers = 3 + Math.floor(rnd() * 2);
+  const layers = 2 + Math.floor(rnd() * 3);
   let y = -0.5;
   for (let l = 0; l < layers; l++) {
     // Plates as thick as a third of their width: blocky ledges, not sheets.
     const th = 0.26 + rnd() * 0.18;
-    const shrink = 1 - l * (0.12 + rnd() * 0.1);
-    const ox = (rnd() - 0.5) * 0.3, oz = (rnd() - 0.5) * 0.25;
+    const shrink = 1 - l * (0.15 + rnd() * 0.12);
+    const ox = (rnd() - 0.5) * 0.35, oz = (rnd() - 0.5) * 0.3;
     const pts: THREE.Vector3[] = [];
-    const sides = 7 + Math.floor(rnd() * 5);
+    // Broken outline: many points with jagged radius (spalled edges, re-entrant bites
+    // smoothed by the hull into irregular facets), thickness varying around the rim.
+    const sides = 14 + Math.floor(rnd() * 8);
+    const bite = rnd() * Math.PI * 2;
     for (let k = 0; k < sides; k++) {
-      const a = (k / sides) * Math.PI * 2 + (rnd() - 0.5) * 0.5;
-      const r = shrink * (0.7 + 0.35 * rnd());
-      const x = Math.cos(a) * r * 1.15 + ox, z = Math.sin(a) * r * 0.8 + oz;
-      pts.push(new THREE.Vector3(x, y + th * (0.1 * rnd()), z), new THREE.Vector3(x * (0.92 + 0.06 * rnd()), y + th * (0.9 + 0.1 * rnd()), z * (0.92 + 0.06 * rnd())));
+      const a = (k / sides) * Math.PI * 2 + (rnd() - 0.5) * 0.35;
+      let r = shrink * (0.55 + 0.45 * rnd());
+      // One side snapped off: a straight-ish fracture face.
+      if (Math.cos(a - bite) > 0.6) r *= 0.7 + 0.1 * rnd();
+      const x = Math.cos(a) * r * 1.1 + ox, z = Math.sin(a) * r * (0.6 + 0.3 * rnd()) + oz;
+      const tk = th * (0.55 + 0.5 * rnd());
+      pts.push(new THREE.Vector3(x, y + th * 0.15 * rnd(), z), new THREE.Vector3(x * (0.85 + 0.12 * rnd()), y + tk, z * (0.85 + 0.12 * rnd())));
     }
     let g: THREE.BufferGeometry = new ConvexGeometry(pts);
-    g.rotateZ((rnd() - 0.5) * 0.12);
-    g.rotateX((rnd() - 0.5) * 0.1);
+    g.rotateZ((rnd() - 0.5) * 0.3);
+    g.rotateX((rnd() - 0.5) * 0.25);
     g = g.index ? g.toNonIndexed() : g;
     g.deleteAttribute('uv');
     g.computeVertexNormals();
     parts.push(g);
-    y += th * (0.92 + 0.08 * rnd());
+    y += th * (0.8 + 0.1 * rnd());
   }
   const g = mergeGeometries(parts)!;
   return colorize(g, n, tint);
@@ -205,7 +211,7 @@ export class Rocks {
   private mars: boolean;
   private gravelMeshes: THREE.InstancedMesh[] = [];
 
-  constructor(private terrain: TerrainData, private physics: Physics, quality: QualitySettings) {
+  constructor(private terrain: TerrainData, private physics: Physics, quality: QualitySettings, photo?: THREE.Texture) {
     this.q = quality;
     this.abundance = terrain.meta.body === 'mars' ? 5 : 1;
     this.mars = terrain.meta.body === 'mars';
@@ -213,14 +219,15 @@ export class Rocks {
     const mars = terrain.meta.body === 'mars';
     const tint: RockTint = mars
       ? { base: new THREE.Color(0.085, 0.078, 0.072), dust: new THREE.Color(0.3, 0.2, 0.13) }
-      : { base: new THREE.Color(0.27, 0.26, 0.245), dust: null };
+      : { base: new THREE.Color(0.18, 0.175, 0.168), dust: null }; // basalt / breccia, albedo ~0.1-0.15
     const mat = makeLunar(new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }), 'rock', (shader) => {
-      shader.defines = { ...(shader.defines ?? {}), ROCK_MARS: mars ? 1 : 0 };
+      shader.defines = { ...(shader.defines ?? {}), ROCK_MARS: mars ? 1 : 0, ROCK_PHOTO: photo ? 1 : 0 };
+      if (photo) shader.uniforms.uRockPhoto = { value: photo };
       // Rock surface detail in the rock's own frame (it stays on the rock): chips and
       // vesicles as a bump map, mineral grains, darker pits, and (Moon) a fine dust
       // coat on the upper faces; (Mars) the ochre dust is handled by the vertex colour.
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vRockP;\nvarying vec3 vRockN;')
+        .replace('#include <common>', '#include <common>\nvarying vec3 vRockP;\nvarying vec3 vRockN;\nvarying float vRockSeed;')
         .replace(
           '#include <begin_vertex>',
           `#include <begin_vertex>
@@ -228,6 +235,9 @@ float rScale = 1.0;
 #ifdef USE_INSTANCING
 rScale = length(instanceMatrix[0].xyz);
 vRockN = normalize(mat3(modelMatrix) * mat3(instanceMatrix) * objectNormal);
+// Which photo tile and where in it: from the rock's own position (stable per rock).
+vec3 iT = instanceMatrix[3].xyz;
+vRockSeed = fract(sin(dot(iT.xz, vec2(12.9898, 78.233))) * 43758.5453);
 #else
 vRockN = normalize(mat3(modelMatrix) * objectNormal);
 #endif
@@ -239,6 +249,24 @@ vRockP = position * rScale;`,
           `#include <common>
 varying vec3 vRockP;
 varying vec3 vRockN;
+varying float vRockSeed;
+#if ROCK_PHOTO > 0
+uniform sampler2D uRockPhoto;
+// Real rover photographs of Martian rock (2 × 2 atlas), projected triplanarly at
+// ~0.6 m per tile, mirrored so it never shows a seam; each rock its own tile and offset.
+vec3 photoTap(vec2 p, vec2 tile) {
+  vec2 q = abs(fract(p * 0.5) * 2.0 - 1.0); // mirror-repeat
+  q = mix(vec2(0.01), vec2(0.99), q);
+  return texture2D(uRockPhoto, (tile + q) * 0.5).rgb;
+}
+vec3 rockPhoto(vec3 p, vec3 w) {
+  float s = vRockSeed;
+  vec2 tile = vec2(floor(s * 2.0), floor(fract(s * 7.13) * 2.0));
+  vec3 o = vec3(s * 17.0, s * 5.0, s * 11.0);
+  p = p / 0.6 + o;
+  return photoTap(p.yz, tile) * w.x + photoTap(p.xz, tile) * w.y + photoTap(p.xy, tile) * w.z;
+}
+#endif
 ${NOISE_GLSL}
 // Triplanar value noise in rock-local metres.
 float tri(vec3 p, vec3 w) {
@@ -260,6 +288,10 @@ float rockH(vec3 p, vec3 w) {
   float fw = length(fwidth(vRockP));
   float detail = 1.0 - smoothstep(0.01, 0.05, fw);
   float H = rockH(vRockP, w) * 0.004 * detail;
+#if ROCK_PHOTO > 0
+  // Relief from the photograph's brightness: fractures, flakes and grains of real rock.
+  H = dot(rockPhoto(vRockP, w), vec3(0.33)) * 0.006 + H * 0.4;
+#endif
   // Bump from screen-space derivatives (Mikkelsen).
   vec3 sx = dFdx(-vViewPosition), sy = dFdy(-vViewPosition);
   vec3 r1 = cross(sy, normal), r2 = cross(normal, sx);
@@ -283,7 +315,12 @@ float rockH(vec3 p, vec3 w) {
   // Breccia clasts and mottling at cm scale; dark pits (vesicles).
   float mott = (tri(vRockP * 14.0 + 3.0, w) - 0.5) * 0.35;
   float pit = smoothstep(0.78, 0.92, tri(vRockP * 38.0 + 5.0, w));
+#if ROCK_PHOTO > 0
+  // Colour, grain, dust patches and fractures from the photographs (their mean is 1).
+  diffuseColor.rgb *= rockPhoto(vRockP, w) / 0.5 * (1.0 + 0.3 * mott);
+#else
   diffuseColor.rgb *= (1.0 + grains + mott) * (1.0 - 0.55 * pit * detail);
+#endif
 #if ROCK_MARS == 0
   // Lunar rocks carry a thin coat of fine soil on their upper faces (zap pits, dust).
   float up = smoothstep(0.35, 0.9, normalize(vRockN).y) * (0.5 + 0.5 * tri(vRockP * 4.0, w));
