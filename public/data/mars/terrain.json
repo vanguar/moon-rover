@@ -126,5 +126,10 @@
       "11_6"
     ],
     "slopes": true
+  },
+  "material": {
+    "file": "material.png",
+    "n": 1024,
+    "pave": "pavement.png"
   }
 }

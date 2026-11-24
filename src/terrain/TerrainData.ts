@@ -1,4 +1,5 @@
 import { dataUrl } from '../version';
+import { buildPavement, paveHeight } from './Pavement';
 
 /**
  * Height field of the playable area: real LROC NAC DTM (2 m/px) + procedural
@@ -27,6 +28,8 @@ export interface TerrainMeta {
   projection?: { radius: number; standardParallel: number };
   /** Full-resolution orthophoto tiles streamed around the rover (DetailTiles). */
   detail?: { x0: number; z0: number; tile: number; res: number; tiles: string[]; slopes?: boolean };
+  /** Surface material map (Mars): 255 = rocky pavement, 0 = sand. */
+  material?: { file: string; n: number; pave?: string };
   centerLat: number;
   centerLon: number;
   landing: { x: number; z: number };
@@ -84,7 +87,13 @@ export class TerrainData {
   private cellItems: Int32Array;
   private cellsX: number;
 
-  constructor(meta: TerrainMeta, heights: Uint16Array, far: FarGrid | null = null) {
+  /** Material map over the window (0 sand .. 255 pavement) and the pavement pattern. */
+  readonly material: Uint8Array | null;
+  readonly pave: Uint8Array | null;
+
+  constructor(meta: TerrainMeta, heights: Uint16Array, far: FarGrid | null = null, material: Uint8Array | null = null, pave: Uint8Array | null = null) {
+    this.material = material;
+    this.pave = material ? (pave ?? buildPavement()) : null;
     this.meta = meta;
     this.heights = heights;
     this.hScale = meta.heightStep ?? (meta.maxHeight - meta.minHeight) / 65535;
@@ -252,6 +261,25 @@ export class TerrainData {
   }
 
   /** Final ground height at any world position. */
+  /** Pavement share at a point, 0 (sand) .. 1 (rocky pavement), bilinear. */
+  materialAt(x: number, z: number): number {
+    const m = this.material;
+    if (!m) return 0;
+    const n = this.meta.material!.n;
+    const u = ((x + this.halfX) / this.meta.sizeX) * n - 0.5, v = ((z + this.halfZ) / this.meta.sizeZ) * n - 0.5;
+    const i = Math.max(0, Math.min(n - 2, Math.floor(u))), j = Math.max(0, Math.min(n - 2, Math.floor(v)));
+    const fu = Math.min(1, Math.max(0, u - i)), fv = Math.min(1, Math.max(0, v - j));
+    const a = m[j * n + i], b = m[j * n + i + 1], c = m[(j + 1) * n + i], d = m[(j + 1) * n + i + 1];
+    return (a + (b - a) * fu + (c - a) * fv + (a - b - c + d) * fu * fv) / 255;
+  }
+
+  /** Centimetre relief of the fractured pavement plates, weighted by the material. */
+  microOffset(x: number, z: number): number {
+    if (!this.pave) return 0;
+    const m = this.materialAt(x, z);
+    return m > 0.01 ? m * paveHeight(this.pave, x, z) : 0;
+  }
+
   height(x: number, z: number): number {
     if (!this.far) {
       const mx = this.mirrorX(x), mz = this.mirrorZ(z);
@@ -259,7 +287,7 @@ export class TerrainData {
     }
     const w = this.dtmWeight(x, z);
     if (w <= 0) return this.farHeight(x, z);
-    const near = this.dtmHeight(x, z) + this.craterOffset(x, z);
+    const near = this.dtmHeight(x, z) + this.craterOffset(x, z) + this.microOffset(x, z);
     return w >= 1 ? near : near * w + this.farHeight(x, z) * (1 - w);
   }
 
@@ -310,5 +338,37 @@ export async function loadTerrainData(base: string, onProgress?: (f: number) => 
       far = null;
     }
   }
-  return new TerrainData(meta, heights, far);
+  let material: Uint8Array | null = null;
+  if (meta.material) {
+    try {
+      const r = await fetch(dataUrl(`${base}${meta.material.file}`));
+      const bmp = await createImageBitmap(await r.blob());
+      const n = meta.material.n;
+      const c = new OffscreenCanvas(n, n);
+      const g = c.getContext('2d', { willReadFrequently: true })!;
+      g.drawImage(bmp, 0, 0, n, n);
+      const d = g.getImageData(0, 0, n, n).data;
+      material = new Uint8Array(n * n);
+      for (let i = 0; i < material.length; i++) material[i] = d[i * 4];
+    } catch {
+      material = null;
+    }
+  }
+  // Baked pavement pattern (tools/make_pavement.ts); computed here only as a fallback.
+  let pave: Uint8Array | null = null;
+  if (material && meta.material?.pave) {
+    try {
+      const r = await fetch(dataUrl(`${base}${meta.material.pave}`));
+      const bmp = await createImageBitmap(await r.blob(), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
+      const c = new OffscreenCanvas(bmp.width, bmp.height);
+      const g = c.getContext('2d', { willReadFrequently: true })!;
+      g.drawImage(bmp, 0, 0);
+      const d = g.getImageData(0, 0, bmp.width, bmp.height).data;
+      pave = new Uint8Array(bmp.width * bmp.height);
+      for (let i = 0; i < pave.length; i++) pave[i] = d[i * 4];
+    } catch {
+      pave = null;
+    }
+  }
+  return new TerrainData(meta, heights, far, material, pave);
 }

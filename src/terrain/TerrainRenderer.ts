@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { QualitySettings } from '../config';
 import { makeLunar, NOISE_GLSL } from '../render/lunar';
 import { chunkIndex } from './chunkIndex';
+import { PAVE_N } from './Pavement';
 import type { TerrainData } from './TerrainData';
 import type { BuildResult } from './terrainWorker';
 
@@ -99,8 +100,22 @@ export class TerrainRenderer {
       uDetSlopes: { value: 0 },
     };
     const u = this.uniforms;
+    // Mars: material map and fractured-pavement relief (the same data as the physics).
+    let matTex: THREE.DataTexture | null = null, paveTex: THREE.DataTexture | null = null;
+    if (terrain.material && terrain.pave && meta.material) {
+      const n = meta.material.n;
+      matTex = new THREE.DataTexture(terrain.material, n, n, THREE.RedFormat);
+      matTex.magFilter = matTex.minFilter = THREE.LinearFilter;
+      matTex.needsUpdate = true;
+      paveTex = new THREE.DataTexture(terrain.pave, PAVE_N, PAVE_N, THREE.RedFormat);
+      paveTex.wrapS = paveTex.wrapT = THREE.RepeatWrapping;
+      paveTex.magFilter = THREE.LinearFilter;
+      paveTex.minFilter = THREE.LinearMipmapLinearFilter;
+      paveTex.generateMipmaps = true;
+      paveTex.needsUpdate = true;
+    }
     this.material = makeLunar(new THREE.MeshLambertMaterial({ color: 0xffffff }), 'terrain', (shader) => {
-      shader.defines = { ...(shader.defines ?? {}), CRATERLETS: this.craterletLevel(), MARS: this.mars ? 1 : 0 };
+      shader.defines = { ...(shader.defines ?? {}), CRATERLETS: this.craterletLevel(), MARS: this.mars ? 1 : 0, PAVE: paveTex ? 1 : 0 };
       Object.assign(shader.uniforms, {
         uOrtho: { value: ortho },
         uBaked: u.uBaked,
@@ -126,6 +141,8 @@ export class TerrainRenderer {
         uDetSlots: u.uDetSlots,
         uDetRes: u.uDetRes,
         uDetSlopes: u.uDetSlopes,
+        uMat: { value: matTex },
+        uPave: { value: paveTex },
       });
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nvarying vec3 vWorldP;\nvarying vec3 vNormalW;\nattribute vec2 aMorph;\nuniform vec4 uLodD;')
@@ -177,6 +194,12 @@ uniform vec4 uDetRect;
 uniform float uDetSlots[9];
 uniform float uDetRes;
 uniform float uDetSlopes;
+uniform sampler2D uMat;
+uniform sampler2D uPave;
+const float PAVE_SIZE = 64.0;
+const float PAVE_MIN = -0.03;
+const float PAVE_RANGE = 0.11;
+const vec2 PAVE_ROT = vec2(0.917060074385124, 0.398609327984423);
 // Set by the photo-tile block, used for the normal: 1 m DTM slopes and their weight.
 vec2 gDetSlope = vec2(0.0);
 float gDetW = 0.0;
@@ -467,10 +490,36 @@ alb = clamp(0.135 + (alb - 0.135) * 0.8, 0.015, 1.0);
 // albedo relative to its surroundings, so every dark patch also changes hue.
 float aLocal = textureLod(uOrtho, mapUv, 5.0).r * 0.9;
 float dustF = smoothstep(0.82, 1.18, alb / max(aLocal, 0.01));
+float paveShade = 1.0;
+#if PAVE > 0
+// Material from the map shared with the physics: rocky pavement crops out of the sand
+// as fractured plates a few centimetres proud, with sand in the cracks.
+float matW = texture2D(uMat, mapUv).r;
+dustF = mix(dustF * 0.35, 1.0, matW);
+{
+  vec2 pq = vec2(dot(vWorldP.xz, vec2(PAVE_ROT.x, -PAVE_ROT.y)), dot(vWorldP.xz, PAVE_ROT.yx)) / PAVE_SIZE;
+  float e = 0.75 / 1024.0;
+  float h0 = texture2D(uPave, pq).r;
+  float hu = texture2D(uPave, pq + vec2(e, 0.0)).r, hv = texture2D(uPave, pq + vec2(0.0, e)).r;
+  // Slopes in the pattern frame (m per m), rotated back to world x/z.
+  vec2 gq = vec2(hu - h0, hv - h0) * PAVE_RANGE / (e * PAVE_SIZE);
+  vec2 gw = vec2(gq.x * PAVE_ROT.x + gq.y * PAVE_ROT.y, -gq.x * PAVE_ROT.y + gq.y * PAVE_ROT.x);
+  float wP = clamp(1.6 - fp * 6.0, 0.0, 1.0) * matW;
+  grad += gw * wP;
+  // Plates lighter, dusty grey-tan; cracks and sand pockets darker.
+  float hm = PAVE_MIN + h0 * PAVE_RANGE;
+  paveShade = mix(1.0, mix(0.78, 1.12, smoothstep(0.0, 0.04, hm)), matW * clamp(1.4 - fp * 3.0, 0.0, 1.0));
+}
+#endif
 vec3 darkSoil = vec3(0.66, 0.6, 0.57), brightDust = vec3(1.3, 0.84, 0.54);
 // Brightness difference kept smaller than in the orbital photo; the hue carries it.
 float albM = mix(aLocal, alb, 0.75);
-diffuseColor.rgb = albM * mix(darkSoil, brightDust, dustF) * 1.9;
+diffuseColor.rgb = albM * mix(darkSoil, brightDust, dustF) * 1.9 * paveShade;
+#if PAVE > 0
+// Exposed rock: dust-coated grey-brown basalt, less saturated than the sand around it.
+float rockW = matW * smoothstep(1.0, 1.08, paveShade) * clamp(1.4 - fp * 3.0, 0.0, 1.0);
+diffuseColor.rgb = mix(diffuseColor.rgb, vec3(dot(diffuseColor.rgb, vec3(0.33))) * vec3(1.12, 0.98, 0.86), rockW * 0.55);
+#endif
 // Wind ripples (~12 cm wavelength) across the sand, faded with distance; they lie on the dark sand.
 // Sand covers the dark (low-albedo) areas; dust and pavement the bright ones.
 float sandy = 1.0 - dustF;
@@ -605,7 +654,7 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`,
     const nWorkers = Math.max(1, Math.min(3, (navigator.hardwareConcurrency || 2) - 1));
     for (let i = 0; i < nWorkers; i++) {
       const w = new Worker(new URL('./terrainWorker.ts', import.meta.url), { type: 'module' });
-      w.postMessage({ type: 'init', meta, heights: terrain.heights, far: terrain.far });
+      w.postMessage({ type: 'init', meta, heights: terrain.heights, far: terrain.far, material: terrain.material, pave: terrain.pave });
       w.onmessage = (e: MessageEvent<BuildResult>) => this.onBuilt(i, e.data);
       this.workers.push(w);
       this.busy.push(0);
