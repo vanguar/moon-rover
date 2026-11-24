@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { HASH2I_GLSL } from '../render/hash';
 import type { Rover } from '../rover/Rover';
 import type { RoverSpec } from '../rover/specs';
 import { hash2, type TerrainData } from '../terrain/TerrainData';
@@ -144,7 +145,8 @@ export class Tracks {
         varying vec3 vSide;
         varying float vDepth;
         varying vec3 vW;
-        float hsh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        ${HASH2I_GLSL}
+        float hsh(vec2 p) { return hash2i(p); }
         float vn(float x) { float i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f); return mix(hsh(vec2(i, 3.0)), hsh(vec2(i + 1.0, 3.0)), f); }
         // Cross profile (in units of the local sinkage) at across-coordinate u (|u| = 1 at the wheel edge).
         float profile(float u, float v) {

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { HASH2I_GLSL } from '../render/hash';
 import type { TerrainData } from '../terrain/TerrainData';
 
 /**
@@ -103,7 +104,8 @@ export class DevilDust {
           vec2 dc = w.xz - cameraPosition.xz; w.y -= dot(dc, dc) * uCurvK;
           gl_Position = projectionMatrix * viewMatrix * w; }`,
       fragmentShader: `varying float vA; varying vec2 vUv;
-        float h(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        ${HASH2I_GLSL}
+        float h(vec2 p) { return hash2i(p); }
         float n(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
           return mix(mix(h(i), h(i + vec2(1, 0)), f.x), mix(h(i + vec2(0, 1)), h(i + vec2(1, 1)), f.x), f.y); }
         void main() {
