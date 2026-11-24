@@ -134,7 +134,8 @@ const showProgress = () => {
  * (flipY = true, the Texture default) is done while decoding; consumers that set
  * flipY = false get the image as stored. The data images carry no colour profile.
  */
-async function loadTexture(url: string, key: 'ortho' | 'other', flipY: boolean): Promise<THREE.Texture> {
+/** key: progress bar share ('late': loaded after the title screen, not on the bar). */
+async function loadTexture(url: string, key: 'ortho' | 'other' | 'late', flipY: boolean): Promise<THREE.Texture> {
   const blob = await fetchBlob(url, key === 'ortho' ? (f) => {
     progress.ortho = f;
     showProgress();
@@ -152,7 +153,7 @@ async function loadTexture(url: string, key: 'ortho' | 'other', flipY: boolean):
   }
   tex.needsUpdate = true;
   if (key === 'ortho') progress.ortho = 1;
-  else progress.other = Math.min(1, progress.other + 0.5);
+  else if (key === 'other') progress.other = Math.min(1, progress.other + 0.5);
   showProgress();
   return tex;
 }
@@ -171,19 +172,17 @@ async function boot(): Promise<void> {
   const moon = W.id === 'moon';
   const bin = (name: string) =>
     fetch(dataUrl(`${D}${name}`)).then((r) => (r.ok ? r.arrayBuffer() : null)).then((b) => (b ? new Float32Array(b) : undefined)).catch(() => undefined);
-  const [terrain, ortho, baked, orthoHi, stars, constellations, farShadow, farAlbedo, milkyWay, rockPhoto] = await Promise.all([
+  const [terrain, ortho, baked, stars, constellations, farShadow, farAlbedo, rockPhoto] = await Promise.all([
     loadTerrainData(D, (f) => {
       progress.height = f;
       showProgress();
     }),
     loadTexture(dataUrl(`${D}ortho.jpg`), 'ortho', false),
     loadTexture(dataUrl(`${D}shadow.png`), 'other', false),
-    loadTexture(dataUrl(`${D}ortho_hi.jpg`), 'other', false).catch(() => undefined),
     moon ? bin('stars.bin') : Promise.resolve(undefined),
     moon ? bin('constellations.bin') : Promise.resolve(undefined),
     loadTexture(dataUrl(`${D}far_shadow.png`), 'other', false).catch(() => undefined),
     moon ? Promise.resolve(undefined) : loadTexture(dataUrl(`${D}far_albedo.jpg`), 'other', false).catch(() => undefined),
-    moon ? loadTexture(dataUrl(`${D}milkyway.jpg`), 'other', true).catch(() => undefined) : Promise.resolve(undefined),
     loadTexture(dataUrl(`${D}rocks.jpg`), 'other', true).catch(() => undefined),
   ]);
   if (rockPhoto) {
@@ -191,6 +190,11 @@ async function boot(): Promise<void> {
     rockPhoto.anisotropy = 4;
   }
   mark('data');
+  // Not needed for the first frame (7 MB on the Moon): the 0.6 m/px centre orthophoto
+  // and the photographic Milky Way start only now, so they do not share the bandwidth
+  // with the essential data, and are attached when they arrive (title screen or later).
+  const orthoHi = loadTexture(dataUrl(`${D}ortho_hi.jpg`), 'late', false).catch(() => undefined);
+  const milkyWay = moon ? loadTexture(dataUrl(`${D}milkyway.jpg`), 'late', true).catch(() => undefined) : undefined;
   await models;
   loadText.textContent = t('loadPhysics');
   const { Physics } = await physicsModule;
@@ -200,7 +204,9 @@ async function boot(): Promise<void> {
   const level: QualityLevel = settings.quality === 'auto' ? autoQuality() : settings.quality;
   const list = roversFor(W.id);
   const spec = list.find((r) => r.id === settings.rover[W.id]) ?? list[0];
-  const game = new Game($('#app'), terrain, physics, ortho, baked, makeQuality(level), settings.quality === 'auto', { stars, orthoHi, constellations, farShadow, farAlbedo, milkyWay, rockPhoto }, spec, settings.weather);
+  const game = new Game($('#app'), terrain, physics, ortho, baked, makeQuality(level), settings.quality === 'auto', { stars, constellations, farShadow, farAlbedo, rockPhoto }, spec, settings.weather);
+  void orthoHi.then((tex) => tex && game.setOrthoHi(tex));
+  void milkyWay?.then((tex) => tex && game.setMilkyWay(tex));
   (window as unknown as { game: Game; ROVERS_: unknown }).game = game;
   (window as unknown as { ROVERS_: unknown }).ROVERS_ = ROVERS;
   mark('game');

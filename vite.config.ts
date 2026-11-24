@@ -46,7 +46,7 @@ var q=new URLSearchParams(location.search).get('world'),w=q;
 if(!w){try{w=(JSON.parse(localStorage.getItem('moon-rover-settings')||'{}').world)}catch(e){}}
 var d=w==='mars'?'data/mars/':'data/',v='?v=${DATA_VERSION}';
 function l(f,hi){var e=document.createElement('link');e.rel='preload';e.as='fetch';e.href=d+f+v;e.crossOrigin='anonymous';if(hi)e.setAttribute('fetchpriority','high');document.head.appendChild(e)}
-l('terrain.json',1);l('heightmap.bin',1);l('ortho.jpg');l('ortho_hi.jpg');l('shadow.png');
+l('terrain.json',1);l('heightmap.bin',1);l('ortho.jpg');l('shadow.png');
 }catch(e){}})();</script>`;
       return html.replace('<head>', `<head>
     ${script}`);

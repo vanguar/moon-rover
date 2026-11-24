@@ -35,13 +35,12 @@ import { DetailTiles } from './terrain/DetailTiles';
 import { t } from './i18n';
 import { world } from './world';
 
+/** Optional data for the scene; the centre orthophoto and the Milky Way map come later (setOrthoHi, setMilkyWay). */
 export interface GameExtras {
   stars?: Float32Array;
-  orthoHi?: THREE.Texture;
   constellations?: Float32Array;
   farShadow?: THREE.Texture;
   farAlbedo?: THREE.Texture;
-  milkyWay?: THREE.Texture;
   /** Atlas of real photographs of rock surfaces (rover / Apollo frames; prepare_rocktex.py). */
   rockPhoto?: THREE.Texture;
 }
@@ -175,7 +174,6 @@ export class Game {
       this.sky = new Sky(terrain.meta.sun.azimuth, terrain.meta.sun.elevation, quality.stars, terrain.meta.earth, extras.stars, {
         constellations: extras.constellations,
         galaxy: terrain.meta.galaxy,
-        milkyWay: extras.milkyWay,
         icrfToGame0,
       });
       this.scene.add(this.sky.group);
@@ -201,7 +199,7 @@ export class Game {
     }
 
     this.shadowMask = this.readMask(baked);
-    this.terrainR = new TerrainRenderer(terrain, ortho, baked, quality, extras.orthoHi, extras.farShadow, extras.farAlbedo);
+    this.terrainR = new TerrainRenderer(terrain, ortho, baked, quality, extras.farShadow, extras.farAlbedo);
     this.scene.add(this.terrainR.group);
     if (terrain.meta.detail && quality.level !== 'low') {
       this.detail = new DetailTiles(this.renderer, terrain, `${import.meta.env.BASE_URL}${W.dataDir}`);
@@ -1488,6 +1486,16 @@ export class Game {
       this.sky.impactFlash(this.scene, new THREE.Vector3(x, t.height(x, z) + 0.3, z), d);
       return;
     }
+  }
+
+  /** High-resolution centre orthophoto, loaded after the title screen is up. */
+  setOrthoHi(tex: THREE.Texture): void {
+    this.terrainR.setOrthoHi(tex);
+  }
+
+  /** Photographic Milky Way (Moon), loaded after the title screen is up; until then a procedural one. */
+  setMilkyWay(tex: THREE.Texture): void {
+    this.sky?.setMilkyWayMap(tex);
   }
 
   /** Restart at the landing site. */

@@ -113,6 +113,7 @@ export class Sky {
   private earth!: THREE.Mesh;
 
   private milkyWay: THREE.Mesh | null = null;
+  private icrfToGame0?: THREE.Matrix4;
   private constLines: THREE.LineSegments | null = null;
   private flashes: { sprite: THREE.Sprite; t: number; peak: number }[] = [];
   private flashTex: THREE.Texture;
@@ -189,6 +190,7 @@ export class Sky {
     this.group.add(earth);
     this.earth = earth;
 
+    this.icrfToGame0 = extras.icrfToGame0;
     if (extras.milkyWay && extras.icrfToGame0) {
       // The real sky: NASA SVS Deep Star Maps 2020 (Gaia DR2), Milky Way without the
       // bright stars (those are drawn from the catalogue), plate carrée in RA/Dec.
@@ -248,6 +250,20 @@ export class Sky {
    * visible only where the ground is dark (in shadow).
    */
   /** Impact flash at pos, seen from dist m; size scales the glow (a meteoroid strike in view is bigger). */
+  /** Swap the procedural Milky Way for the photographic map once it has loaded (after start). */
+  setMilkyWayMap(tex: THREE.Texture): void {
+    if (!this.icrfToGame0) return;
+    const adapt = this.milkyWay ? (this.milkyWay.material as THREE.ShaderMaterial).uniforms.uAdapt.value : 1;
+    if (this.milkyWay) {
+      this.celestial.remove(this.milkyWay);
+      this.milkyWay.geometry.dispose();
+      (this.milkyWay.material as THREE.Material).dispose();
+    }
+    this.milkyWay = buildMilkyWayMap(tex, this.icrfToGame0);
+    (this.milkyWay.material as THREE.ShaderMaterial).uniforms.uAdapt.value = adapt;
+    this.celestial.add(this.milkyWay);
+  }
+
   impactFlash(scene: THREE.Scene, pos: THREE.Vector3, dist: number, size = 1): void {
     const mat = new THREE.SpriteMaterial({ map: this.flashTex, color: 0xfff1dc, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
     const sprite = new THREE.Sprite(mat);

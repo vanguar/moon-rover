@@ -33,6 +33,9 @@ export class TerrainRenderer {
     uSunShadow: { value: THREE.Vector3 };
     uBaked: { value: THREE.Texture };
     uFarShadow: { value: THREE.Texture };
+    /** 0.6 m/px centre orthophoto and its rect (x0, z0, size, on); see setOrthoHi. */
+    uOrthoHi: { value: THREE.Texture };
+    uHi: { value: THREE.Vector4 };
     uOne: { value: number };
     /** Mars: share of diffuse light (1 − direct transmission); fades photographed shading. */
     uDiffuse: { value: number };
@@ -53,35 +56,26 @@ export class TerrainRenderer {
   private nextId = 1;
   private q: QualitySettings;
   private mars: boolean;
+  private orthoHiRect?: { x: number; z: number; size: number };
 
   constructor(
     terrain: TerrainData,
     ortho: THREE.Texture,
     baked: THREE.Texture,
     quality: QualitySettings,
-    orthoHi?: THREE.Texture,
     farShadow?: THREE.Texture,
     farAlbedo?: THREE.Texture,
   ) {
     this.q = quality;
     const meta = terrain.meta;
     this.mars = meta.body === 'mars';
+    this.orthoHiRect = meta.orthoHi;
     for (const t of [ortho, baked]) {
       t.wrapS = t.wrapT = THREE.MirroredRepeatWrapping;
       t.flipY = false;
       t.needsUpdate = true;
     }
     ortho.colorSpace = THREE.SRGBColorSpace;
-    const hiRect = new THREE.Vector4(0, 0, 1, 0);
-    if (orthoHi && meta.orthoHi) {
-      orthoHi.flipY = false;
-      orthoHi.colorSpace = THREE.SRGBColorSpace;
-      orthoHi.anisotropy = 8;
-      orthoHi.wrapS = orthoHi.wrapT = THREE.ClampToEdgeWrapping;
-      orthoHi.needsUpdate = true;
-      const h = meta.orthoHi;
-      hiRect.set(h.x - h.size / 2, h.z - h.size / 2, h.size, 1);
-    }
     const dtmNormals = this.buildNormalTexture(terrain);
     ortho.anisotropy = 8;
     ortho.generateMipmaps = true;
@@ -95,6 +89,9 @@ export class TerrainRenderer {
       uSunShadow: { value: new THREE.Vector3(1, 0, 0) },
       uBaked: { value: baked },
       uFarShadow: { value: farShadow ?? baked },
+      // Off (w = 0) until the centre orthophoto arrives (setOrthoHi).
+      uOrthoHi: { value: ortho },
+      uHi: { value: new THREE.Vector4(0, 0, 1, 0) },
       uOne: { value: 1 },
       uDiffuse: { value: 0 },
       uStorm: { value: new THREE.Vector3() },
@@ -127,8 +124,8 @@ export class TerrainRenderer {
         uOrtho: { value: ortho },
         uBaked: u.uBaked,
         uMapSize: { value: new THREE.Vector2(meta.sizeX, meta.sizeZ) },
-        uOrthoHi: { value: orthoHi ?? ortho },
-        uHi: { value: hiRect },
+        uOrthoHi: u.uOrthoHi,
+        uHi: u.uHi,
         uDtmN: { value: dtmNormals },
         uNearN: { value: quality.lodDistances[1] },
         uFarShadow: u.uFarShadow,
@@ -775,6 +772,19 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`,
     tex.generateMipmaps = true;
     tex.needsUpdate = true;
     return tex;
+  }
+
+  /** The high-resolution centre orthophoto (loaded after the title screen is up). */
+  setOrthoHi(tex: THREE.Texture): void {
+    const h = this.orthoHiRect;
+    if (!h) return;
+    tex.flipY = false;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 8;
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.needsUpdate = true;
+    this.uniforms.uOrthoHi.value = tex;
+    this.uniforms.uHi.value.set(h.x - h.size / 2, h.z - h.size / 2, h.size, 1);
   }
 
   /** Terrain cast-shadow masks recomputed for the current Sun (ShadowBaker). */
