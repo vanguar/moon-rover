@@ -495,10 +495,12 @@ export class Rover {
         wv.uniforms.uCenter.value.set(wp.x, wp.y, wp.z);
         wv.uniforms.uDown.value.copy(down);
         wv.uniforms.uDefl.value = contact ? THREE.MathUtils.clamp(loadN / this.tyreK, 0.008, 0.08) : 0;
+        // Motion blur of the chevrons only when they really smear (> ~1/3 pitch per frame
+        // at 60 Hz, i.e. above ~12 km/h), eased over time so it never flickers; the
+        // chevrons themselves stay solid.
         const travel = Math.abs(this.wheelRimSpeed[i]) / 60 / ((2 * Math.PI * this.wheelRadius) / 18);
-        const blur = THREE.MathUtils.smoothstep(travel, 0.15, 0.45);
-        wv.blurMat.opacity = blur * 0.75;
-        wv.chevronMat.opacity = 1 - blur * 0.8;
+        const target = THREE.MathUtils.smoothstep(travel, 0.3, 0.6) * 0.6;
+        wv.blurMat.opacity += (target - wv.blurMat.opacity) * Math.min(1, dt * 3);
       }
     }
     this.model.setSteering(this.steerAngle);

@@ -249,10 +249,11 @@ export function buildLrvModel(): RoverModel {
     steer.add(spin);
     const uniforms = { uCenter: { value: new THREE.Vector3() }, uDown: { value: new THREE.Vector3(0, -1, 0) }, uDefl: { value: 0.02 } };
     const tireMat = deformable(
-      new THREE.MeshStandardMaterial({ color: 0xb3b0a8, metalness: 0.8, roughness: 0.5, alphaMap: weave, alphaTest: 0.45, side: THREE.DoubleSide }),
+      new THREE.MeshStandardMaterial({ color: 0xb3b0a8, metalness: 0.8, roughness: 0.5, alphaMap: weave, alphaTest: 0.45, alphaToCoverage: true, side: THREE.DoubleSide }),
       uniforms,
     );
-    const chevronMat = deformable(new THREE.MeshStandardMaterial({ color: 0x9c9da1, metalness: 0.8, roughness: 0.35, transparent: true }), uniforms);
+    // Opaque: transparent chevrons over the alpha-tested wire mesh flickered (sorting).
+    const chevronMat = deformable(new THREE.MeshStandardMaterial({ color: 0x9c9da1, metalness: 0.8, roughness: 0.35 }), uniforms);
     const flangeMat = deformable(new THREE.MeshStandardMaterial({ color: 0xb8b9bc, metalness: 0.85, roughness: 0.3 }), uniforms);
     add(tireGeo, tireMat, 0, 0, 0, spin);
     add(bumpGeo, anod, 0, 0, 0, spin);
