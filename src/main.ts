@@ -355,6 +355,24 @@ function setupMenu(game: Game): void {
     if (menu.classList.contains('hidden')) game.setPaused(false);
   };
   $('#b-ok').addEventListener('click', closeBrief);
+  const fail = $('#fail');
+  game.onFail = () => {
+    $('#fail-text').textContent = t(document.body.classList.contains('world-mars') ? 'failTextMars' : 'failTextMoon');
+    fail.classList.remove('hidden');
+    game.setPaused(true);
+  };
+  $('#fail-retry').addEventListener('click', () => {
+    fail.classList.add('hidden');
+    game.recoverFromFall();
+    game.setPaused(false);
+  });
+  $('#fail-restart').addEventListener('click', () => {
+    fail.classList.add('hidden');
+    game.mission.reset();
+    game.restart();
+    game.recoverFromFall();
+    game.setPaused(false);
+  });
   game.onBriefing = () => (brief.classList.contains('hidden') ? openBrief() : closeBrief());
   $('#mission').addEventListener('pointerdown', (e) => {
     e.stopPropagation();

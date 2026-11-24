@@ -610,7 +610,8 @@ float rockH(vec3 p, vec3 w) {
   private makeCollider(r: Rock): RAPIER.Collider {
     const R = this.physics.R;
     // Rounded box fitted to the rock's scaled extents; rocks are fixed (embedded in regolith).
-    const k = r.outcrop ? 0.42 : 0.68;
+    // Fitted to the visible shape (was 0.68: wheels sank into rocks without touching them).
+    const k = r.outcrop ? 0.48 : 0.82;
     const hx = r.sx * k, hy = r.sy * k, hz = r.sz * k;
     const br = Math.min(hx, hy, hz) * 0.45;
     const d = R.ColliderDesc.roundCuboid(hx - br, hy - br, hz - br, br)

@@ -34,6 +34,8 @@ export class Hud {
   private slopeN = [0, 1, 0];
   warningLevel = 0; // 0 none, 1 caution, 2 danger
   atBase = false;
+  /** A real cliff (> 33°, a drop of metres) lies ahead within 20 m. */
+  cliff = false;
   /** Current mission target and the mission sites (found ones are ticked). */
   target: { x: number; z: number } | null = null;
   sites: { x: number; z: number; found: boolean }[] = [];
@@ -107,6 +109,12 @@ export class Hud {
     if (rover.heater) { warns.push(`${t('wCold')} ${rover.elecTemp.toFixed(0)}°C`); level = Math.max(level, 1); }
     if (rover.elecTemp > 85) { warns.push(`${t('wHot')} ${rover.elecTemp.toFixed(0)}°C`); level = Math.max(level, 1); }
     if (this.atBase) warns.push(t('wBase'));
+    if (this.cliff) { warns.unshift(t('wCliff')); level = 2; }
+    const dead = rover.wheelDamage.filter((d) => d >= 1).length;
+    const hurt = rover.wheelDamage.filter((d) => d > 0.3 && d < 1).length;
+    if (dead) { warns.push(`${t('wWheelDead')} ×${dead}`); level = 2; }
+    else if (hurt) { warns.push(`${t('wWheelHurt')} ×${hurt}`); level = Math.max(level, 1); }
+    if (rover.bodyDamage > 0.3) { warns.push(`${t('wBody')} ${Math.round(rover.bodyDamage * 100)}%`); level = Math.max(level, 1); }
     if (rover.battery <= 0) { warns.push(t('wBattEmpty')); level = 2; }
     else if (rover.battery < 0.15) { warns.push(t('wBattLow')); level = Math.max(level, 1); }
     if (!ter.inside(p.x, p.z)) { warns.push(t('wOutside')); level = Math.max(level, 1); }

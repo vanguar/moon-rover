@@ -2,6 +2,19 @@
 type Dict = Record<string, string>;
 
 const ru: Dict = {
+  wWheelHurt: 'КОЛЕСО ПОВРЕЖДЕНО',
+  wWheelDead: 'КОЛЕСО ВЫШЛО ИЗ СТРОЯ',
+  wBody: 'ПОВРЕЖДЕНИЕ РАМЫ',
+  radio_wheelHurt: 'Видим скачок тока на колесе после удара. Аккуратнее с камнями, объезжайте крупные.',
+  radio_wheelDead: 'Одно колесо больше не тянет. Дальше на трёх — без резких манёвров.',
+  wCliff: 'ОБРЫВ ВПЕРЕДИ — СТОП!',
+  failTitle: 'Миссия провалена',
+  failRetry: 'Вернуться на край обрыва',
+  failRestart: 'Начать миссию заново',
+  failTextMoon: 'Ровер сорвался со стены борозды Хэдли: склон круче 35°, перепад в десятки метров. Колёса и подвеска разбиты, вернуться к модулю невозможно. Реальные экипажи «Аполлона-15» держались в нескольких метрах от края.',
+  failTextMars: 'Perseverance сорвался с обрыва: склон круче 35°. Ровер весом в тонну лежит на боку у подножия, до ближайшего механика 200 миллионов километров. Миссия стоимостью 2,7 млрд долларов окончена. Настоящая команда прокладывает маршрут так, чтобы уклон не превышал 30°.',
+  radio_cliff: 'Внимание: по нашим картам впереди обрыв. Остановитесь и объезжайте.',
+  radio_fell: 'Мы потеряли телеметрию ровера... Хьюстон, у нас проблема.',
   m_rille: 'Край борозды Хэдли (район станции 9a): подъедьте к обрыву и сфотографируйте каньон',
   site_rille: 'Борозда Хэдли',
   site_rille_fact: 'Извилистый каньон длиной 135 км, шириной ~1,5 км и глубиной ~300 м — русло древнего лавового потока. На станции 9a Скотт и Ирвин сфотографировали слоистые базальты в его стене: первые коренные породы, увиденные человеком на Луне.',
@@ -109,6 +122,19 @@ const ru: Dict = {
 };
 
 const uk: Dict = {
+  wWheelHurt: 'КОЛЕСО ПОШКОДЖЕНО',
+  wWheelDead: 'КОЛЕСО ВИЙШЛО З ЛАДУ',
+  wBody: 'ПОШКОДЖЕННЯ РАМИ',
+  radio_wheelHurt: 'Бачимо стрибок струму на колесі після удару. Обережніше з каменями.',
+  radio_wheelDead: 'Одне колесо більше не тягне. Далі без різких маневрів.',
+  wCliff: 'УРВИЩЕ ПОПЕРЕДУ — СТОП!',
+  failTitle: 'Місію провалено',
+  failRetry: 'Повернутися на край урвища',
+  failRestart: 'Почати місію знову',
+  failTextMoon: 'Ровер зірвався зі стіни борозни Хедлі: схил крутіший за 35°, перепад у десятки метрів. Колеса й підвіска розбиті, повернутися до модуля неможливо.',
+  failTextMars: 'Perseverance зірвався з урвища: схил крутіший за 35°. Ровер вагою в тонну лежить на боці, до найближчого механіка 200 мільйонів кілометрів. Місію вартістю 2,7 млрд доларів завершено.',
+  radio_cliff: 'Увага: за нашими мапами попереду урвище. Зупиніться й об’їжджайте.',
+  radio_fell: 'Ми втратили телеметрію ровера... Х’юстоне, у нас проблема.',
   m_rille: 'Край борозни Хедлі (район станції 9a): під’їдьте до урвища й сфотографуйте каньйон',
   site_rille: 'Борозна Хедлі',
   site_rille_fact: 'Звивистий каньйон завдовжки 135 км, завширшки ~1,5 км і глибиною ~300 м — русло давнього лавового потоку. На станції 9a Скотт та Ірвін сфотографували шаруваті базальти в його стіні.',
@@ -212,6 +238,19 @@ const uk: Dict = {
 };
 
 const en: Dict = {
+  wWheelHurt: 'WHEEL DAMAGED',
+  wWheelDead: 'WHEEL FAILED',
+  wBody: 'FRAME DAMAGE',
+  radio_wheelHurt: 'We see a current spike on a wheel after that hit. Easy with the rocks, go around the big ones.',
+  radio_wheelDead: 'One wheel is no longer pulling. Carry on gently on the others.',
+  wCliff: 'CLIFF AHEAD — STOP!',
+  failTitle: 'Mission failed',
+  failRetry: 'Back to the rim',
+  failRestart: 'Restart the mission',
+  failTextMoon: 'The rover went over the wall of Hadley Rille: a slope steeper than 35°, a drop of tens of metres. Wheels and suspension are wrecked; there is no way back to the LM. The real Apollo 15 crew kept a few metres from the edge.',
+  failTextMars: 'Perseverance went over the cliff: a slope steeper than 35°. A one-tonne rover lies on its side at the foot, 200 million kilometres from the nearest mechanic. A 2.7-billion-dollar mission is over. The real team plans drives so that tilt never exceeds 30°.',
+  radio_cliff: 'Caution: our maps show a cliff ahead. Stop and go around.',
+  radio_fell: 'We have lost the rover telemetry... Houston, we have a problem.',
   m_rille: 'Rim of Hadley Rille (station 9a area): drive to the edge and photograph the canyon',
   site_rille: 'Hadley Rille',
   site_rille_fact: 'A winding canyon 135 km long, ~1.5 km wide and ~300 m deep - the channel of an ancient lava flow. At station 9a Scott and Irwin photographed layered basalts in its wall: the first bedrock seen by humans on the Moon.',

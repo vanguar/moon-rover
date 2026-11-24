@@ -117,6 +117,8 @@ export class Game {
   private orbit = { yaw: 0, pitch: 0.28, dist: 9 };
   private chasePos = new THREE.Vector3();
   private cabQ = new THREE.Quaternion(0, 0, 0, 0);
+  /** Camera shake from wheel and chassis blows (damped spring, felt in the seat). */
+  private shake = { a: 0, t: 0, ph: 0 };
   private clock = new THREE.Timer();
   private fpsAcc = { t: 0, n: 0, fps: 60 };
   private sunTexel = 1;
@@ -756,6 +758,7 @@ export class Game {
     this.updateEnergy(dt);
     this.radio.update(dt);
     this.updateMission();
+    this.updateCliff(dt);
     this.radioEvents();
 
     this.fpsAcc.t += dt;
@@ -872,6 +875,81 @@ export class Game {
     return out;
   }
 
+  /**
+   * Real cliffs: the inner walls of Hadley Rille (slopes > 35°, ~30 m drops) and the
+   * delta scarp / Kodiak on Mars. The terrain ahead is scanned for a steep drop and the
+   * driver is warned; a fall (the rover losing more height than any drivable slope
+   * allows) ends the mission - no one can recover a rover at the foot of a cliff.
+   */
+  private cliff = { t: 0, peakY: Number.NaN, warn: false, safe: new THREE.Vector3(), safeYaw: 0, safeT: 0, failed: false, last: new THREE.Vector3(Number.NaN, 0, 0) };
+  onFail?: () => void;
+  cliffAhead = false;
+
+  private updateCliff(dt: number): void {
+    const c = this.cliff, r = this.rover, p = r.object.position, t = this.terrain;
+    if (this.heli || c.failed) return;
+    // Remember the last safe spot (flat, not near a drop) to restart from.
+    c.safeT -= dt;
+    // A jump in position (restart, reset, teleport) starts the height tracking afresh.
+    if (!(c.last.distanceTo(p) < 5)) c.peakY = Number.NaN;
+    c.last.copy(p);
+    // Fall detection: allowed descent 2.2 m/s (any drivable slope at full speed).
+    c.peakY = Number.isNaN(c.peakY) ? p.y : Math.max(p.y, c.peakY - 2.2 * dt);
+    const { roll, pitch } = r.attitude();
+    const n = [0, 1, 0];
+    t.normal(p.x, p.z, n, 1.5);
+    const slopeHere = (Math.acos(Math.min(1, n[1])) * 180) / Math.PI;
+    if (c.peakY - p.y > 8 || (Math.max(Math.abs(roll), Math.abs(pitch)) > 75 && slopeHere > 28)) {
+      c.failed = true;
+      this.autoDrive = false;
+      this.audio.click(300);
+      if (this.sky) this.radio.say('fell', { repeat: true });
+      this.onFail?.();
+      return;
+    }
+    c.t -= dt;
+    if (c.t > 0) return;
+    c.t = 0.25;
+    // Look ahead along the direction of travel (or the heading when slow).
+    const f = r.forwardVector(new THREE.Vector3());
+    const dir = r.speed < -0.2 ? -1 : 1;
+    let ahead = false;
+    const h0 = t.height(p.x, p.z);
+    for (const d of [4, 8, 12, 16, 20]) {
+      const x = p.x + f.x * d * dir, z = p.z + f.z * d * dir;
+      t.normal(x, z, n, 1.5);
+      const sl = (Math.acos(Math.min(1, n[1])) * 180) / Math.PI;
+      const drop = h0 - t.height(x + f.x * 6 * dir, z + f.z * 6 * dir);
+      if (sl > 33 && drop > 3) {
+        ahead = true;
+        break;
+      }
+    }
+    if (!ahead && slopeHere < 12 && c.safeT <= 0) {
+      c.safe.copy(p);
+      c.safeYaw = -THREE.MathUtils.degToRad(r.attitude().heading) + Math.PI;
+      c.safeT = 2;
+    }
+    if (ahead && !c.warn) {
+      this.audio.click(2200);
+      if (this.sky) this.radio.say('cliff', { repeat: true });
+    }
+    c.warn = ahead;
+    this.cliffAhead = ahead;
+    this.hud.cliff = ahead;
+  }
+
+  /** After a fall: back to the last safe spot on the rim (the mission continues). */
+  recoverFromFall(): void {
+    const c = this.cliff;
+    const s = c.safe.lengthSq() > 0 ? c.safe : this.rover.object.position;
+    this.physics.updatePatch(s.x, s.z, true);
+    this.rover.placeAt(s.x, s.z, c.safeYaw);
+    c.peakY = Number.NaN;
+    c.failed = false;
+    this.chasePos.set(0, 0, 0);
+  }
+
   setMission(kind: 'moon' | 'mars' | 'heli'): void {
     this.mission = new Missions(this.terrain, kind);
     this.mission.onStep = (key, finished) => {
@@ -973,6 +1051,11 @@ export class Game {
     if (far && !st.far) this.radio.say('far');
     st.far = far;
     if (Math.abs(r.attitude().roll) > 30) this.radio.say('roll');
+    if (r.lastHit >= 0) {
+      if ((r.wheelDamage[r.lastHit] ?? 0) >= 1) this.radio.say('wheelDead', { repeat: true });
+      else if ((r.wheelDamage[r.lastHit] ?? 0) > 0.3) this.radio.say('wheelHurt');
+      r.lastHit = -1;
+    }
   }
 
   private litTimer = 0;
@@ -1217,6 +1300,15 @@ export class Game {
       if (dt <= 0 || this.cabQ.lengthSq() === 0) this.cabQ.copy(qT);
       else this.cabQ.slerp(qT, 1 - Math.exp(-dt / 0.08));
       const q = this.cabQ.clone();
+      // Jolts: each knock kicks a damped ~9 Hz shake (rocks hard and sharp, bumps soft).
+      for (const k of rover.knocks) this.shake.a = Math.min(0.06, this.shake.a + k.strength * (0.006 + 0.014 * k.hard));
+      this.shake.a *= Math.exp(-dt * 7);
+      this.shake.ph += dt * 57;
+      if (this.shake.a > 1e-4) {
+        const sa = this.shake.a;
+        q.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.sin(this.shake.ph) * sa, Math.sin(this.shake.ph * 0.73 + 1.3) * sa * 0.4, Math.sin(this.shake.ph * 1.31 + 0.4) * sa * 0.7)));
+        this.camera.position.y += Math.sin(this.shake.ph * 0.9) * sa * 0.35;
+      }
       const look = new THREE.Quaternion().setFromEuler(new THREE.Euler(this.look.pitch, Math.PI + this.look.yaw, 0, 'YXZ'));
       this.camera.quaternion.copy(q).multiply(look);
       this.camera.near = Math.min(0.08, 0.1 * this.sizeK);
@@ -1246,7 +1338,10 @@ export class Game {
       if (this.chasePos.y < gy) this.chasePos.y = gy;
       this.camera.position.copy(this.chasePos);
       this.camera.up.set(0, 1, 0);
-      this.camera.lookAt(p.x, p.y + 0.8 * this.sizeK, p.z);
+      for (const k of rover.knocks) this.shake.a = Math.min(0.06, this.shake.a + k.strength * (0.004 + 0.01 * k.hard));
+      this.shake.a *= Math.exp(-dt * 7);
+      this.shake.ph += dt * 57;
+      this.camera.lookAt(p.x, p.y + 0.8 * this.sizeK + Math.sin(this.shake.ph) * this.shake.a * 2, p.z);
       this.camera.near = 0.2 * this.sizeK;
     }
     this.camera.updateProjectionMatrix();
@@ -1351,6 +1446,7 @@ export class Game {
 
   /** Restart at the landing site. */
   restart(): void {
+    this.rover.repair();
     const [x, z] = this.startPoint();
     this.physics.updatePatch(x, z, true);
     this.rover.placeAt(x, z, START_YAW);

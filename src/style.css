@@ -417,3 +417,10 @@ body.mobile #hud { right: calc(138px + var(--safe-r)); }
 .author a:hover { text-decoration: underline; }
 
 body.heli #tb-drive { display: none; }
+
+/* ===== Mission failed (fell off a cliff) ===== */
+#fail { position: fixed; inset: 0; z-index: 31; display: grid; place-items: center; background: rgba(40, 0, 0, 0.55); padding: 16px; }
+#fail .bbox { width: min(560px, 100%); padding: 20px 22px; border-radius: 16px; background: rgba(20, 10, 10, 0.96); color: #f3e8e8; border: 1px solid rgba(255, 90, 90, 0.4); }
+#fail h2 { margin: 0 0 8px; color: #ff7a6b; }
+#fail p { line-height: 1.5; margin: 0 0 14px; }
+#fail .fbtns { display: flex; gap: 10px; flex-wrap: wrap; }

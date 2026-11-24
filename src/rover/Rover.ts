@@ -58,6 +58,16 @@ export class Rover {
   battTemp = 22;
   volts = 36;
   readonly knocks: Knock[] = [];
+  /**
+   * Damage from hitting rocks, 0..1 per wheel (bent rim / torn wire mesh / drive
+   * damage: less traction, more drag, at 1 the wheel is dead) and for the chassis
+   * (bent frame, suspension: lower top speed). Stays until the mission restarts.
+   */
+  wheelDamage: number[] = [];
+  bodyDamage = 0;
+  /** Index of the wheel that just took damage (for warnings), −1 none. */
+  lastHit = -1;
+  private hitAt: number[] = [];
   readonly n: number;
   readonly wheelRadius: number;
   readonly wheelContact: boolean[];
@@ -311,7 +321,7 @@ export class Rover {
     const fwd = this.forwardVector(this.tv);
     const speed = lv.x * fwd.x + lv.y * fwd.y + lv.z * fwd.z;
     this.speed = speed;
-    const vmax = this.maxSpeed;
+    const vmax = this.maxSpeed * (1 - 0.45 * this.bodyDamage);
 
     // Steering servos: rate-limited; front and rear axles steer opposite (double Ackermann).
     const steerLimit = spec.maxSteer * (1 - 0.55 * Math.min(1, Math.abs(speed) / vmax));
@@ -353,7 +363,9 @@ export class Rover {
       const rim = omega * this.wheelRadius;
       const dirRim = d >= 0 ? rim : -rim;
       const curve = Math.max(0, 1 - Math.max(0, dirRim) / vmax);
-      const tq = d * this.stallTorque * curve * powerAvail * derate;
+      const dmg = this.wheelDamage[i] ?? 0;
+      // A damaged wheel delivers less torque; a dead one (dmg 1) none, and it drags.
+      const tq = d * this.stallTorque * curve * powerAvail * derate * (1 - Math.min(1, dmg) * 0.85);
       const r = u.wheel.rotation();
       const axle = this.tv2.set(1, 0, 0).applyQuaternion(this.tq.set(r.x, r.y, r.z, r.w));
       u.wheel.resetTorques(true);
@@ -363,7 +375,9 @@ export class Rover {
       // Brakes act through the axle joint: viscous at speed, locking when parked.
       // Note: a factor of exactly 0 makes Rapier lock the joint; use a negligible value to free it.
       const damp = parked ? 4000 * (this.steerK / 3000) : brake * this.brakeDamp;
-      u.axle.configureMotorVelocity(0, Math.max(damp, 1e-6));
+      // A wrecked wheel (jammed drive, bent rim) drags.
+      const drag = Math.max(0, dmg - 0.6) * this.brakeDamp * 0.6;
+      u.axle.configureMotorVelocity(0, Math.max(damp + drag, 1e-6));
       mech += Math.abs(tq * omega);
       load += (Math.abs(d) * curve * powerAvail) / n;
     }
@@ -424,7 +438,21 @@ export class Rover {
       const scale = this.steerK / 3000;
       const excess = (e.force / scale - (wheel >= 0 ? 450 : 0)) / 1000;
       if (excess <= 0.05) continue;
-      this.knocks.push({ wheel, strength: Math.min(2.5, excess * (rock ? 1.2 : 0.6)), hard: rock ? 1 : wheel === -1 ? 0.8 : 0.3 });
+      const strength = Math.min(2.5, excess * (rock ? 1.2 : 0.6));
+      this.knocks.push({ wheel, strength, hard: rock ? 1 : wheel === -1 ? 0.8 : 0.3 });
+      // Damage: only real blows on rock (a wheel hitting a block at speed, the belly
+      // grounding on one); driving over regolith or bumps does nothing.
+      const now = performance.now();
+      const key = wheel + 1;
+      // One blow per contact, not one per physics step while pressed against the rock.
+      if (rock > 0.12 && strength > 0.9 && now - (this.hitAt[key] ?? 0) > 400) {
+        this.hitAt[key] = now;
+        const blow = (strength - 0.9) * (0.08 + rock * 0.12);
+        if (wheel >= 0) {
+          this.wheelDamage[wheel] = Math.min(1, (this.wheelDamage[wheel] ?? 0) + blow);
+          this.lastHit = wheel;
+        } else this.bodyDamage = Math.min(1, this.bodyDamage + blow * 0.7);
+      }
     }
   }
 
@@ -564,6 +592,13 @@ export class Rover {
     const { heading } = this.attitude();
     const yaw = -THREE.MathUtils.degToRad(heading) + Math.PI;
     this.teleport(t.x, this.terrain.height(t.x, t.z) + this.rideHeight(), t.z, new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw));
+  }
+
+  /** New mission: a fresh rover. */
+  repair(): void {
+    this.wheelDamage = [];
+    this.bodyDamage = 0;
+    this.lastHit = -1;
   }
 
   placeAt(x: number, z: number, yaw: number): void {
