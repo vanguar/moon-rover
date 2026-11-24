@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { isMobile } from '../config';
 import { t } from '../i18n';
 import type { TerrainData } from '../terrain/TerrainData';
 
@@ -84,6 +85,15 @@ export class Missions {
     return this.finished ? `${this.id}_done` : this.steps[this.index].key;
   }
 
+  /** Step text; phones get the touch-control wording where it differs. */
+  private text_(key: string): string {
+    if (isMobile) {
+      const tk = t(`${key}_touch`);
+      if (tk !== `${key}_touch`) return tk;
+    }
+    return t(key);
+  }
+
   reset(): void {
     this.index = 0;
     this.save();
@@ -121,7 +131,7 @@ export class Missions {
     if (!this.panel || !this.text) return;
     const head = this.panel.querySelector('.mh')!;
     head.textContent = `${t(`${this.id}_title`)} · ${Math.min(this.index + 1, this.steps.length)}/${this.steps.length}`;
-    this.text.textContent = t(this.stepKey);
+    this.text.textContent = this.text_(this.stepKey);
   }
 
   /** Full briefing text for the overlay (mission goal + all steps with ticks). */
@@ -129,7 +139,7 @@ export class Missions {
     return {
       title: t(`${this.id}_title`),
       intro: t(`${this.id}_intro`),
-      steps: this.steps.map((s, i) => ({ text: t(s.key), done: i < this.index, current: i === this.index })),
+      steps: this.steps.map((s, i) => ({ text: this.text_(s.key), done: i < this.index, current: i === this.index })),
     };
   }
 

@@ -334,7 +334,12 @@ body.heli .tb.heli-only { display: grid; }
 #mission .md { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-family: ui-monospace, Menlo, Consolas, monospace; color: #9fd3ff; }
 #mission .marrow { width: 22px; height: 22px; display: inline-block; transition: transform 0.15s linear;
   background: no-repeat center/contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2l7 18-7-4-7 4z' fill='%239fd3ff'/%3E%3C/svg%3E"); }
-body.mobile #mission { top: 8px; left: 8px; font-size: 12px; max-width: 46vw; padding: 6px 10px; }
+/* Phones: below the top instrument strip, compact, clear of the joystick. */
+body.mobile #mission { top: calc(env(safe-area-inset-top, 0px) + 64px); left: calc(env(safe-area-inset-left, 0px) + 8px); font-size: 11px; max-width: 38vw; padding: 5px 9px; }
+body.mobile #mission .mh { font-size: 9px; }
+body.mobile #brief .bbox { padding: 14px 16px; }
+body.mobile #brief h2 { font-size: 18px; }
+body.mobile #brief p, body.mobile #brief ol { font-size: 13px; }
 /* ===== Briefing ===== */
 #brief { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; background: rgba(0, 0, 0, 0.55); padding: 16px; }
 #brief .bbox { width: min(640px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: 20px 22px; border-radius: 16px;
@@ -396,3 +401,11 @@ body.heli #mission { top: auto; bottom: 150px; }
 #navarrow.off { opacity: 0; }
 body.mobile #navarrow { bottom: 120px; transform: scale(0.8); }
 body.cab #navarrow { bottom: 42%; }
+
+/* Phones: the toolbar is a compact three-column block in the top-right corner, so it
+   never covers the instrument strip however many buttons the vehicle has. */
+body.mobile #toolbar { display: grid; grid-template-columns: repeat(3, 38px); grid-auto-rows: 38px; gap: 4px; }
+body.mobile #toolbar .tb { width: 38px; height: 38px; border-radius: 10px; }
+body.mobile #toolbar .tb svg { width: 20px; height: 20px; }
+body.mobile #toolbar .tb.menu { margin-inline-start: 0; }
+body.mobile #hud { right: calc(138px + var(--safe-r)); }

@@ -2,6 +2,12 @@
 type Dict = Record<string, string>;
 
 const ru: Dict = {
+  m_drive_touch: 'Проверка систем: проедьте 25 м (педаль «ГАЗ», джойстик — руль)',
+  r_drive_touch: 'Проверка ходовой: проедьте 30 м (педаль «ГАЗ», джойстик — руль)',
+  h_hover_touch: 'Взлёт: коснитесь джойстика или педали и дождитесь висения на 3 м',
+  h_out_touch: 'Отлетите от площадки дальше 30 м (педаль «ГАЗ» — вперёд, джойстик — поворот)',
+  h_land_touch: 'Вернитесь и сядьте на площадку (джойстик вниз — снижение)',
+  h_auto_touch: 'Запустите автоматический облёт (кнопка с вертолётом) и дождитесь посадки',
   tabJournal: 'Журнал',
   jNote: 'Подъезжайте к местам миссии «Аполлон-15» и фотографируйте их (F): откроется архивный снимок NASA с этого места.',
   jFound: 'Найдено',
@@ -76,6 +82,12 @@ const ru: Dict = {
 };
 
 const uk: Dict = {
+  m_drive_touch: 'Перевірка систем: проїдьте 25 м (педаль «ГАЗ», джойстик — кермо)',
+  r_drive_touch: 'Перевірка ходової: проїдьте 30 м (педаль «ГАЗ», джойстик — кермо)',
+  h_hover_touch: 'Зліт: торкніться джойстика або педалі й дочекайтеся висіння на 3 м',
+  h_out_touch: 'Відлетіть від майданчика далі 30 м (педаль «ГАЗ» — вперед, джойстик — поворот)',
+  h_land_touch: 'Поверніться й сядьте на майданчик (джойстик вниз — зниження)',
+  h_auto_touch: 'Запустіть автоматичний обліт (кнопка з гелікоптером) і дочекайтеся посадки',
   jNote: 'Під’їжджайте до місць місії «Аполлон-15» і фотографуйте їх (F): відкриється архівний знімок NASA з цього місця.',
   jFound: 'Знайдено',
   jHint: 'ще не знайдено — виконуйте завдання місії й фотографуйте (F)',
@@ -147,6 +159,12 @@ const uk: Dict = {
 };
 
 const en: Dict = {
+  m_drive_touch: 'Systems check: drive 25 m (GAS pedal, joystick — steering)',
+  r_drive_touch: 'Drive system check: drive 30 m (GAS pedal, joystick — steering)',
+  h_hover_touch: 'Take off: touch the joystick or a pedal and wait for the 3 m hover',
+  h_out_touch: 'Fly more than 30 m away from the pad (GAS — forward, joystick — turn)',
+  h_land_touch: 'Come back and land on the pad (joystick down — descend)',
+  h_auto_touch: 'Start the automatic loop (helicopter button) and wait for the landing',
   tabJournal: 'Journal',
   jNote: 'Drive to the Apollo 15 sites and photograph them (F) to open an archive NASA frame taken there.',
   jFound: 'Found',
