@@ -15,7 +15,6 @@ const D2R = Math.PI / 180;
 
 /** 1971-07-31 13:13 UTC — start of Apollo 15 EVA-1 (Scott and Irwin's first LRV drive). */
 export const APOLLO15_EVA1 = Date.UTC(1971, 6, 31, 13, 13, 0);
-export const APOLLO15_LANDING = Date.UTC(1971, 6, 30, 22, 16, 29);
 
 const daysJ2000 = (ms: number) => ms / 86400000 + 2440587.5 - 2451545.0;
 
@@ -94,10 +93,4 @@ export function lunarSky(ms: number, latDeg: number, lonDeg: number): LunarSkySt
   const cosPsi = s[0] * -e[0] + s[1] * -e[1] + s[2] * -e[2];
   const earthPhase = (1 + cosPsi) / 2; // Full Earth at new Moon (Sun behind the Moon as seen from the Earth).
   return { sun: apply(icrfToGame, s), earth: apply(icrfToGame, e), icrfToGame, earthPhase };
-}
-
-export function azEl(v: V3): { az: number; el: number } {
-  let az = Math.atan2(v[0], -v[2]) / D2R;
-  if (az < 0) az += 360;
-  return { az, el: Math.asin(Math.max(-1, Math.min(1, v[1]))) / D2R };
 }

@@ -138,7 +138,6 @@ export class Game {
     const mars = W.id === 'mars';
     setSurfacePhotometry(W.id, W.radius);
     this.q = quality;
-    this.drs.maxLevel = quality.level;
     this.autoQuality = auto;
     this.renderer = new THREE.WebGLRenderer({ antialias: !isMobile || window.devicePixelRatio < 2, powerPreference: 'high-performance', stencil: false });
     this.renderer.setPixelRatio(quality.pixelRatio);
@@ -640,10 +639,7 @@ export class Game {
   setQuality(level: QualityLevel, auto: boolean): void {
     this.autoQuality = auto;
     this.q = makeQuality(level);
-    if (!auto) {
-      this.drs.scale = 1;
-      this.drs.maxLevel = level;
-    }
+    if (!auto) this.drs.scale = 1;
     this.renderer.setPixelRatio(this.q.pixelRatio * this.drs.scale);
     this.configureShadow();
     this.setupComposer();
@@ -1284,7 +1280,9 @@ export class Game {
     if (lateFrac > 0.12) {
       d.calm = 0;
       if (scale > minScale + 1e-3) scale = Math.max(minScale, scale - 0.1);
-      else if (this.autoQuality && ++d.floorHits >= 4) {
+      // A level change recompiles the big terrain shader (a 1–3 s freeze on an iGPU):
+      // only downward, at most once per 90 s, never back up automatically.
+      else if (this.autoQuality && ++d.floorHits >= 4 && this.time - d.downAt > 90) {
         d.floorHits = 0;
         const i = LEVELS.indexOf(this.q.level);
         if (i > 0) {
@@ -1299,14 +1297,6 @@ export class Game {
       if (d.calm >= 3 && scale < maxScale) {
         scale = Math.min(maxScale, scale + 0.05);
         d.calm = 0;
-      } else if (this.autoQuality && scale >= maxScale && d.calm >= 30 && this.time - d.downAt > 60) {
-        // A long calm at full resolution: try the next quality level up again.
-        const i = LEVELS.indexOf(this.q.level);
-        if (i >= 0 && i < LEVELS.indexOf(d.maxLevel)) {
-          this.setQuality(LEVELS[i + 1], true);
-          scale = 0.8;
-        }
-        d.calm = 0;
       }
     }
     if (Math.abs(scale - d.scale) > 1e-3) {
@@ -1317,7 +1307,7 @@ export class Game {
   }
 
   /** Dynamic-resolution state (see adaptQuality). */
-  private drs = { t: 0, n: 0, late: 0, scale: 1, calm: 0, floorHits: 0, warm: 4, minDt: 1 / 60, downAt: -1e9, maxLevel: 'high' as QualityLevel };
+  private drs = { t: 0, n: 0, late: 0, scale: 1, calm: 0, floorHits: 0, warm: 4, minDt: 1 / 60, downAt: -1e9 };
 
   private readMask(baked: THREE.Texture): Uint8Array | null {
     try {
