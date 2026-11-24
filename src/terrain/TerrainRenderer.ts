@@ -180,6 +180,17 @@ uniform float uDetSlopes;
 // Set by the photo-tile block, used for the normal: 1 m DTM slopes and their weight.
 vec2 gDetSlope = vec2(0.0);
 float gDetW = 0.0;
+// 1 m DTM slope at a world point from the tile atlas (w = 0 if that tile is not loaded).
+vec2 detSlopeAt(vec2 p, out float ok) {
+  vec2 tp = (p - uDetRect.xy) / uDetRect.z;
+  vec2 ij = floor(tp);
+  vec2 sl = mod(ij, 3.0);
+  int si = int(sl.x + sl.y * 3.0 + 0.5);
+  ok = abs(uDetSlots[si] - (ij.x + ij.y * 4096.0)) < 0.5 ? 1.0 : 0.0;
+  float h = 0.5 / uDetRes;
+  vec2 sv = texture2D(uDet, sl / 3.0 + clamp(fract(tp), h, 1.0 - h) / 3.0).gb * 2.0 - 1.0;
+  return sign(sv) * sv * sv * 2.0;
+}
 ${NOISE_GLSL}
 // Cast shadows of sub-metre craters (low Sun: the up-Sun inner wall is in shadow).
 // Marches the bowl profile toward the Sun; returns 1 lit .. 0 shadowed.
@@ -384,6 +395,18 @@ if (uDetRect.w > 0.5) {
       vec2 sv = detT.gb * 2.0 - 1.0;
       gDetSlope = sign(sv) * sv * sv * 2.0;
       gDetW = wD;
+      // Cast shadows of the metre-scale relief: integrate the height along the Sun
+      // direction from the slopes (dh = slope · dir · ds) and compare with the ray.
+      float tanEl = 1.0 / max(uSunShadow.z, 0.03);
+      float rise = 0.0, lit = 1.0, ds = 0.5;
+      for (int k = 1; k <= uFive * 3; k++) {
+        float dist = float(k) * ds;
+        float okS;
+        vec2 sl2 = detSlopeAt(vWorldP.xz + uSunShadow.xy * dist, okS);
+        rise += dot(sl2, uSunShadow.xy) * ds * okS;
+        lit = min(lit, smoothstep(-0.03, 0.06, dist * tanEl - rise + 0.02));
+      }
+      microLit = min(microLit, mix(1.0, lit, wD));
     }
     float o = 6.0 / uDetRect.z / 3.0;
     float detLow = 0.25 * (pow(texture2D(uDet, base + clamp(lc + vec2(o * 3.0, 0.0), h, 1.0 - h) / 3.0).r, 2.2)
@@ -435,7 +458,9 @@ ortho = mix(ortho, textureLod(uOrthoHi, clamp((vWorldP.xz - uHi.xy) / uHi.z, 0.0
 // The broad noise octaves are muted here: the HiRISE albedo already carries the large-scale pattern.
 float alb = clamp(ortho * 0.9 + albedoVar * 0.08, 0.02, 1.0);
 // (linear) Stretch the contrast around the scene mean; Mars is about twice as bright as the lunar mare.
-alb = clamp(0.13 + (alb - 0.13) * 1.3, 0.015, 1.0);
+// Seen from the ground the plain is evener than in the orbital image (the albedo
+// contrast of dust vs. sand is compressed by the low view angle and forward scattering).
+alb = clamp(0.135 + (alb - 0.135) * 0.8, 0.015, 1.0);
 vec3 darkSoil = vec3(0.8, 0.6, 0.48), brightDust = vec3(1.3, 0.8, 0.5);
 diffuseColor.rgb = alb * mix(darkSoil, brightDust, smoothstep(0.05, 0.3, alb)) * 1.9;
 // Wind ripples (~12 cm wavelength) across the sand, faded with distance; they lie on the dark sand.

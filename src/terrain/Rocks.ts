@@ -16,6 +16,8 @@ const COLLIDER_SMALL = 0.1;
 const BOULDER_GRID = 8;
 const BOULDER_CELL = 64;
 const BOULDER_VARIANTS = 4;
+/** Gravel layer (5–30 cm) in the 3 × 3 cells around the rover, per m² (Moon / Mars). */
+const GRAVEL = { moon: 0.12, mars: 0.4 };
 
 interface Rock {
   x: number; y: number; z: number;
@@ -139,7 +141,7 @@ function colorize(g: THREE.BufferGeometry, n: (x: number, y: number, z: number) 
     if (tint.dust) {
       // Dust settles only on the flatter upper faces, patchily; sides stay dark basalt.
       const up = THREE.MathUtils.smoothstep(nr.getY(i), 0.55, 0.95) * (0.35 + 0.55 * (fbm(n, v, 3, 2) * 0.5 + 0.5));
-      c.lerp(tint.dust, THREE.MathUtils.clamp(up, 0, 0.6));
+      c.lerp(tint.dust, THREE.MathUtils.clamp(up * 0.7, 0, 0.4));
     }
     col.set([c.r, c.g, c.b], i * 3);
   }
@@ -168,14 +170,16 @@ export class Rocks {
   private q: QualitySettings;
   private tmpN = [0, 0, 0];
   private abundance: number;
+  private mars: boolean;
 
   constructor(private terrain: TerrainData, private physics: Physics, quality: QualitySettings) {
     this.q = quality;
     this.abundance = terrain.meta.body === 'mars' ? 5 : 1;
+    this.mars = terrain.meta.body === 'mars';
     // Moon: grey basalt/breccia; Mars: dark grey-brown basalt under a coat of ferric dust.
     const mars = terrain.meta.body === 'mars';
     const tint: RockTint = mars
-      ? { base: new THREE.Color(0.075, 0.064, 0.058), dust: new THREE.Color(0.3, 0.17, 0.1) }
+      ? { base: new THREE.Color(0.085, 0.078, 0.072), dust: new THREE.Color(0.3, 0.2, 0.13) }
       : { base: new THREE.Color(0.27, 0.26, 0.245), dust: null };
     const mat = makeLunar(new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }), 'rock', (shader) => {
       shader.defines = { ...(shader.defines ?? {}), ROCK_MARS: mars ? 1 : 0 };
@@ -274,7 +278,8 @@ float rockH(vec3 p, vec3 w) {
   }
 
   private capacity(): number {
-    return Math.ceil(this.q.maxRocks / VARIANTS) + 64;
+    // + the gravel layer of the 3 × 3 cells around the rover.
+    return Math.ceil(this.q.maxRocks / VARIANTS) + Math.ceil((9 * CELL * CELL * GRAVEL.mars * 1.2) / VARIANTS) + 64;
   }
 
   private prep(m: THREE.InstancedMesh): void {
@@ -341,6 +346,29 @@ float rockH(vec3 p, vec3 w) {
     }
   }
 
+  /**
+   * Dense gravel near the rover: on the Jezero floor (Máaz) a few angular 5–40 cm
+   * rocks per square metre are seen in every Navcam frame; drawing them everywhere
+   * would be too costly, so this layer exists only in the cells around the rover
+   * (the terrain shader's pebbles carry on beyond).
+   */
+  private cellGravel(cx: number, cz: number): Rock[] {
+    const t = this.terrain;
+    const rnd = mulberry32(Math.floor(hash2(cx, cz, 191) * 4294967296));
+    const x0 = cx * CELL, z0 = cz * CELL;
+    const n = Math.floor(CELL * CELL * (this.mars ? GRAVEL.mars : GRAVEL.moon) * this.q.rockDensity);
+    const out: Rock[] = [];
+    for (let i = 0; i < n; i++) {
+      const x = x0 + rnd() * CELL, z = z0 + rnd() * CELL;
+      const r = Math.min(0.3, 0.045 * Math.pow(1 - rnd() * 0.999, -1 / 1.9));
+      const sx = r * (0.8 + rnd() * 0.6), sy = r * (0.4 + rnd() * 0.4), sz = r * (0.8 + rnd() * 0.6);
+      const y = t.height(x, z) - sy * 0.35;
+      const q = new THREE.Quaternion().setFromEuler(new THREE.Euler((rnd() - 0.5) * 0.8, rnd() * Math.PI * 2, (rnd() - 0.5) * 0.8));
+      out.push({ x, y, z, r, sx, sy, sz, q, v: Math.floor(rnd() * VARIANTS), albedo: 0.7 + rnd() * 0.7 });
+    }
+    return out;
+  }
+
   private cellRocks(cx: number, cz: number): Rock[] {
     const t = this.terrain;
     const rnd = mulberry32(Math.floor(hash2(cx, cz, 77) * 4294967296));
@@ -385,7 +413,8 @@ float rockH(vec3 p, vec3 w) {
       }
     cells.sort((a, b) => a[2] - b[2]);
     for (const [ix, iz, d2] of cells) {
-      const rocks = this.cellRocks(ix, iz);
+      const near1 = Math.abs(ix - cx) <= 1 && Math.abs(iz - cz) <= 1;
+      const rocks = near1 ? this.cellRocks(ix, iz).concat(this.cellGravel(ix, iz)) : this.cellRocks(ix, iz);
       const far = Math.sqrt(d2) * CELL;
       for (const r of rocks) {
         if (r.r < far * 0.0012) continue;
@@ -403,7 +432,7 @@ float rockH(vec3 p, vec3 w) {
         keep.add(k);
         if (!this.colliders.has(k)) {
           const min = adj ? COLLIDER_SMALL : COLLIDER_BIG;
-          this.colliders.set(k, rocks.filter((r) => r.r >= min).map((r) => this.makeCollider(r)));
+          this.colliders.set(k, rocks.filter((r) => r.r >= min && r.r > 0.12).map((r) => this.makeCollider(r)));
         }
       }
     }

@@ -34,6 +34,9 @@ export class Hud {
   private slopeN = [0, 1, 0];
   warningLevel = 0; // 0 none, 1 caution, 2 danger
   atBase = false;
+  /** Current mission target and the mission sites (found ones are ticked). */
+  target: { x: number; z: number } | null = null;
+  sites: { x: number; z: number; found: boolean }[] = [];
   private wasLit = true;
   private shadowFlash = 0;
 
@@ -278,6 +281,41 @@ export class Hud {
     g.font = '10px sans-serif';
     g.fillText(this.siteLabel, lx + 5, lz + 3);
     g.fillRect(lx - 2, lz - 2, 4, 4);
+    // Mission sites: found = filled, not yet = ring.
+    for (const st of this.sites) {
+      g.strokeStyle = g.fillStyle = st.found ? 'rgba(120,230,140,0.95)' : 'rgba(255,255,255,0.7)';
+      g.lineWidth = 1.5;
+      g.beginPath();
+      g.arc(toX(st.x), toY(st.z), 3.5, 0, Math.PI * 2);
+      if (st.found) g.fill();
+      else g.stroke();
+    }
+    // Current target: pulsing ring, or an edge arrow when it is off the map.
+    if (this.target) {
+      const tx = toX(this.target.x), ty = toY(this.target.z);
+      const pulse = 5 + 2 * Math.sin(performance.now() / 250);
+      g.strokeStyle = '#ffc46b';
+      g.lineWidth = 2;
+      if (tx > 6 && tx < w - 6 && ty > 6 && ty < h - 6) {
+        g.beginPath();
+        g.arc(tx, ty, pulse, 0, Math.PI * 2);
+        g.stroke();
+      } else {
+        const a = Math.atan2(ty - h / 2, tx - w / 2);
+        const r = Math.min(w, h) / 2 - 8;
+        const ex = w / 2 + Math.cos(a) * r, ey = h / 2 + Math.sin(a) * r;
+        g.save();
+        g.translate(ex, ey);
+        g.rotate(a);
+        g.fillStyle = '#ffc46b';
+        g.beginPath();
+        g.moveTo(7, 0);
+        g.lineTo(-4, -5);
+        g.lineTo(-4, 5);
+        g.fill();
+        g.restore();
+      }
+    }
     // Dust devils.
     if (this.weather) {
       for (const d of this.weather.devils) {

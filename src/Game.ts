@@ -802,6 +802,8 @@ export class Game {
     const fwd = this.camera.getWorldDirection(new THREE.Vector3());
     let camHdg = (Math.atan2(fwd.x, -fwd.z) * 180) / Math.PI;
     if (camHdg < 0) camHdg += 360;
+    this.hud.target = this.mission.target();
+    if (this.finds) this.hud.sites = this.finds.sites.map((st) => ({ x: st.x, z: st.z, found: this.finds!.found.has(st.id) }));
     this.mission.update({
       roverPos: h ? h.pos : this.rover.object.position,
       odometer: this.rover.odometer,
