@@ -20,6 +20,7 @@ import { Rover } from './rover/Rover';
 import { buildLunarModule } from './rover/models/nasa';
 import { ROVERS, type RoverSpec } from './rover/specs';
 import { Astronaut } from './eva/Astronaut';
+import { fmtHM } from './format';
 import { Helicopter } from './heli/Helicopter';
 import { Radio } from './audio/Radio';
 import { Meteors } from './fx/Meteors';
@@ -57,6 +58,10 @@ function acesFilmic(c: THREE.Color, exposure: number): THREE.Color {
   const sat = (v: number) => Math.min(1, Math.max(0, v));
   return new THREE.Color(sat(o[0]), sat(o[1]), sat(o[2]));
 }
+
+/** PLSS 7 h + OPS 30 min, s. */
+const O2_FULL = 7.5 * 3600;
+const O2_OPS = 1800;
 
 /** Sun irradiance in scene units; everything else is relative to it. */
 const SUN_INTENSITY = 9;
@@ -100,6 +105,12 @@ export class Game {
   private heliHud: HTMLElement | null = null;
   /** Astronaut on foot (Moon, crewed rover): out of the rover, hopping to the target. */
   eva: Astronaut | null = null;
+  /**
+   * Suit oxygen of the crew (Moon, crewed LRV), s. Apollo 15-17 PLSS: 7 h at an average
+   * work rate, plus ~30 min in the OPS emergency bottle; the suits stay on while driving.
+   * Used faster on foot (hopping is work), refilled only at the LM.
+   */
+  o2 = O2_FULL;
   readonly radio: Radio;
   private meteors: Meteors | null = null;
   readonly finds: Discoveries | null = null;
@@ -423,7 +434,8 @@ export class Game {
     const r = this.rover.object.position, f = this.rover.forwardVector(new THREE.Vector3());
     // Out on the left side (the commander's seat), facing where the rover faces.
     const x = r.x + f.z * 1.6, z = r.z - f.x * 1.6;
-    this.eva = new Astronaut(this.terrain, x, z, Math.atan2(f.x, f.z));
+    const ground = (gx: number, gz: number) => Math.max(this.terrain.height(gx, gz), this.rocks.surfaceAt(gx, gz));
+    this.eva = new Astronaut(this.terrain, ground, x, z, Math.atan2(f.x, f.z));
     this.scene.add(this.eva.object);
     this.rover.parkBrake = true;
     this.heliHud = document.getElementById('heli-hud');
@@ -448,6 +460,32 @@ export class Game {
     this.orbit.dist = 9 * this.sizeK;
   }
 
+  private updateO2(dt: number): void {
+    if (world().id !== 'moon' || !this.rover.spec.crew) {
+      this.hud.o2 = null;
+      return;
+    }
+    const lm = this.terrain.meta.landing;
+    const p = this.eva ? this.eva.pos : this.rover.object.position;
+    const atLm = Math.hypot(p.x - lm.x, p.z - lm.z) < 20 && (this.eva ? this.eva.speed < 0.3 : Math.abs(this.rover.speed) < 0.2);
+    const before = this.o2;
+    if (atLm) this.o2 = Math.min(O2_FULL, this.o2 + dt * 120); // PLSS recharge in the LM
+    else {
+      // Metabolic rate: seated ~0.75 of the PLSS design average, standing 0.85, hopping up to 1.5.
+      const rate = this.eva ? 0.85 + 0.65 * Math.min(1, this.eva.speed / 2) : 0.75;
+      this.o2 = Math.max(0, this.o2 - dt * rate);
+    }
+    if (this.sky) {
+      if (before > 3600 && this.o2 <= 3600) this.radio.say('o2Low', { repeat: true });
+      if (before > O2_OPS && this.o2 <= O2_OPS) this.radio.say('o2Ops', { repeat: true });
+    }
+    if (this.o2 <= 0 && before > 0) {
+      this.autoDrive = false;
+      this.onFail?.('o2');
+    }
+    this.hud.o2 = this.o2;
+  }
+
   private updateEvaHud(): void {
     const a = this.eva, el = this.heliHud;
     if (!a || !el) return;
@@ -455,7 +493,7 @@ export class Game {
     const d = Math.hypot(a.pos.x - r.x, a.pos.z - r.z);
     el.innerHTML =
       `<b>${t('evaTitle')}</b><br>` +
-      `${t('evaSpeed')} <b>${(a.speed * 3.6).toFixed(1)}</b> ${t('evaKmh')} · ${t('evaToRover')} <b>${d.toFixed(0)}</b> ${t('hM')}` +
+      `${t('evaSpeed')} <b>${(a.speed * 3.6).toFixed(1)}</b> ${t('evaKmh')} · ${t('evaToRover')} <b>${d.toFixed(0)}</b> ${t('hM')} · O₂ <b>${fmtHM(this.o2)}</b>` +
       `<div class="hk">${t(d < 4 ? 'evaKeysNear' : 'evaKeys')}</div>`;
   }
 
@@ -891,6 +929,7 @@ export class Game {
     this.updateImpacts(dt);
     if (this.meteors) this.meteors.update(dt, fp, this.camera);
     this.updateEnergy(dt);
+    this.updateO2(dt);
     this.radio.update(dt);
     this.updateMission();
     this.updateCliff(dt);
@@ -1018,7 +1057,8 @@ export class Game {
    * allows) ends the mission - no one can recover a rover at the foot of a cliff.
    */
   private cliff = { t: 0, peakY: Number.NaN, warn: false, safe: new THREE.Vector3(), safeYaw: 0, safeT: 0, failed: false, last: new THREE.Vector3(Number.NaN, 0, 0) };
-  onFail?: () => void;
+  /** Mission failed: reason 'o2' (out of oxygen) or undefined (fell off a cliff). */
+  onFail?: (reason?: 'o2') => void;
   cliffAhead = false;
 
   private updateCliff(dt: number): void {
@@ -1610,6 +1650,7 @@ export class Game {
   /** Restart at the landing site. */
   restart(): void {
     this.exitEva();
+    this.o2 = O2_FULL;
     this.rover.repair();
     const [x, z] = this.startPoint();
     this.physics.updatePatch(x, z, true);

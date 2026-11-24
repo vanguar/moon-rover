@@ -11,9 +11,11 @@ import type { TerrainData } from '../terrain/TerrainData';
  * Accelerating and stopping take several hops; a standing jump reaches ~0.5 m
  * (John Young's jump salute, Apollo 16, ~0.4 m with suit and PLSS ≈ 170 kg).
  *
- * Simplifications: the body follows the terrain height field only (no collisions
- * with rocks); slopes steeper than ~25° cannot be climbed or stepped down, so no
- * one walks into the rille.
+ * Ground: the terrain or the top of a rock, whichever is higher (`ground`). Rocks
+ * up to STEP are stepped onto in stride; a higher one stops the astronaut like a
+ * wall - jump onto it (Space, ~0.5 m) - and walking off its edge is a free fall in
+ * 1/6 g. Terrain slopes steeper than ~25° cannot be climbed or stepped down, so
+ * no one walks into the rille.
  */
 const G = 1.62;
 /** Top loping speed, m/s, and backward shuffle. */
@@ -25,6 +27,10 @@ const ACCEL = 1.0;
 const HOP_PUSH = 0.4;
 const TURN = 1.8;
 const MAX_SLOPE = Math.tan(THREE.MathUtils.degToRad(25));
+/** Highest step taken in stride (a cobble, a low ledge), m; higher needs a jump. */
+const STEP = 0.3;
+/** Body radius for running into rocks, m (the suit with the PLSS). */
+const BODY_R = 0.3;
 
 export interface EvaInput {
   /** −1 (back) .. 1 (forward). */
@@ -55,10 +61,11 @@ export class Astronaut {
   private armL = new THREE.Group();
   private armR = new THREE.Group();
 
-  constructor(private terrain: TerrainData, x: number, z: number, yaw: number) {
+  /** ground(x, z): height to stand on - the terrain or a rock top, whichever is higher. */
+  constructor(private terrain: TerrainData, private ground: (x: number, z: number) => number, x: number, z: number, yaw: number) {
     this.buildModel();
     this.yaw = yaw;
-    this.pos.set(x, terrain.height(x, z), z);
+    this.pos.set(x, ground(x, z), z);
     this.sync();
   }
 
@@ -121,7 +128,6 @@ export class Astronaut {
     const t = this.terrain;
     this.yaw -= input.turn * TURN * dt * (this.onGround ? 1 : 0.4);
     const fx = Math.sin(this.yaw), fz = Math.cos(this.yaw);
-    const ground = t.height(this.pos.x, this.pos.z);
     if (this.onGround) {
       // Push off along the heading: limited by traction, several hops to get going.
       const target = input.fwd >= 0 ? input.fwd * VMAX : input.fwd * VBACK;
@@ -143,24 +149,39 @@ export class Astronaut {
         this.vel.y = input.jump ? 1.3 : 0.42 + 0.3 * k;
         this.onGround = false;
       }
-      this.pos.y = ground;
     } else {
       this.vel.y -= G * dt;
     }
-    // Horizontal move, refused into slopes steeper than ~25° (up or down).
+    // Horizontal move: refused into terrain slopes steeper than ~25° (up or down), and
+    // into anything rising more than a step above the feet (a rock face) - checked at
+    // the new position and one body radius ahead of it.
     const nx = this.pos.x + this.vel.x * dt, nz = this.pos.z + this.vel.z * dt;
-    const hNew = t.height(nx, nz), run = Math.hypot(nx - this.pos.x, nz - this.pos.z);
-    const steep = run > 1e-4 && Math.abs(t.height(nx + (nx - this.pos.x) / run * 0.6, nz + (nz - this.pos.z) / run * 0.6) - hNew) / 0.6 > MAX_SLOPE;
-    if (steep) {
-      this.vel.x = 0;
-      this.vel.z = 0;
-    } else {
-      this.pos.x = nx;
-      this.pos.z = nz;
+    const run = Math.hypot(nx - this.pos.x, nz - this.pos.z);
+    if (run > 1e-5) {
+      const ux = (nx - this.pos.x) / run, uz = (nz - this.pos.z) / run;
+      const hNew = t.height(nx, nz);
+      const steep = Math.abs(t.height(nx + ux * 0.6, nz + uz * 0.6) - hNew) / 0.6 > MAX_SLOPE;
+      const ax = nx + ux * BODY_R, az = nz + uz * BODY_R;
+      // Only a rock is a wall (the terrain's own rise is the slope rule's business).
+      const top = Math.max(this.ground(nx, nz), this.ground(ax, az)), terr = Math.max(hNew, t.height(ax, az));
+      const rise = top > terr + 0.01 ? top - this.pos.y : -Infinity;
+      if (steep || rise > (this.onGround ? STEP : 0.02)) {
+        this.vel.x = 0;
+        this.vel.z = 0;
+      } else {
+        this.pos.x = nx;
+        this.pos.z = nz;
+      }
     }
-    if (!this.onGround) {
+    const g = this.ground(this.pos.x, this.pos.z);
+    if (this.onGround) {
+      // Off the edge of a rock: a free fall; otherwise follow small steps up and down.
+      if (g < this.pos.y - 0.08) {
+        this.onGround = false;
+        this.vel.y = Math.min(this.vel.y, 0);
+      } else this.pos.y = g;
+    } else {
       this.pos.y += this.vel.y * dt;
-      const g = t.height(this.pos.x, this.pos.z);
       if (this.pos.y <= g && this.vel.y < 0) {
         this.pos.y = g;
         this.vel.y = 0;

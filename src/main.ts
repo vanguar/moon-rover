@@ -400,8 +400,10 @@ function setupMenu(game: Game): void {
   };
   $('#b-ok').addEventListener('click', closeBrief);
   const fail = $('#fail');
-  game.onFail = () => {
-    $('#fail-text').textContent = t(document.body.classList.contains('world-mars') ? 'failTextMars' : 'failTextMoon');
+  game.onFail = (reason) => {
+    $('#fail-text').textContent = t(reason === 'o2' ? 'failTextO2' : document.body.classList.contains('world-mars') ? 'failTextMars' : 'failTextMoon');
+    // Out of oxygen there is nothing to go back to: only a new mission.
+    $('#fail-retry').classList.toggle('hidden', reason === 'o2');
     fail.classList.remove('hidden');
     game.setPaused(true);
   };

@@ -448,6 +448,7 @@ float rockH(vec3 p, vec3 w) {
 
   setQuality(q: QualitySettings): void {
     this.q = q;
+    this.surfCells.clear(); // cobble density depends on the quality
     for (let v = 0; v < VARIANTS; v++) {
       const old = this.meshes[v];
       const m = new THREE.InstancedMesh(old.geometry, old.material, this.capacity());
@@ -779,6 +780,57 @@ float rockH(vec3 p, vec3 w) {
   /** Rock size if the collider is a rock, else 0. */
   sizeOf(c: RAPIER.Collider): number {
     return this.rockSize.get(c.handle) ?? 0;
+  }
+
+  /** Rocks of the cells around a point, for surfaceAt (deterministic, so cached). */
+  private surfCells = new Map<string, Rock[]>();
+  private tq = new THREE.Quaternion();
+  private ta = new THREE.Vector3();
+  private tb = new THREE.Vector3();
+
+  private surfCell(cx: number, cz: number): Rock[] {
+    const key = `${cx},${cz}`;
+    let list = this.surfCells.get(key);
+    if (!list) {
+      if (this.surfCells.size > 24) this.surfCells.clear();
+      list = [...this.cellRocks(cx, cz), ...this.cellGravel(cx, cz)];
+      this.surfCells.set(key, list);
+    }
+    return list;
+  }
+
+  /**
+   * Top of the rock surface under (x, z), m (−Infinity where there is none): for
+   * an astronaut on foot to stand on, step onto, or run into rocks. Each rock is
+   * taken as the ellipsoid of its drawn shape (boulders and cobbles ~0.85 of their
+   * scale across, 0.8 up; slabs and plates 0.9 across, 0.5 up).
+   */
+  surfaceAt(x: number, z: number): number {
+    let top = -Infinity;
+    const test = (r: Rock) => {
+      const reach = Math.max(r.sx, r.sz);
+      const dx = x - r.x, dz = z - r.z;
+      if (dx * dx + dz * dz > reach * reach) return;
+      const kx = r.outcrop ? 0.9 : 0.85, ky = r.outcrop ? 0.5 : 0.8;
+      // Vertical line through (x, z) in the rock's unit-sphere frame: |A + t·B| = 1.
+      this.tq.copy(r.q).invert();
+      const A = this.ta.set(dx, 0, dz).applyQuaternion(this.tq);
+      const B = this.tb.set(0, 1, 0).applyQuaternion(this.tq);
+      A.set(A.x / (r.sx * kx), A.y / (r.sy * ky), A.z / (r.sz * kx));
+      B.set(B.x / (r.sx * kx), B.y / (r.sy * ky), B.z / (r.sz * kx));
+      const bb = B.dot(B), ab = A.dot(B), disc = ab * ab - bb * (A.dot(A) - 1);
+      if (disc <= 0) return;
+      const y = r.y + (-ab + Math.sqrt(disc)) / bb;
+      if (y > top) top = y;
+    };
+    const c0x = Math.floor((x - 3) / CELL), c1x = Math.floor((x + 3) / CELL);
+    const c0z = Math.floor((z - 3) / CELL), c1z = Math.floor((z + 3) / CELL);
+    for (let cz = c0z; cz <= c1z; cz++) for (let cx = c0x; cx <= c1x; cx++) for (const r of this.surfCell(cx, cz)) test(r);
+    const b0x = Math.floor((x - 8) / BOULDER_CELL), b1x = Math.floor((x + 8) / BOULDER_CELL);
+    const b0z = Math.floor((z - 8) / BOULDER_CELL), b1z = Math.floor((z + 8) / BOULDER_CELL);
+    for (let bz = b0z; bz <= b1z; bz++)
+      for (let bx = b0x; bx <= b1x; bx++) for (const i of this.boulderGrid.get(`${bx},${bz}`) ?? []) test(this.boulders[i]);
+    return top;
   }
 
   count(): number {

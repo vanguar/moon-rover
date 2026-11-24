@@ -1,5 +1,6 @@
 import { world } from '../world';
 import { t } from '../i18n';
+import { fmtHM } from '../format';
 import type * as THREE from 'three';
 import type { Rover } from '../rover/Rover';
 import type { TerrainData } from '../terrain/TerrainData';
@@ -33,6 +34,10 @@ export class Hud {
   private mapTimer = 0;
   /** On foot (EVA): compass, speed and map follow the astronaut instead of the parked rover. */
   focus: { pos: THREE.Vector3; heading: number; speed: number } | null = null;
+  /** Suit oxygen left, s (Moon, crewed rover), or null. */
+  o2: number | null = null;
+  private o2El = document.getElementById('h-o2');
+  private o2Line = document.getElementById('h-o2line');
   private mapImg: CanvasImageSource | null = null;
   private slopeN = [0, 1, 0];
   warningLevel = 0; // 0 none, 1 caution, 2 danger
@@ -92,6 +97,8 @@ export class Hud {
     e.solar.textContent = Math.round(rover.solar).toString();
     if (this.elec) this.elec.textContent = rover.elecTemp.toFixed(0);
     if (this.range) this.range.textContent = rover.rangeKm.toFixed(1);
+    this.o2Line?.classList.toggle('hidden', this.o2 === null);
+    if (this.o2El && this.o2 !== null) this.o2El.textContent = fmtHM(this.o2);
     e.roll.textContent = `${roll.toFixed(0)}°`;
     e.pitch.textContent = `${pitch.toFixed(0)}°`;
     e.lights.classList.toggle('on', rover.headlights);
@@ -120,6 +127,7 @@ export class Hud {
     const hurt = rover.wheelDamage.filter((d) => d > 0.3 && d < 1).length;
     if (dead) { warns.push(`${t('wWheelDead')} ×${dead}`); level = 2; }
     else if (hurt) { warns.push(`${t('wWheelHurt')} ×${hurt}`); level = Math.max(level, 1); }
+    if (this.o2 !== null && this.o2 < 3600) { warns.push(`${t(this.o2 < 1800 ? 'wO2Ops' : 'wO2Low')} ${fmtHM(this.o2)}`); level = Math.max(level, this.o2 < 1800 ? 2 : 1); }
     if (rover.electronics > 0.02) { warns.push(`${t('wElec')} ${Math.round(rover.electronics * 100)}%`); level = Math.max(level, rover.electronics > 0.6 || rover.stall > 0 ? 2 : 1); }
     if (rover.bodyDamage > 0.3) { warns.push(`${t('wBody')} ${Math.round(rover.bodyDamage * 100)}%`); level = Math.max(level, 1); }
     if (rover.battery <= 0) { warns.push(t('wBattEmpty')); level = 2; }
