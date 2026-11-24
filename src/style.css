@@ -319,6 +319,9 @@ kbd { min-width: 27px; height: 27px; font-size: 13px; }
 #heli-hud .hk { margin-top: 4px; opacity: 0.6; font-size: 11px; }
 body.mobile #heli-hud .hk { display: none; }
 body.heli #hud { display: none; }
+/* On foot the rover's instruments stay (battery, map): the EVA panel sits above them. */
+body.eva #heli-hud { bottom: 200px; }
+body.mobile.eva #heli-hud { bottom: auto; top: 64px; }
 .tb.heli-only { display: none; }
 body.heli .tb.heli-only { display: grid; }
 

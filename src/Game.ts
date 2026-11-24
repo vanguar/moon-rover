@@ -19,6 +19,7 @@ import { ShadowBaker } from './render/ShadowBaker';
 import { Rover } from './rover/Rover';
 import { buildLunarModule } from './rover/models/nasa';
 import { ROVERS, type RoverSpec } from './rover/specs';
+import { Astronaut } from './eva/Astronaut';
 import { Helicopter } from './heli/Helicopter';
 import { Radio } from './audio/Radio';
 import { Meteors } from './fx/Meteors';
@@ -97,6 +98,8 @@ export class Game {
   /** Ingenuity, when it is the selected vehicle (Perseverance then stays parked nearby). */
   heli: Helicopter | null = null;
   private heliHud: HTMLElement | null = null;
+  /** Astronaut on foot (Moon, crewed rover): out of the rover, hopping to the target. */
+  eva: Astronaut | null = null;
   readonly radio: Radio;
   private meteors: Meteors | null = null;
   readonly finds: Discoveries | null = null;
@@ -392,6 +395,70 @@ export class Game {
     this.orbit.dist = 9 * this.sizeK;
   }
 
+  /**
+   * EVA (E): an astronaut climbs off a stopped crewed rover - when the battery is
+   * flat or the rover is stuck, the target can still be reached on foot - and gets
+   * back on within a few metres of it.
+   */
+  toggleEva(): void {
+    if (this.eva) {
+      const r = this.rover.object.position;
+      if (Math.hypot(this.eva.pos.x - r.x, this.eva.pos.z - r.z) > 4) {
+        this.toast(t('evaFar'));
+        return;
+      }
+      this.exitEva();
+      this.toast(t('evaIn'));
+      return;
+    }
+    if (world().id !== 'moon' || !this.rover.spec.crew || this.heli) {
+      this.toast(t('evaNoCrew'));
+      return;
+    }
+    if (Math.abs(this.rover.speed) > 0.4) {
+      this.toast(t('evaMoving'));
+      return;
+    }
+    this.setAutoDrive(false);
+    const r = this.rover.object.position, f = this.rover.forwardVector(new THREE.Vector3());
+    // Out on the left side (the commander's seat), facing where the rover faces.
+    const x = r.x + f.z * 1.6, z = r.z - f.x * 1.6;
+    this.eva = new Astronaut(this.terrain, x, z, Math.atan2(f.x, f.z));
+    this.scene.add(this.eva.object);
+    this.rover.parkBrake = true;
+    this.heliHud = document.getElementById('heli-hud');
+    this.heliHud?.classList.remove('hidden');
+    document.body.classList.add('eva');
+    this.chasePos.set(0, 0, 0);
+    this.orbit.dist = 4.5;
+    this.orbit.pitch = 0.3;
+    if (this.cameraMode === 'cabin') this.setCameraMode('chase');
+    this.toast(t('evaOut'));
+    if (this.sky) this.radio.say('evaOut', { delay: 1 });
+  }
+
+  private exitEva(): void {
+    if (!this.eva) return;
+    this.scene.remove(this.eva.object);
+    this.eva.dispose();
+    this.eva = null;
+    this.heliHud?.classList.add('hidden');
+    document.body.classList.remove('eva');
+    this.chasePos.set(0, 0, 0);
+    this.orbit.dist = 9 * this.sizeK;
+  }
+
+  private updateEvaHud(): void {
+    const a = this.eva, el = this.heliHud;
+    if (!a || !el) return;
+    const r = this.rover.object.position;
+    const d = Math.hypot(a.pos.x - r.x, a.pos.z - r.z);
+    el.innerHTML =
+      `<b>${t('evaTitle')}</b><br>` +
+      `${t('evaSpeed')} <b>${(a.speed * 3.6).toFixed(1)}</b> ${t('evaKmh')} · ${t('evaToRover')} <b>${d.toFixed(0)}</b> ${t('hM')}` +
+      `<div class="hk">${t(d < 4 ? 'evaKeysNear' : 'evaKeys')}</div>`;
+  }
+
   /** Swap the rover in place (menu selection), keeping position and heading. */
   setRover(spec: RoverSpec): void {
     if (spec.heli) {
@@ -676,6 +743,8 @@ export class Game {
       this.zoom(1);
     } else if (a === 'drive') {
       this.setAutoDrive(!this.autoDrive);
+    } else if (a === 'eva') {
+      this.toggleEva();
     } else if (a === 'mission') {
       this.onBriefing?.();
     } else if (a === 'photo') {
@@ -789,7 +858,7 @@ export class Game {
     this.input.update(dt);
     const rover = this.rover;
     const parkedInput = { throttle: 0, brake: 0, steer: 0, handbrake: true };
-    const drive = this.heli ? parkedInput : this.autoDrive ? this.autopilot(dt) : this.input.drive;
+    const drive = this.heli || this.eva ? parkedInput : this.autoDrive ? this.autopilot(dt) : this.input.drive;
     const alpha = this.physics.step(dt, (h) => rover.step(h, drive));
     if (this.heli) {
       const d = this.input.drive;
@@ -798,23 +867,29 @@ export class Game {
       this.heli.setListener(this.camera.position.distanceTo(this.heli.pos));
       this.updateHeliHud();
     }
+    if (this.eva) {
+      const d = this.input.drive;
+      this.eva.update(dt, { fwd: d.throttle - d.brake, turn: d.steer, jump: d.handbrake });
+      this.updateEvaHud();
+    }
     rover.onContacts(this.physics.takeContacts());
     rover.sync(dt, alpha);
     this.animateRover(dt, false);
     this.updatePanel(dt);
     const p = rover.object.position;
     this.physics.updatePatch(p.x, p.z);
-    this.rocks.update(p);
+    // Where the player is: the rover, the helicopter or the astronaut on foot.
+    const fp = this.heli ? this.heli.pos : this.eva ? this.eva.pos : p;
+    this.rocks.update(fp);
     this.updateCamera(dt);
-    this.terrainR.update(this.camera.position, p);
-    const fp = this.heli ? this.heli.pos : p;
+    this.terrainR.update(this.camera.position, fp);
     this.detail?.update(fp.x, fp.z);
     this.dust.update(dt, rover, this.camera);
     this.tracks.update(rover, dt);
     this.updateEnvironment(dt);
-    this.updateSun(p);
+    this.updateSun(fp);
     this.updateImpacts(dt);
-    if (this.meteors) this.meteors.update(dt, this.rover.object.position, this.camera);
+    if (this.meteors) this.meteors.update(dt, fp, this.camera);
     this.updateEnergy(dt);
     this.radio.update(dt);
     this.updateMission();
@@ -832,6 +907,7 @@ export class Game {
       const w = this.weather;
       this.hud.weather = { wind: Math.hypot(w.wind.x, w.wind.z), tau: w.tau, storm: w.storm, devilDist: w.devilDist, devils: w.devilList() };
     }
+    this.hud.focus = this.eva ? { pos: this.eva.pos, heading: this.eva.heading, speed: this.eva.speed } : null;
     this.hud.update(dt, rover, this.fpsAcc.fps);
     this.audio.update(dt, rover, this.input.drive.steer, this.hud.warningLevel);
     rover.knocks.length = 0;
@@ -867,8 +943,8 @@ export class Game {
   }
 
   setAutoDrive(on: boolean, reason?: string): void {
-    if (on && (this.heli || !this.mission.target())) {
-      this.toast(t(this.heli ? 'apNoHeli' : 'apNoTarget'));
+    if (on && (this.heli || this.eva || !this.mission.target())) {
+      this.toast(t(this.heli ? 'apNoHeli' : this.eva ? 'evaNoAuto' : 'apNoTarget'));
       on = false;
     }
     if (on === this.autoDrive && !reason) return;
@@ -947,7 +1023,7 @@ export class Game {
 
   private updateCliff(dt: number): void {
     const c = this.cliff, r = this.rover, p = r.object.position, t = this.terrain;
-    if (this.heli || c.failed) return;
+    if (this.heli || this.eva || c.failed) return;
     // Remember the last safe spot (flat, not near a drop) to restart from.
     c.safeT -= dt;
     // A jump in position (restart, reset, teleport) starts the height tracking afresh.
@@ -1039,7 +1115,7 @@ export class Game {
     this.hud.target = this.mission.target();
     if (this.finds) this.hud.sites = this.finds.sites.map((st) => ({ x: st.x, z: st.z, found: this.finds!.found.has(st.id) }));
     this.mission.update({
-      roverPos: h ? h.pos : this.rover.object.position,
+      roverPos: h ? h.pos : this.eva ? this.eva.pos : this.rover.object.position,
       odometer: this.rover.odometer,
       found: this.finds?.found ?? new Set(),
       atBase: this.hud.atBase,
@@ -1316,8 +1392,8 @@ export class Game {
 
   private updateCamera(dt: number): void {
     const rover = this.rover;
-    if (this.heli && !this.debugCam) {
-      const h = this.heli;
+    if ((this.heli || this.eva) && !this.debugCam) {
+      const h = (this.heli ?? this.eva)!;
       if (this.cameraMode === 'cabin') {
         h.camAnchor.updateMatrixWorld();
         h.camAnchor.getWorldPosition(this.camera.position);
@@ -1330,14 +1406,16 @@ export class Game {
         const yaw = h.yaw + this.orbit.yaw;
         const d = top ? Math.max(6, this.topHeight * 0.3) : this.orbit.dist;
         const pitch = top ? 1.45 : this.orbit.pitch;
-        const target = new THREE.Vector3(p.x - Math.sin(yaw) * Math.cos(pitch) * d, p.y + 0.3 + Math.sin(pitch) * d, p.z - Math.cos(yaw) * Math.cos(pitch) * d);
+        // Aim at the helicopter's body, or at an astronaut's chest.
+        const aimY = this.eva ? 1.2 : 0.3;
+        const target = new THREE.Vector3(p.x - Math.sin(yaw) * Math.cos(pitch) * d, p.y + aimY + Math.sin(pitch) * d, p.z - Math.cos(yaw) * Math.cos(pitch) * d);
         if (this.chasePos.lengthSq() === 0 || dt === 0) this.chasePos.copy(target);
         else this.chasePos.lerp(target, 1 - Math.exp(-dt * 4));
         const gy = this.terrain.height(this.chasePos.x, this.chasePos.z) + 0.4;
         if (this.chasePos.y < gy) this.chasePos.y = gy;
         this.camera.position.copy(this.chasePos);
         this.camera.up.set(0, 1, 0);
-        this.camera.lookAt(p.x, p.y + 0.25, p.z);
+        this.camera.lookAt(p.x, p.y + aimY - 0.05, p.z);
         this.camera.near = 0.05;
       }
       this.camera.updateProjectionMatrix();
@@ -1531,6 +1609,7 @@ export class Game {
 
   /** Restart at the landing site. */
   restart(): void {
+    this.exitEva();
     this.rover.repair();
     const [x, z] = this.startPoint();
     this.physics.updatePatch(x, z, true);

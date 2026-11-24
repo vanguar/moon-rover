@@ -1,5 +1,6 @@
 import { world } from '../world';
 import { t } from '../i18n';
+import type * as THREE from 'three';
 import type { Rover } from '../rover/Rover';
 import type { TerrainData } from '../terrain/TerrainData';
 
@@ -30,6 +31,8 @@ export class Hud {
   private trail: number[] = [];
   private lastTrail = { x: Infinity, z: Infinity };
   private mapTimer = 0;
+  /** On foot (EVA): compass, speed and map follow the astronaut instead of the parked rover. */
+  focus: { pos: THREE.Vector3; heading: number; speed: number } | null = null;
   private mapImg: CanvasImageSource | null = null;
   private slopeN = [0, 1, 0];
   warningLevel = 0; // 0 none, 1 caution, 2 danger
@@ -65,12 +68,15 @@ export class Hud {
   }
 
   update(dt: number, rover: Rover, fps: number): void {
-    const p = rover.object.position;
-    const { roll, pitch, heading } = rover.attitude();
+    const f = this.focus;
+    const p = f ? f.pos : rover.object.position;
+    const att = rover.attitude();
+    const { roll, pitch } = att;
+    const heading = f ? f.heading : att.heading;
     const ter = this.terrain;
     const e = this.els;
 
-    e.speed.textContent = (Math.abs(rover.speed) * 3.6).toFixed(1);
+    e.speed.textContent = (Math.abs(f ? f.speed : rover.speed) * 3.6).toFixed(1);
     const altAbs = p.y + ter.meta.minHeight;
     e.alt.textContent = `${altAbs.toFixed(0)}`;
     ter.normal(p.x, p.z, this.slopeN, 1.5);
