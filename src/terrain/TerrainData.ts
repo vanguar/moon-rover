@@ -28,6 +28,8 @@ export interface TerrainMeta {
   sites?: Record<string, { lat: number; lon: number; x: number; z: number }>;
   /** Surveyed surface hardware (Apollo 17 ALSEP instruments), game x/z. */
   hardware?: { type: string; x: number; z: number }[];
+  /** Largest crater radius the game adds (m); default 45 on the Moon. */
+  craterRMax?: number;
   orthoSun?: { azimuth: number; incidence: number };
   projection?: { radius: number; standardParallel: number };
   /** Full-resolution orthophoto tiles streamed around the rover (DetailTiles). */
@@ -154,13 +156,15 @@ export class TerrainData {
     // Moon: the Apollo 15 mare is saturated with small and medium craters - 2.5x the
     // earlier density, radii up to 45 m.
     const count = Math.round(CRATER_COUNT * areaK * (mars ? 0.35 : 2.5));
-    const rMax = mars ? CRATER_RMAX : 45;
+    // A site whose DTM resolves every crater above a few metres (Apollo 17) caps the
+    // added ones at that size: no invented duplicates of the real, mapped craters.
+    const rMax = meta.craterRMax ?? (mars ? CRATER_RMAX : 45);
     const depthK = mars ? 0.45 : 1;
     this.craters = new Float32Array(count * 5);
     for (let i = 0; i < count; i++) {
       // Cumulative size-frequency N(>R) ~ R^-2 (Pareto, truncated).
       let R = CRATER_RMIN * Math.pow(1 - rnd(), -0.5);
-      if (R > rMax) R = CRATER_RMIN + rnd() * 3;
+      if (R > rMax) R = CRATER_RMIN + rnd() * Math.min(3, rMax - CRATER_RMIN);
       const fresh = rnd();
       // Most small craters on an old mare surface are degraded (shallow, soft rims).
       const depth = 2 * R * (0.03 + 0.15 * fresh * fresh * fresh) * depthK;

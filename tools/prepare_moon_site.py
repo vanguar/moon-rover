@@ -239,6 +239,9 @@ def main():
         "centerLon": lon_c,
         "projection": {"radius": MOON_R, "standardParallel": lat_c},
         "landing": {"x": lm_x, "z": lm_z},
+        # The DTM already holds every crater it resolves (> ~4 px across): the game adds
+        # only the smaller ones, not invented duplicates of the large.
+        "craterRMax": round(2 * px * 0.75, 1),
         "orthoHi": {"x": hx, "z": hz, "size": b["hi_size"]},
         "epoch": site["epoch"].isoformat(),
         "sun": {"azimuth": sun_az, "elevation": sun_el},

@@ -20,6 +20,7 @@ import { Rover } from './rover/Rover';
 import { buildLunarModule } from './rover/models/nasa';
 import { ROVERS, type RoverSpec } from './rover/specs';
 import { Astronaut } from './eva/Astronaut';
+import { EvaCamera } from './eva/EvaCamera';
 import { Footprints } from './eva/Footprints';
 import { fmtHM } from './format';
 import { Helicopter } from './heli/Helicopter';
@@ -69,8 +70,10 @@ const SUN_INTENSITY = 9;
 const LEVELS: QualityLevel[] = ['low', 'medium', 'high', 'ultra'];
 /** Initial heading: west (toward Hadley Rille / the Jezero delta). */
 const START_YAW = Math.PI - THREE.MathUtils.degToRad(270);
-export type CameraMode = 'cabin' | 'chase' | 'top';
+export type CameraMode = 'cabin' | 'chase' | 'top' | 'partner' | 'tv';
 const CAMERA_CYCLE: CameraMode[] = ['cabin', 'chase', 'top'];
+/** On foot: behind, the partner's Hasselblad, the rover's TV camera, the helmet, above. */
+const EVA_CYCLE: CameraMode[] = ['chase', 'partner', 'tv', 'cabin', 'top'];
 
 export class Game {
   readonly renderer: THREE.WebGLRenderer;
@@ -131,6 +134,9 @@ export class Game {
   private q: QualitySettings;
   autoQuality: boolean;
   cameraMode: CameraMode = 'cabin';
+  private evaCam: EvaCamera | null = null;
+  private parkedLrv: { x: number; z: number; yaw: number } | null = null;
+  private baseFov = 68;
   /** Show the full HTML instrument overlay even in the cab. */
   hudOverlay = false;
   constellationsOn = false;
@@ -189,6 +195,7 @@ export class Game {
 
     this.scene.background = new THREE.Color(0x000000);
     this.camera = new THREE.PerspectiveCamera(isMobile ? 75 : 68, container.clientWidth / container.clientHeight, 0.08, 60000);
+    this.baseFov = this.camera.fov;
 
     if (mars) {
       // Mars: dusty sky, haze, sunlight reduced to 38 % (1.63 AU) and attenuated by dust.
@@ -442,7 +449,7 @@ export class Game {
     // Out on the left side (the commander's seat), facing where the rover faces.
     const x = r.x + f.z * 1.6, z = r.z - f.x * 1.6;
     const ground = (gx: number, gz: number) => Math.max(this.terrain.height(gx, gz), this.rocks.surfaceAt(gx, gz));
-    this.eva = new Astronaut(this.terrain, ground, x, z, Math.atan2(f.x, f.z));
+    this.eva = new Astronaut(this.terrain, ground, x, z, Math.atan2(f.x, f.z), (px, pz, br) => this.hardwareAt(px, pz, br));
     if (!this.footprints) {
       this.footprints = new Footprints(this.terrain, this.sunDir, 0.5 / world().radius);
       this.scene.add(this.footprints.mesh);
@@ -462,12 +469,43 @@ export class Game {
     this.chasePos.set(0, 0, 0);
     this.orbit.dist = 4.5;
     this.orbit.pitch = 0.3;
-    if (this.cameraMode === 'cabin') this.setCameraMode('chase');
+    if (this.cameraMode !== 'chase') this.setCameraMode('chase');
+    (this.evaCam ??= new EvaCamera(this.terrain)).start(this.eva);
     this.toast(t('evaOut'));
     if (this.sky) this.radio.say('evaOut', { delay: 1 });
   }
 
+  /**
+   * Hardware an astronaut cannot walk through: the LM descent stage (~4.3 m across)
+   * and its four footpads, the rover just left (its frame and wheels, 3.1 × 2.1 m) and
+   * the parked LRV.
+   */
+  private hardwareAt(x: number, z: number, r: number): boolean {
+    const lm = this.terrain.meta.landing;
+    if (world().id === 'moon' && lm) {
+      const dx = x - lm.x, dz = z - lm.z;
+      if (Math.hypot(dx, dz) < 2.2 + r) return true;
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+        if (Math.hypot(dx - Math.cos(a) * 4.4, dz - Math.sin(a) * 4.4) < 0.5 + r) return true;
+      }
+    }
+    const box = (cx: number, cz: number, yaw: number, hw: number, hl: number) => {
+      const dx = x - cx, dz = z - cz, c = Math.cos(yaw), s = Math.sin(yaw);
+      const lx = dx * c - dz * s, lz = dx * s + dz * c; // into the box frame (+z forward)
+      return Math.abs(lx) < hw + r && Math.abs(lz) < hl + r;
+    };
+    const rp = this.rover.object.position, f = this.rover.forwardVector(new THREE.Vector3());
+    const half = this.rover.spec.wheels.reduce((m, w) => Math.max(m, Math.abs(w[1])), 0) + this.rover.spec.wheelRadius;
+    const halfW = this.rover.spec.wheels.reduce((m, w) => Math.max(m, Math.abs(w[0])), 0) + 0.1;
+    if (box(rp.x, rp.z, Math.atan2(f.x, f.z), halfW, half)) return true;
+    const lrv = this.parkedLrv;
+    return !!lrv && box(lrv.x, lrv.z, lrv.yaw, 1.0, 1.5);
+  }
+
   private exitEva(): void {
+    if (this.cameraMode === 'partner' || this.cameraMode === 'tv') this.setCameraMode('chase');
+    this.camera.fov = this.baseFov;
     if (!this.eva) return;
     this.scene.remove(this.eva.object);
     this.eva.dispose();
@@ -775,7 +813,9 @@ export class Game {
     if (a === 'pause') return; // handled by UI
     if (this.paused) return;
     if (a === 'camera') {
-      this.setCameraMode(CAMERA_CYCLE[(CAMERA_CYCLE.indexOf(this.cameraMode) + 1) % CAMERA_CYCLE.length]);
+      const cycle = this.eva ? EVA_CYCLE : CAMERA_CYCLE;
+      this.setCameraMode(cycle[(cycle.indexOf(this.cameraMode) + 1) % cycle.length]);
+      if (this.eva) this.toast(t(`evaCam_${this.cameraMode}`));
       this.audio.click(1800);
     } else if (a === 'top') {
       this.setCameraMode(this.cameraMode === 'top' ? 'cabin' : 'top');
@@ -980,7 +1020,15 @@ export class Game {
     const pitch = Math.asin(THREE.MathUtils.clamp(fwd.y, -1, 1));
     const vfov = THREE.MathUtils.degToRad(this.camera.fov);
     const groundFrac = THREE.MathUtils.clamp(0.5 - pitch / vfov, 0, 1);
-    this.sky?.setAdaptation(1 - 0.85 * THREE.MathUtils.smoothstep(groundFrac, 0.1, 0.65));
+    // The Sun itself in the field of view blinds eye and film alike: no stars at all.
+    const sunOff = Math.acos(THREE.MathUtils.clamp(fwd.dot(this.sunDir), -1, 1));
+    const sunGlare = 1 - THREE.MathUtils.smoothstep(sunOff, vfov * 0.5, vfov * 0.5 + 0.35);
+    this.sky?.setAdaptation((1 - 0.85 * THREE.MathUtils.smoothstep(groundFrac, 0.1, 0.65)) * (1 - 0.95 * sunGlare));
+    // The visor mirrors the scene when the astronaut is seen up close (not from inside the helmet).
+    const e = this.eva;
+    if (e && this.cameraMode !== 'cabin' && this.q.level !== 'low' && this.camera.position.distanceTo(e.pos) < 25) {
+      e.updateVisor(this.renderer, this.scene, (on) => this.sky?.hideFlare(on));
+    }
     if (this.composer) this.composer.render();
     else this.renderer.render(this.scene, this.camera);
   }
@@ -1198,6 +1246,7 @@ export class Game {
       // pointed at the LM to film the lift-off.
       const lm = this.terrain.meta.landing;
       g.rotation.y = Math.atan2(lm.x - x, lm.z - z);
+      this.parkedLrv = { x, z, yaw: g.rotation.y };
       g.position.set(x, this.terrain.height(x, z) + 0.76, z);
       m.animate({ dt: 0.016, time: 0, speed: 0, steer: 0, lookYaw: 0, lookPitch: 0, parked: true, wheelLocal: m.wheels.map((w) => w.steer.position.clone()), preview: false });
       this.scene.add(g);
@@ -1461,6 +1510,12 @@ export class Game {
     const rover = this.rover;
     if ((this.heli || this.eva) && !this.debugCam) {
       const h = (this.heli ?? this.eva)!;
+      if (this.eva && this.evaCam && (this.cameraMode === 'partner' || this.cameraMode === 'tv')) {
+        const r = this.rover.object.position;
+        this.evaCam.shoot(this.cameraMode, dt, this.eva, this.camera, { pos: r, fwd: this.rover.forwardVector(new THREE.Vector3()) }, this.baseFov);
+        return;
+      }
+      this.camera.fov = this.baseFov;
       if (this.cameraMode === 'cabin') {
         h.camAnchor.updateMatrixWorld();
         h.camAnchor.getWorldPosition(this.camera.position);
@@ -1470,7 +1525,9 @@ export class Game {
       } else {
         const p = h.object.position;
         const top = this.cameraMode === 'top';
-        const yaw = h.yaw + this.orbit.yaw;
+        const dr = this.input.drive;
+        const ec = this.eva && this.evaCam && !top ? this.evaCam.chase(dt, this.eva, Math.abs(dr.throttle) + Math.abs(dr.brake) + Math.abs(dr.steer) > 0.05) : null;
+        const yaw = h.yaw + this.orbit.yaw + (ec ? this.evaCam!.idleYaw : 0);
         const d = top ? Math.max(6, this.topHeight * 0.3) : this.orbit.dist;
         const pitch = top ? 1.45 : this.orbit.pitch;
         // Aim at the helicopter's body, or at an astronaut's chest.
@@ -1481,6 +1538,8 @@ export class Game {
         const gy = this.terrain.height(this.chasePos.x, this.chasePos.z) + 0.4;
         if (this.chasePos.y < gy) this.chasePos.y = gy;
         this.camera.position.copy(this.chasePos);
+        // Stepping off the rover: first seen from in front, then the camera swings behind.
+        if (ec && ec.intro > 0) this.camera.position.lerp(ec.from, ec.intro);
         this.camera.up.set(0, 1, 0);
         this.camera.lookAt(p.x, p.y + aimY - 0.05, p.z);
         this.camera.near = 0.05;

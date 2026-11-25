@@ -114,6 +114,16 @@ export class Sky {
   readonly earthDir: THREE.Vector3;
   private stars: THREE.Points;
   private flare: Lensflare;
+
+  private flareWas = false;
+
+  /** Hide the lens flare for a cube-map render (a screen-space effect), then restore it. */
+  hideFlare(hide: boolean): void {
+    if (hide) {
+      this.flareWas = this.flare.visible;
+      this.flare.visible = false;
+    } else this.flare.visible = this.flareWas;
+  }
   /** Stars, Milky Way and constellations: rotated as one sphere as time runs. */
   private celestial = new THREE.Group();
   private sunDisc!: THREE.Mesh;
@@ -156,17 +166,17 @@ export class Sky {
     this.group.add(sunDisc);
     this.sunDisc = sunDisc;
 
-    // Camera-lens glare: starburst + ghosts along the sun-centre axis; hidden when the sun is occluded.
-    const glow = radialTexture([[0, 'rgba(255,255,255,1)'], [0.08, 'rgba(255,250,240,0.9)'], [0.25, 'rgba(255,240,220,0.25)'], [1, 'rgba(0,0,0,0)']], 256);
-    const ring = radialTexture([[0, 'rgba(0,0,0,0)'], [0.75, 'rgba(0,0,0,0)'], [0.88, 'rgba(120,160,255,0.35)'], [0.95, 'rgba(255,200,120,0.2)'], [1, 'rgba(0,0,0,0)']]);
-    const ghost = radialTexture([[0, 'rgba(160,200,255,0.35)'], [0.7, 'rgba(120,170,255,0.15)'], [1, 'rgba(0,0,0,0)']]);
+    // No air, so no halo or aureole: the sky is black right up to the disc. What the
+    // Apollo frames show is the lens itself - a small over-exposed core and faint ghosts
+    // along the line through the image centre; hidden when the sun is occluded.
+    const glow = radialTexture([[0, 'rgba(255,255,255,1)'], [0.25, 'rgba(255,252,245,0.85)'], [0.55, 'rgba(255,245,230,0.12)'], [1, 'rgba(0,0,0,0)']], 256);
+    // Ghosts: small and faint (a few per cent), so they never close into a ring.
+    const ghost = radialTexture([[0, 'rgba(160,200,255,0.12)'], [0.7, 'rgba(120,170,255,0.05)'], [1, 'rgba(0,0,0,0)']]);
     const flare = new Lensflare();
-    flare.addElement(new LensflareElement(glow, 420, 0, new THREE.Color(1, 0.97, 0.9)));
-    flare.addElement(new LensflareElement(ring, 260, 0, new THREE.Color(1, 1, 1)));
-    flare.addElement(new LensflareElement(ghost, 60, 0.4));
-    flare.addElement(new LensflareElement(ghost, 110, 0.65));
-    flare.addElement(new LensflareElement(ring, 160, 0.9));
-    flare.addElement(new LensflareElement(ghost, 40, 1.15));
+    flare.addElement(new LensflareElement(glow, 70, 0, new THREE.Color(1, 0.98, 0.94)));
+    flare.addElement(new LensflareElement(ghost, 34, 0.5));
+    flare.addElement(new LensflareElement(ghost, 52, 0.85));
+    flare.addElement(new LensflareElement(ghost, 26, 1.25));
     flare.position.copy(this.sunDir).multiplyScalar(sunDist * 0.98);
     this.group.add(flare);
     this.flare = flare;
