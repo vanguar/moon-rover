@@ -74,10 +74,14 @@ export class Garage {
     host.innerHTML = '';
     const sites = WORLDS[this.world].sites;
     if (sites.length < 2) return;
+    const label = document.createElement('span');
+    label.className = 'sites-label';
+    host.appendChild(label);
     for (const s of sites) {
       const b = document.createElement('button');
       b.className = `site-btn${s.id === site().id ? ' on' : ''}`;
       b.dataset.site = s.id;
+      b.innerHTML = `<img alt="" src="${import.meta.env.BASE_URL}photos/site_${s.id}.jpg"><span><b></b><small></small></span>`;
       b.addEventListener('click', () => {
         if (s.id !== site().id) this.onSite(s.id);
       });
@@ -87,7 +91,13 @@ export class Garage {
   }
 
   private updateSiteTexts(): void {
-    document.querySelectorAll<HTMLButtonElement>('.site-btn').forEach((b) => (b.textContent = t(`siteBtn_${b.dataset.site}`)));
+    const label = document.querySelector('.sites-label');
+    if (label) label.textContent = t('siteLabel');
+    document.querySelectorAll<HTMLButtonElement>('.site-btn').forEach((b) => {
+      const [name, mission] = t(`siteBtn_${b.dataset.site}`).split(' · ');
+      b.querySelector('b')!.textContent = name;
+      b.querySelector('small')!.textContent = mission ?? '';
+    });
   }
 
   private setView(v: 'photo' | '3d'): void {
