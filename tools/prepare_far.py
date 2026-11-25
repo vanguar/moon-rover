@@ -66,6 +66,29 @@ def march_shadow(h, step, az_deg, el_deg, max_d):
     return lit
 
 
+def despike(h, limit=40.0):
+    """
+    Single-cell spikes and pits of the SLDEM (a cell standing more than `limit` m above
+    or below all eight neighbours - a ~65° cone at this spacing, which no real lunar
+    slope makes; one at Taurus-Littrow rose 170 m as a sharp pyramid on the horizon)
+    take the median of their neighbours. Real cliffs keep neighbours on their own side
+    and are untouched (Apollo 15 has none).
+    """
+    from scipy import ndimage
+
+    fp = np.ones((3, 3), bool)
+    fp[1, 1] = False
+    for _ in range(3):
+        mx = ndimage.maximum_filter(h, footprint=fp, mode="nearest")
+        mn = ndimage.minimum_filter(h, footprint=fp, mode="nearest")
+        bad = (h - mx > limit) | (mn - h > limit)
+        if not bad.any():
+            break
+        print(f"SLDEM spikes/pits removed: {int(bad.sum())}")
+        h = np.where(bad, ndimage.median_filter(h, footprint=fp, mode="nearest"), h)
+    return h
+
+
 def main():
     meta_path = os.path.join(OUT, "terrain.json")
     meta = json.load(open(meta_path, encoding="utf-8"))
@@ -78,7 +101,7 @@ def main():
     zz, xx = np.meshgrid(coords, coords, indexing="ij")  # rows: z (south), cols: x (east)
     lat = lat_c - np.degrees(zz / R_MOON)
     lon = lon_c + np.degrees(xx / (R_MOON * cos_sp))
-    h = sample_sldem(dem, lat, lon)
+    h = despike(sample_sldem(dem, lat, lon))
 
     # Vertical alignment with the NAC DTM over the DTM window.
     hm = heightmap_io.load(OUT).astype(np.float64)

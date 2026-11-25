@@ -118,7 +118,7 @@ const W = setWorld(settings.world);
 // ?site=apollo17 likewise picks the landing site.
 const SITE = setSite(new URLSearchParams(location.search).get('site') ?? settings.site[W.id]);
 document.body.classList.add(`world-${W.id}`);
-setVariant(W.id);
+setVariant(W.id, SITE.id);
 setLang(settings.lang ?? detectLang());
 
 const loadBar = $<HTMLDivElement>('#load-bar');
@@ -284,6 +284,17 @@ function setupMenu(game: Game): void {
       document.body.classList.add('switching');
       const u = new URL(location.href);
       u.searchParams.delete('world');
+      u.searchParams.delete('site');
+      setTimeout(() => location.replace(u.toString()), 60);
+    },
+    (id) => {
+      // Another landing site: its own terrain and sky - reload into it, as for a world.
+      settings.site[W.id] = id;
+      saveSettings(settings);
+      $('#world-note').textContent = t('siteLoading');
+      document.body.classList.add('switching');
+      const u = new URL(location.href);
+      u.searchParams.delete('site');
       setTimeout(() => location.replace(u.toString()), 60);
     },
   );

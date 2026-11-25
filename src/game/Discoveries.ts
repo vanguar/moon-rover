@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { lang, t } from '../i18n';
+import { site as currentSite } from '../world';
 import type { TerrainData } from '../terrain/TerrainData';
 
 /**
- * Real places and hardware of Apollo 15 at their LROC / IAU coordinates
+ * Real places and hardware of the landing site at their LROC / IAU / survey coordinates
  * (terrain.json "sites"). Photograph one in photo mode (F) from within its radius
  * to open its card: an archive NASA frame taken there and a short fact; found
  * sites go into the journal (saved in localStorage).
@@ -28,6 +29,19 @@ const PHOTOS: Record<string, { file: string; frame: string; radius: number }> = 
   rille: { file: 'rille.jpg', frame: 'AS15-82-11110…11116 (pan, station 9a)', radius: 120 },
 };
 
+/** Apollo 17: frames from the ALSJ image library, each taken at that place. */
+const PHOTOS_A17: Record<string, { file: string; frame: string; radius: number }> = {
+  lm: { file: 'apollo17/lm.jpg', frame: 'AS17-147-22527', radius: 60 },
+  lrv: { file: 'apollo17/lrv.jpg', frame: 'AS17-147-22526', radius: 40 },
+  alsep: { file: 'apollo17/alsep.jpg', frame: 'AS17-134-20500', radius: 50 },
+  flag: { file: 'apollo17/flag.jpg', frame: 'AS17-134-20384', radius: 30 },
+  st2: { file: 'apollo17/st2.jpg', frame: 'AS17-137-20903', radius: 150 },
+  st4: { file: 'apollo17/st4.jpg', frame: 'AS17-137-20990', radius: 160 },
+  st5: { file: 'apollo17/st5.jpg', frame: 'AS17-145-22165', radius: 320 },
+  st6: { file: 'apollo17/st6.jpg', frame: 'AS17-140-21496', radius: 120 },
+  st9: { file: 'apollo17/st9.jpg', frame: 'AS17-142-21803', radius: 150 },
+};
+
 /** Mars: Perseverance's own photographs of the places (NASA/JPL-Caltech/ASU/MSSS). */
 const PHOTOS_MARS: Record<string, { file: string; frame: string; radius: number }> = {
   landing: { file: 'mars/landing.jpg', frame: 'PIA24264', radius: 60 },
@@ -38,6 +52,7 @@ const PHOTOS_MARS: Record<string, { file: string; frame: string; radius: number 
 
 const KEY_MOON = 'moon-rover-journal';
 const KEY_MARS = 'mars-rover-journal';
+const KEY_MOON17 = 'moon17-rover-journal';
 
 export class Discoveries {
   readonly sites: Site[] = [];
@@ -47,9 +62,10 @@ export class Discoveries {
   private key: string;
 
   constructor(terrain: TerrainData) {
-    this.key = terrain.meta.body === 'mars' ? KEY_MARS : KEY_MOON;
+    const a17 = currentSite().id === 'apollo17';
+    this.key = terrain.meta.body === 'mars' ? KEY_MARS : a17 ? KEY_MOON17 : KEY_MOON;
     const base = import.meta.env.BASE_URL;
-    const table = terrain.meta.body === 'mars' ? PHOTOS_MARS : PHOTOS;
+    const table = terrain.meta.body === 'mars' ? PHOTOS_MARS : a17 ? PHOTOS_A17 : PHOTOS;
     for (const [id, s] of Object.entries(terrain.meta.sites ?? {})) {
       const p = table[id];
       if (!p) continue;

@@ -82,8 +82,15 @@ function buildMilkyWayMap(tex: THREE.Texture, icrfToGame0: THREE.Matrix4): THREE
         float ra = atan(d.y, d.x);
         float dec = asin(clamp(d.z, -1.0, 1.0));
         // Map centred on RA 0h, RA increasing to the left.
-        vec2 uv = vec2(fract(0.5 - ra / 6.2831853), 0.5 + dec / 3.1415927);
-        vec3 c = texture2D(uMap, uv).rgb;
+        float u = 0.5 - ra / 6.2831853, v = 0.5 + dec / 3.1415927;
+        // fract() jumps by 1 where RA wraps: taken as is, the screen derivatives there
+        // pick the coarsest mip and draw a dotted seam across the sky. Use the derivatives
+        // of whichever of two wrappings is continuous at this pixel.
+        float ua = fract(u), ub = fract(u + 0.5) - 0.5;
+        bool useB = abs(dFdx(ua)) + abs(dFdy(ua)) > abs(dFdx(ub)) + abs(dFdy(ub));
+        vec2 gx = vec2(useB ? dFdx(ub) : dFdx(ua), dFdx(v));
+        vec2 gy = vec2(useB ? dFdy(ub) : dFdy(ua), dFdy(v));
+        vec3 c = textureGrad(uMap, vec2(ua, v), gx, gy).rgb;
         // Faint: seen only by a dark-adapted eye (no sunlit ground in view).
         gl_FragColor = vec4(c * 0.55 * uAdapt * uAdapt, 1.0);
         #include <colorspace_fragment>

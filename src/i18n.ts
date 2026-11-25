@@ -1,5 +1,6 @@
 import { GAME_STRINGS } from './i18nGame';
 import { MISSION_STRINGS } from './i18nMission';
+import { SITE_STRINGS } from './i18nSites';
 import { WORLD_STRINGS } from './i18nWorlds';
 
 export type Lang = 'ru' | 'uk' | 'en' | 'de' | 'ar' | 'zh';
@@ -544,13 +545,16 @@ const zh: Dict = {
 };
 
 const DICTS: Record<Lang, Dict> = { ru, uk, en, de, ar, zh };
-for (const l of Object.keys(DICTS) as Lang[]) Object.assign(DICTS[l], WORLD_STRINGS[l], GAME_STRINGS[l] ?? {}, MISSION_STRINGS[l] ?? {});
+for (const l of Object.keys(DICTS) as Lang[]) Object.assign(DICTS[l], WORLD_STRINGS[l], GAME_STRINGS[l] ?? {}, MISSION_STRINGS[l] ?? {}, SITE_STRINGS[l] ?? {});
 let current: Lang = 'ru';
-/** World variant: keys `<key>_mars` override `<key>` on Mars. */
-let variant = '';
+/**
+ * Variants, most specific first: keys `<key>_<site>` override `<key>` at that landing
+ * site (src/i18nSites.ts), keys `<key>_mars` everywhere on Mars.
+ */
+let variants: string[] = [];
 
-export function setVariant(v: 'moon' | 'mars'): void {
-  variant = v === 'mars' ? '_mars' : '';
+export function setVariant(v: 'moon' | 'mars', site?: string): void {
+  variants = [site ? `_${site}` : '', v === 'mars' ? '_mars' : ''].filter((x) => x);
 }
 
 export function detectLang(): Lang {
@@ -564,7 +568,7 @@ export function detectLang(): Lang {
 }
 
 export function t(key: string): string {
-  if (variant) {
+  for (const variant of variants) {
     const v = DICTS[current][key + variant] ?? DICTS.en[key + variant];
     if (v !== undefined) return v;
   }

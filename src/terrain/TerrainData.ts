@@ -26,6 +26,8 @@ export interface TerrainMeta {
   /** Metres per heightmap unit (default: full 16-bit range between min and max). */
   heightStep?: number;
   sites?: Record<string, { lat: number; lon: number; x: number; z: number }>;
+  /** Surveyed surface hardware (Apollo 17 ALSEP instruments), game x/z. */
+  hardware?: { type: string; x: number; z: number }[];
   orthoSun?: { azimuth: number; incidence: number };
   projection?: { radius: number; standardParallel: number };
   /** Full-resolution orthophoto tiles streamed around the rover (DetailTiles). */

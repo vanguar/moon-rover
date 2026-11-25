@@ -24,6 +24,8 @@ interface Step {
   done: (c: MissionCtx) => boolean;
 }
 
+export type MissionKind = 'moon' | 'moon17' | 'mars' | 'heli';
+
 export class Missions {
   readonly id: string;
   private steps: Step[];
@@ -36,7 +38,7 @@ export class Missions {
   private navText = this.nav?.querySelector('span') ?? null;
   onStep?: (key: string, finished: boolean) => void;
 
-  constructor(terrain: TerrainData, kind: 'moon' | 'mars' | 'heli') {
+  constructor(terrain: TerrainData, kind: MissionKind) {
     this.id = `mission-${kind}`;
     const s = terrain.meta.sites ?? {};
     const site = (k: string) => () => (s[k] ? { x: s[k].x, z: s[k].z } : null);
@@ -51,6 +53,16 @@ export class Missions {
         { key: 'm_spur', target: site('spur'), done: (c) => c.found.has('spur') },
         { key: 'm_stgeorge', target: site('stgeorge'), done: (c) => c.found.has('stgeorge') },
         { key: 'm_rille', target: site('rille'), done: (c) => c.found.has('rille') },
+        { key: 'm_home', target: () => ({ x: L.x, z: L.z }), done: (c) => c.atBase },
+      ];
+    } else if (kind === 'moon17') {
+      // Taurus-Littrow: the LM site, then the geology stations in the order of the real
+      // EVA-2 (South Massif and back: 2, 4, 5) and EVA-3 (North Massif: 6, then 9).
+      this.steps = [
+        { key: 'm_drive', done: (c) => c.odometer > 25 },
+        ...['lrv', 'alsep', 'flag', 'lm', 'st2', 'st4', 'st5', 'st6', 'st9'].map((id) => ({
+          key: `m17_${id}`, target: site(id), done: (c: MissionCtx) => c.found.has(id),
+        })),
         { key: 'm_home', target: () => ({ x: L.x, z: L.z }), done: (c) => c.atBase },
       ];
     } else if (kind === 'mars') {

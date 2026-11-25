@@ -1,6 +1,6 @@
 import { t } from '../i18n';
 import { roversFor, type RoverId, type RoverSpec } from '../rover/specs';
-import type { WorldId } from '../world';
+import { site, WORLDS, type SiteId, type WorldId } from '../world';
 import { PhotoFx } from './PhotoFx';
 import { RoverPreview } from './RoverPreview';
 
@@ -27,6 +27,7 @@ export class Garage {
     selected: RoverId,
     private onSelect: (s: RoverSpec) => void,
     private onWorld: (w: WorldId) => void,
+    private onSite: (id: SiteId) => void = () => {},
   ) {
     const list = roversFor(world);
     this.selected = list.find((r) => r.id === selected) ?? list[0];
@@ -63,7 +64,30 @@ export class Garage {
         if (b.dataset.world !== this.world) this.onWorld(b.dataset.world as WorldId);
       });
     });
+    this.buildSites();
     this.select(this.selected, true);
+  }
+
+  /** Landing-site buttons of the current world (none when it has a single site). */
+  private buildSites(): void {
+    const host = $('#sites');
+    host.innerHTML = '';
+    const sites = WORLDS[this.world].sites;
+    if (sites.length < 2) return;
+    for (const s of sites) {
+      const b = document.createElement('button');
+      b.className = `site-btn${s.id === site().id ? ' on' : ''}`;
+      b.dataset.site = s.id;
+      b.addEventListener('click', () => {
+        if (s.id !== site().id) this.onSite(s.id);
+      });
+      host.appendChild(b);
+    }
+    this.updateSiteTexts();
+  }
+
+  private updateSiteTexts(): void {
+    document.querySelectorAll<HTMLButtonElement>('.site-btn').forEach((b) => (b.textContent = t(`siteBtn_${b.dataset.site}`)));
   }
 
   private setView(v: 'photo' | '3d'): void {
@@ -95,6 +119,7 @@ export class Garage {
 
   /** (Re)write all language-dependent text. */
   updateTexts(): void {
+    this.updateSiteTexts();
     for (const [id, c] of this.cards) {
       c.el.querySelector('b')!.textContent = t(`r_${id}`);
       const spec = roversFor(this.world).find((r) => r.id === id)!;

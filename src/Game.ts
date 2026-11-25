@@ -26,8 +26,8 @@ import { Helicopter } from './heli/Helicopter';
 import { Radio } from './audio/Radio';
 import { Meteors } from './fx/Meteors';
 import { Discoveries } from './game/Discoveries';
-import { Missions } from './game/Missions';
-import { buildAlsep } from './game/Hardware';
+import { Missions, type MissionKind } from './game/Missions';
+import { buildAlsep, buildAlsep17 } from './game/Hardware';
 import { buildLrvModel } from './rover/model';
 import { applyWear } from './rover/models/wear';
 import { Rocks } from './terrain/Rocks';
@@ -86,7 +86,7 @@ export class Game {
   private hemi: THREE.HemisphereLight;
   private earthshine: THREE.DirectionalLight | null = null;
   /** Simulated UTC time (ms) and its rate relative to real time (Moon). */
-  simTime = APOLLO15_EVA1;
+  simTime: number;
   timeScale = 60;
   private baker: ShadowBaker | null = null;
   private starFrame0 = new THREE.Matrix4();
@@ -171,6 +171,9 @@ export class Game {
   ) {
     const W = world();
     const mars = W.id === 'mars';
+    // The site's own moment (terrain.json "epoch": start of the first moonwalk).
+    const epoch = Date.parse(terrain.meta.epoch ?? '');
+    this.simTime = Number.isFinite(epoch) ? epoch : APOLLO15_EVA1;
     setSurfacePhotometry(W.id, W.radius);
     this.q = quality;
     this.autoQuality = auto;
@@ -197,8 +200,8 @@ export class Game {
       // --- Moon: one hard sun, no sky light. Shadows are filled only by light
       // bounced off sunlit regolith (albedo ~0.12) — modelled as a hemisphere light
       // that reaches surfaces facing down/sideways — and by faint earthshine.
-      const l0 = terrain.meta.sites?.lm ?? { lat: 26.13224, lon: 3.634 };
-      const m0 = lunarSky(APOLLO15_EVA1, l0.lat, l0.lon).icrfToGame;
+      const l0 = this.lunarSite();
+      const m0 = lunarSky(this.simTime, l0.lat, l0.lon).icrfToGame;
       const icrfToGame0 = new THREE.Matrix4().set(m0[0][0], m0[0][1], m0[0][2], 0, m0[1][0], m0[1][1], m0[1][2], 0, m0[2][0], m0[2][1], m0[2][2], 0, 0, 0, 0, 1);
       this.sky = new Sky(terrain.meta.sun.azimuth, terrain.meta.sun.elevation, quality.stars, terrain.meta.earth, extras.stars, {
         constellations: extras.constellations,
@@ -241,8 +244,8 @@ export class Game {
       this.baker.setSun(this.sunDir, true);
       this.baker.bakeAll();
       this.terrainR.setShadowMaps(this.baker.near.texture, this.baker.far?.texture ?? null);
-      const l = terrain.meta.sites?.lm ?? { lat: 26.13224, lon: 3.634 };
-      const m0 = lunarSky(APOLLO15_EVA1, l.lat, l.lon).icrfToGame;
+      const l = this.lunarSite();
+      const m0 = lunarSky(this.simTime, l.lat, l.lon).icrfToGame;
       this.starFrame0.set(m0[0][0], m0[0][1], m0[0][2], 0, m0[1][0], m0[1][1], m0[1][2], 0, m0[2][0], m0[2][1], m0[2][2], 0, 0, 0, 0, 1);
       this.envSun.copy(this.sunDir);
     }
@@ -300,8 +303,9 @@ export class Game {
       this.meteors = new Meteors(terrain);
       this.scene.add(this.meteors.points, this.meteors.streaks, this.meteors.heads);
       // Craters made by earlier impacts stay (saved in the browser).
+      const craterKey = site().id === 'apollo15' ? 'moon-craters' : `moon-craters-${site().id}`;
       try {
-        const saved = JSON.parse(localStorage.getItem('moon-craters') ?? '[]') as number[][];
+        const saved = JSON.parse(localStorage.getItem(craterKey) ?? '[]') as number[][];
         for (const [x, z, r] of saved) {
           terrain.newCraters.push(x, z, r);
           this.terrainR.addCrater(x, z, r);
@@ -313,9 +317,9 @@ export class Game {
         terrain.newCraters.push(x, z, r);
         this.terrainR.addCrater(x, z, r);
         try {
-          const saved = JSON.parse(localStorage.getItem('moon-craters') ?? '[]') as number[][];
+          const saved = JSON.parse(localStorage.getItem(craterKey) ?? '[]') as number[][];
           saved.push([Math.round(x * 10) / 10, Math.round(z * 10) / 10, Math.round(r * 100) / 100]);
-          localStorage.setItem('moon-craters', JSON.stringify(saved.slice(-60)));
+          localStorage.setItem(craterKey, JSON.stringify(saved.slice(-60)));
         } catch {
           /* storage unavailable */
         }
@@ -330,7 +334,7 @@ export class Game {
     this.finds = new Discoveries(terrain);
     // Houston comments on finds on the Moon (1.3 light-seconds away), not on Mars.
     this.finds.onFound = (site) => (mars ? this.toast(t(`site_${site.id}`)) : this.radio.say(`find_${site.id}`, { delay: 0.5 }));
-    this.setMission(mars ? (spec.heli ? 'heli' : 'mars') : 'moon');
+    this.setMission(mars ? (spec.heli ? 'heli' : 'mars') : site().id === 'apollo17' ? 'moon17' : 'moon');
     if (spec.heli) this.enterHeli();
     this.input.onAction((a) => this.onAction(a));
     this.bindLook(this.renderer.domElement);
@@ -622,7 +626,9 @@ export class Game {
       // Falcon landed facing roughly west; the +Z hatch side of the model faces the rille.
       nasa.rotation.y = -Math.PI / 2;
       this.scene.add(nasa);
-      this.addFlag(x, z);
+      // The flag where it was surveyed (Apollo 17), else ~10 m north-east of the LM.
+      const flag = this.terrain.meta.sites?.flag;
+      this.addFlag(flag ? flag.x : x + 8, flag ? flag.z : z - 6);
       const R = this.physics.R;
       this.physics.world.createCollider(R.ColliderDesc.cylinder(1.8, 2.2).setTranslation(x, nasa.position.y + 3.2, z));
       for (let i = 0; i < 4; i++) {
@@ -675,8 +681,7 @@ export class Game {
   }
 
   /** The flag planted ~10 m north-east of the LM (aluminium pole, nylon flag on a top bar). */
-  private addFlag(lmX: number, lmZ: number): void {
-    const x = lmX + 8, z = lmZ - 6;
+  private addFlag(x: number, z: number): void {
     const g = new THREE.Group();
     const pole = new THREE.MeshStandardMaterial({ color: 0xd6d8da, metalness: 0.9, roughness: 0.3 });
     const c = document.createElement('canvas');
@@ -1140,7 +1145,7 @@ export class Game {
     this.chasePos.set(0, 0, 0);
   }
 
-  setMission(kind: 'moon' | 'mars' | 'heli'): void {
+  setMission(kind: MissionKind): void {
     this.mission = new Missions(this.terrain, kind);
     this.mission.onStep = (key, finished) => {
       this.audio.click(1400);
@@ -1177,18 +1182,20 @@ export class Game {
     }, camHdg);
   }
 
-  /** The parked Apollo 15 LRV and the ALSEP at their LROC positions. */
+  /** The parked LRV and the ALSEP at their surveyed positions. */
   private addApolloHardware(): void {
     const s = this.terrain.meta.sites;
     if (!s) return;
-    if (s.alsep) this.scene.add(buildAlsep(this.terrain, s.alsep.x, s.alsep.z));
+    const hw = this.terrain.meta.hardware;
+    if (s.alsep) this.scene.add(hw ? buildAlsep17(this.terrain, s.alsep.x, s.alsep.z, hw) : buildAlsep(this.terrain, s.alsep.x, s.alsep.z));
     if (s.lrv) {
       const m = buildLrvModel();
       applyWear(m.root, { dust: { value: 0.7 }, dustColor: new THREE.Color(0.2, 0.195, 0.188), lowY: -0.4, rootInv: { value: new THREE.Matrix4() } });
       const x = s.lrv.x, z = s.lrv.z;
       const g = new THREE.Group();
       g.add(m.root);
-      // Final parking: ~90 m east of the LM, the TV camera pointed at Falcon for the lift-off.
+      // Final parking (Apollo 15 ~90 m, Apollo 17 ~150 m east of the LM): the TV camera
+      // pointed at the LM to film the lift-off.
       const lm = this.terrain.meta.landing;
       g.rotation.y = Math.atan2(lm.x - x, lm.z - z);
       g.position.set(x, this.terrain.height(x, z) + 0.76, z);
@@ -1267,6 +1274,12 @@ export class Game {
     this.hud.atBase = atBase;
   }
 
+  /** Where the sky is computed: the LM (or the window centre). */
+  private lunarSite(): { lat: number; lon: number } {
+    const m = this.terrain.meta;
+    return m.sites?.lm ?? { lat: m.centerLat, lon: m.centerLon };
+  }
+
   /** Jump to a moment (UTC ms) and set the time rate (1 = real time). */
   setTime(ms: number, scale = this.timeScale): void {
     this.simTime = ms;
@@ -1281,7 +1294,7 @@ export class Game {
   private updateClock(dt: number, jump = false): void {
     if (!this.sky) return;
     this.simTime += dt * 1000 * this.timeScale;
-    const l = this.terrain.meta.sites?.lm ?? { lat: 26.13224, lon: 3.634 };
+    const l = this.lunarSite();
     const st = lunarSky(this.simTime, l.lat, l.lon);
     this.sunDir.set(...st.sun);
     const earth = new THREE.Vector3(...st.earth);

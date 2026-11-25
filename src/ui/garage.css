@@ -63,6 +63,15 @@ body.switching .m-wrap { opacity: 0.55; transition: opacity 0.3s; }
 }
 @keyframes planet-spin { from { background-position: 0 0; } to { background-position: -200% 0; } }
 .world-note { font: 13px var(--mono); color: var(--dim); }
+/* Landing sites of the current world (shown when it has more than one). */
+.sites { display: flex; gap: 8px; margin: -4px 0 12px; flex-wrap: wrap; }
+.sites:empty { display: none; }
+.site-btn {
+  font: 600 13px system-ui; color: var(--dim); padding: 6px 12px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03); border: 1px solid var(--edge); cursor: pointer; transition: border-color 0.2s, background 0.2s;
+}
+.site-btn:hover { color: inherit; border-color: var(--edge-hi); }
+.site-btn.on { color: inherit; border-color: var(--edge-hi); background: rgba(255, 255, 255, 0.07); }
 
 .g-grid { display: grid; grid-template-columns: minmax(220px, 0.5fr) minmax(520px, 1.5fr); gap: 14px; align-items: start; }
 .rail { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; max-height: min(62vh, 560px); overflow-y: auto; padding-inline-end: 4px; }
