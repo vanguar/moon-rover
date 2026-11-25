@@ -76,6 +76,8 @@ body.switching .m-wrap { opacity: 0.55; transition: opacity 0.3s; }
 .site-btn b { font: 800 15px system-ui; color: inherit; }
 .site-btn small { font-size: 12px; opacity: 0.8; }
 .site-btn:hover { color: inherit; border-color: var(--edge-hi); }
+.site-btn.soon { cursor: default; opacity: 0.55; padding-inline-start: 16px; border-style: dashed; }
+.site-btn.soon:hover { color: var(--dim); border-color: var(--edge); }
 .site-btn.on { color: #fff; border-color: var(--cyan); background: rgba(89, 208, 255, 0.1); box-shadow: 0 0 18px rgba(89, 208, 255, 0.18); }
 body.mobile .site-btn { padding: 3px 10px 3px 3px; }
 body.mobile .site-btn img { width: 44px; height: 33px; }

@@ -19,6 +19,8 @@ export interface WorldConfig {
   commonDir: string;
   /** Landing sites; the first is the default. */
   sites: SiteConfig[];
+  /** Sites being prepared: shown in the garage, not yet selectable. */
+  upcoming?: string[];
   /** Has an atmosphere: sky light, haze, wind, drag on dust. */
   atmosphere: boolean;
   /** Air density at the surface, kg/m³. */
@@ -43,6 +45,7 @@ export const WORLDS: Record<WorldId, WorldConfig> = {
     id: 'mars', gravity: 3.721, radius: 3389500, commonDir: 'data/mars/', atmosphere: true, airDensity: 0.017,
     solarFactor: 0.38, rockDensity: 1.5,
     sites: [{ id: 'jezero', dataDir: 'data/mars/' }],
+    upcoming: ['gale'],
   },
 };
 

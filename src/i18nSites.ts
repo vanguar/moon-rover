@@ -6,6 +6,9 @@
 type Dict = Record<string, string>;
 
 const ru: Dict = {
+  siteBtn_jezero: 'Кратер Езеро · Perseverance',
+  siteBtn_gale: 'Кратер Гейл · Curiosity',
+  siteSoon: 'скоро',
   siteLabel: 'Место посадки:',
   siteBtn_apollo15: 'Борозда Хэдли · Аполлон-15',
   siteBtn_apollo17: 'Тавр-Литтров · Аполлон-17',
@@ -72,6 +75,9 @@ const ru: Dict = {
 };
 
 const uk: Dict = {
+  siteBtn_jezero: 'Кратер Єзеро · Perseverance',
+  siteBtn_gale: 'Кратер Гейл · Curiosity',
+  siteSoon: 'незабаром',
   siteLabel: 'Місце посадки:',
   siteBtn_apollo15: 'Борозна Хедлі · Аполлон-15',
   siteBtn_apollo17: 'Тавр-Літтров · Аполлон-17',
@@ -133,6 +139,9 @@ const uk: Dict = {
 };
 
 const en: Dict = {
+  siteBtn_jezero: 'Jezero crater · Perseverance',
+  siteBtn_gale: 'Gale crater · Curiosity',
+  siteSoon: 'coming soon',
   siteLabel: 'Landing site:',
   siteBtn_apollo15: 'Hadley Rille · Apollo 15',
   siteBtn_apollo17: 'Taurus-Littrow · Apollo 17',
@@ -200,6 +209,9 @@ const en: Dict = {
 };
 
 const de: Dict = {
+  siteBtn_jezero: 'Krater Jezero · Perseverance',
+  siteBtn_gale: 'Krater Gale · Curiosity',
+  siteSoon: 'bald',
   siteLabel: 'Landeplatz:',
   siteBtn_apollo15: 'Hadley-Rille · Apollo 15',
   siteBtn_apollo17: 'Taurus-Littrow · Apollo 17',
@@ -212,6 +224,9 @@ const de: Dict = {
 };
 
 const ar: Dict = {
+  siteBtn_jezero: 'فوهة جيزيرو · Perseverance',
+  siteBtn_gale: 'فوهة غيل · Curiosity',
+  siteSoon: 'قريبًا',
   siteLabel: 'موقع الهبوط:',
   siteBtn_apollo15: 'أخدود هادلي · أبولو 15',
   siteBtn_apollo17: 'توروس-ليترو · أبولو 17',
@@ -222,6 +237,9 @@ const ar: Dict = {
 };
 
 const zh: Dict = {
+  siteBtn_jezero: '耶泽罗陨石坑 · Perseverance',
+  siteBtn_gale: '盖尔陨石坑 · Curiosity',
+  siteSoon: '即将推出',
   siteLabel: '着陆点：',
   siteBtn_apollo15: '哈德利月溪 · 阿波罗15号',
   siteBtn_apollo17: '金牛-利特罗 · 阿波罗17号',

@@ -73,7 +73,8 @@ export class Garage {
     const host = $('#sites');
     host.innerHTML = '';
     const sites = WORLDS[this.world].sites;
-    if (sites.length < 2) return;
+    const upcoming = WORLDS[this.world].upcoming ?? [];
+    if (sites.length + upcoming.length < 2) return;
     const label = document.createElement('span');
     label.className = 'sites-label';
     host.appendChild(label);
@@ -87,6 +88,14 @@ export class Garage {
       });
       host.appendChild(b);
     }
+    for (const id of upcoming) {
+      const b = document.createElement('button');
+      b.className = 'site-btn soon';
+      b.disabled = true;
+      b.dataset.site = id;
+      b.innerHTML = '<span><b></b><small></small></span>';
+      host.appendChild(b);
+    }
     this.updateSiteTexts();
   }
 
@@ -96,7 +105,7 @@ export class Garage {
     document.querySelectorAll<HTMLButtonElement>('.site-btn').forEach((b) => {
       const [name, mission] = t(`siteBtn_${b.dataset.site}`).split(' · ');
       b.querySelector('b')!.textContent = name;
-      b.querySelector('small')!.textContent = mission ?? '';
+      b.querySelector('small')!.textContent = b.classList.contains('soon') ? t('siteSoon') : mission ?? '';
     });
   }
 
