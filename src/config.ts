@@ -122,6 +122,8 @@ export interface UserSettings {
   quality: QualityLevel | 'auto';
   world: 'moon' | 'mars';
   rover: { moon: string; mars: string };
+  /** Landing site chosen on each world (src/world.ts). */
+  site: { moon?: string; mars?: string };
   /** Mars weather: 'auto' cycles calm / dust devils / storms. */
   weather: 'auto' | 'calm' | 'devils' | 'storm';
   tiltSteering: boolean;
@@ -130,13 +132,13 @@ export interface UserSettings {
 
 export function loadSettings(): UserSettings {
   const def: UserSettings = {
-    quality: 'auto', tiltSteering: false, volume: 0.8, world: 'moon', rover: { moon: 'lrv', mars: 'perseverance' }, weather: 'auto',
+    quality: 'auto', tiltSteering: false, volume: 0.8, world: 'moon', rover: { moon: 'lrv', mars: 'perseverance' }, site: {}, weather: 'auto',
   };
   try {
     const s = localStorage.getItem(STORE_KEY);
     if (!s) return def;
     const v = JSON.parse(s) as Partial<UserSettings>;
-    return { ...def, ...v, rover: { ...def.rover, ...(v.rover ?? {}) } };
+    return { ...def, ...v, rover: { ...def.rover, ...(v.rover ?? {}) }, site: { ...(v.site ?? {}) } };
   } catch {
     return def;
   }

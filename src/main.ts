@@ -12,7 +12,7 @@ import { ROVERS, roversFor } from './rover/specs';
 import { loadTerrainData } from './terrain/TerrainData';
 import { Garage } from './ui/Garage';
 import { dataUrl } from './version';
-import { setWorld, type WorldId } from './world';
+import { setSite, setWorld, type WorldId } from './world';
 
 const BASE = import.meta.env.BASE_URL;
 
@@ -115,6 +115,8 @@ const settings = loadSettings() as ReturnType<typeof loadSettings> & { lang?: La
 const urlWorld = new URLSearchParams(location.search).get('world');
 if (urlWorld === 'moon' || urlWorld === 'mars') settings.world = urlWorld;
 const W = setWorld(settings.world);
+// ?site=apollo17 likewise picks the landing site.
+const SITE = setSite(new URLSearchParams(location.search).get('site') ?? settings.site[W.id]);
 document.body.classList.add(`world-${W.id}`);
 setVariant(W.id);
 setLang(settings.lang ?? detectLang());
@@ -168,7 +170,9 @@ async function boot(): Promise<void> {
   const physicsModule = import('./physics/Physics');
   // Official NASA models (LM at the Apollo site; Perseverance and Ingenuity on Mars), in parallel with the data.
   const models = Promise.all((W.id === 'moon' ? (['lm'] as const) : (['perseverance', 'ingenuity'] as const)).map((m) => loadNasaModel(m).catch((e) => console.warn('[models]', m, e))));
-  const D = `${BASE}${W.dataDir}`;
+  const D = `${BASE}${SITE.dataDir}`;
+  // Data every site of the world shares (rock atlas, Milky Way map).
+  const C = `${BASE}${W.commonDir}`;
   const moon = W.id === 'moon';
   const bin = (name: string) =>
     fetch(dataUrl(`${D}${name}`)).then((r) => (r.ok ? r.arrayBuffer() : null)).then((b) => (b ? new Float32Array(b) : undefined)).catch(() => undefined);
@@ -183,7 +187,7 @@ async function boot(): Promise<void> {
     moon ? bin('constellations.bin') : Promise.resolve(undefined),
     loadTexture(dataUrl(`${D}far_shadow.png`), 'other', false).catch(() => undefined),
     moon ? Promise.resolve(undefined) : loadTexture(dataUrl(`${D}far_albedo.jpg`), 'other', false).catch(() => undefined),
-    loadTexture(dataUrl(`${D}rocks.jpg`), 'other', true).catch(() => undefined),
+    loadTexture(dataUrl(`${C}rocks.jpg`), 'other', true).catch(() => undefined),
   ]);
   if (rockPhoto) {
     rockPhoto.colorSpace = THREE.SRGBColorSpace;
@@ -194,7 +198,7 @@ async function boot(): Promise<void> {
   // and the photographic Milky Way start only now, so they do not share the bandwidth
   // with the essential data, and are attached when they arrive (title screen or later).
   const orthoHi = loadTexture(dataUrl(`${D}ortho_hi.jpg`), 'late', false).catch(() => undefined);
-  const milkyWay = moon ? loadTexture(dataUrl(`${D}milkyway.jpg`), 'late', true).catch(() => undefined) : undefined;
+  const milkyWay = moon ? loadTexture(dataUrl(`${C}milkyway.jpg`), 'late', true).catch(() => undefined) : undefined;
   await models;
   loadText.textContent = t('loadPhysics');
   const { Physics } = await physicsModule;

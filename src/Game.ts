@@ -36,7 +36,7 @@ import { FarTerrain } from './terrain/FarTerrain';
 import { TerrainRenderer } from './terrain/TerrainRenderer';
 import { DetailTiles } from './terrain/DetailTiles';
 import { t } from './i18n';
-import { world } from './world';
+import { site, world } from './world';
 
 /** Optional data for the scene; the centre orthophoto and the Milky Way map come later (setOrthoHi, setMilkyWay). */
 export interface GameExtras {
@@ -231,7 +231,7 @@ export class Game {
     this.terrainR = new TerrainRenderer(terrain, ortho, baked, quality, extras.farShadow, extras.farAlbedo);
     this.scene.add(this.terrainR.group);
     if (terrain.meta.detail && quality.level !== 'low') {
-      this.detail = new DetailTiles(this.renderer, terrain, `${import.meta.env.BASE_URL}${W.dataDir}`);
+      this.detail = new DetailTiles(this.renderer, terrain, `${import.meta.env.BASE_URL}${site().dataDir}`);
       this.terrainR.setDetail(this.detail.texture, this.detail.rect, this.detail.slots, terrain.meta.detail.res, !!terrain.meta.detail.slopes);
     }
     this.terrainR.setSun(this.sunDir);
