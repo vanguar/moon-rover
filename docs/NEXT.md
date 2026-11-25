@@ -1,7 +1,7 @@
 # Где остановились и что дальше
 
 Файл для продолжения работы в новой сессии: «продолжай» = начать с раздела «Следующий пункт».
-Обновлено 25.11.2026, последний коммит на момент записи — `08580d2`.
+Обновлено 25.11.2026, последний коммит на момент записи — `c871a49`.
 
 ## Правила работы (просьбы автора проекта)
 
@@ -35,38 +35,42 @@
 | `894d377` | Скафандр A7L-B по фото; следы ботинок на каждом приземлении |
 | `08580d2` | (25.11) Астронавт: один бесшовный скафандр со скиннингом (SDF → marching cubes), походки ходьба/лоуп по ALSJ, физика μ·g, наклон atan(a/g), след на каждый шаг |
 
-## Следующий пункт: выбор локаций
+## Следующий пункт: выбор локаций (в работе, 25.11.2026)
 
-Вопрос автору, на котором остановились (ответа ещё нет — уточнить при старте):
+Автор ответил: **делать обе по порядку — сначала Аполлон-17, потом кратер Гейл.**
 
-> Это большая работа: для каждой точки нужно скачать исходные данные (порядка гигабайта) и прогнать
-> подготовку рельефа. Каждая новая локация добавит на сайт ~20–25 МБ, но качаются они только при выборе
-> этой локации.
-> 1. **Аполлон-17, долина Тавр-Литтров**: точная модель рельефа LROC NAC 2 м, места станций экипажа
->    и знаменитый расколотый валун Трейси.
-> 2. **Кратер Гейл, Curiosity**: модели рельефа HiRISE 1 м, гора Шарп на горизонте.
->
-> Начинать с обеих по порядку или сначала с одной?
+### Сделано
+- `8667c3e` — данные Аполлона-17 в `public/data/apollo17/` (10,4 МБ): DTM USGS/Haase 1,5 м + ортомозаика LROC 0,5 м,
+  окно 10,4×10,4 км (4000² по 2,6 м), все 9 станций внутри; шов стереомоделей DTM убран (`destripe`),
+  запечённое освещение снято со снимка (`tools/deshade.py`, бывший `deshade_mars.py`); дальний рельеф и небо
+  (`prepare_far.py --site apollo17`, `prepare_sky.py --site apollo17`). Конвейер: `tools/prepare_moon_site.py`,
+  `tools/moon_sites.py`. Исходники в `raw_data/apollo17/` (там же `ziplist.py` — чтение ZIP-архива Haase по HTTP Range).
+- `c871a49` — места посадки в `src/world.ts` (`sites`, `setSite()/site()`, `commonDir` для общих rocks/milkyway),
+  `settings.site[world]`, `?site=apollo17`; хеш у каждого файла данных отдельно (`__DATA_HASHES__`), предзагрузка
+  в HTML учитывает место; 9 проверенных кадров ALSJ в `public/photos/apollo17/` (lm, lrv, alsep, flag, st2, st4, st5, st6, st9).
+- С `?site=apollo17` рельеф уже грузится, но миссия, журнал, ALSEP и тексты пока от Аполлона-15.
 
-### Как сейчас устроено (отправная точка)
+### Осталось для Аполлона-17 (по порядку)
+1. Эпоха из `terrain.meta.epoch` вместо `APOLLO15_EVA1` (`src/Game.ts`: `simTime`, строки ~200 и ~244; запасные
+   координаты LM ~1284).
+2. `src/game/Hardware.ts`: вынести общие детали (центральная станция, SNAP-27, кабели) и добавить
+   `buildAlsep17(t, cx, cz, meta.hardware)` — LEAM, LACE, LSG с зонтиком, LSP, HFE, G/M по координатам из `hardware`
+   (первая попытка правки сорвалась из-за кавычек в heredoc — файл не изменён, писать через Write/Edit).
+   В `addApolloHardware` выбирать по `site().id`; флаг ставить в `sites.flag`, если он есть (`addFlag`).
+3. Миссия `moon17` в `src/game/Missions.ts`: m_drive → lrv → alsep → flag → lm → st5 Camelot → st4 Shorty →
+   st6 Tracy → st2 Nansen → st9 Van Serg → m_home; `setMission` по `site().id`.
+4. `src/game/Discoveries.ts`: таблица фото по месту (`apollo17/*.jpg`, кадры см. коммит c871a49; радиусы как у
+   Аполлона-15, для кратеров побольше), ключ журнала `moon17-rover-journal`; ключ кратеров `moon-craters-apollo17`.
+5. Тексты: в `src/i18n.ts` расширить `setVariant(world, site)` — ключи `<key>_apollo17` перекрывают базовые
+   (titleSub, lead, chip*, credit, worldMoonSub, failTextMoon, site_*, radio_find_*, mission-moon17_*); новый
+   файл `src/i18nSites.ts` (ru/uk/en/de, остальным — en). Sun 96°/16°, Earth 242°/46°, эпоха 11.12.1972 23:55 UTC.
+6. Гараж: ряд кнопок мест под Луна/Марс (`index.html` ~190, `src/ui/Garage.ts`, перезагрузка как в `onWorld`
+   в `src/main.ts`).
+7. Проверить в браузере обе локации Луны и Марс (скриншоты, никакой геометрии в природе), tsc, build → коммит, пуш.
 
-- `src/world.ts`: `WORLDS.moon` / `WORLDS.mars`, у каждого один `dataDir` (`data/` и `data/mars/`).
-  Понятия «место внутри мира» пока нет — его нужно ввести (например, `sites` у мира, `dataDir` у места,
-  выбор места в гараже рядом с кнопками Луна/Марс в `index.html`, сохранение в настройках, параметр URL).
-- Переключение мира — перезагрузка страницы (`Garage.onWorld` в `src/main.ts`); для места — так же.
-- Данные места: `terrain.json` (метаданные, `sites`, `landing`, `orthoHi`, `far`, `detail`…), `heightmap.bin`,
-  `ortho.jpg`, `ortho_hi.jpg`, `shadow.png`, `far_*.png/jpg`, `detail/` (тайлы), `rocks.jpg`.
-  Код, привязанный к Аполлону-15/Езеро, искать по `sites.lm`, `landing`, `APOLLO15`, `rochette`, миссиям
-  (`src/game/Missions.ts`, `src/game/Discoveries.ts`, `src/i18nMission.ts`), `addApolloHardware`, `placeArtuby`.
-- Подготовка данных: `tools/prepare_terrain.py` (Аполлон-15: NAC DTM + SLDEM2015 по краям),
-  `tools/prepare_mars.py` (Езеро: карты навигации Mars 2020, USGS), `prepare_far.py`, `prepare_detail.py`,
-  `deshade.py`, `prepare_rocktex.py`, `tools/heightmap_io.py` (формат карты высот).
-  Исходники лежат в `raw_data/` (в `.gitignore`).
-- Аполлон-17: LROC NAC DTM «APOLLO17» в том же архиве PDS, что и Аполлон-15
-  (`pds.lroc.im-ldi.com/data/LRO-L-LROC-5-RDR-V1.0/LROLRC_2001/DATA/SDP/NAC_DTM/…`) — точный путь проверить.
-  Солнце/Земля на эпоху EVA — `tools/ephemeris.py`.
-- Гейл: подобрать HiRISE DTM района посадки MSL (Bradbury Landing) в PDS / на uahirise.org, CTX DTM для краёв;
-  проверить лицензию и размеры перед скачиванием.
+### Затем — кратер Гейл (Curiosity)
+HiRISE DTM района Bradbury Landing (PDS / uahirise.org), CTX DTM по краям, гора Шарп на горизонте;
+конвейер по образцу `tools/prepare_mars.py` + `deshade.py --dir public/data/gale`; место `gale` в `WORLDS.mars.sites`.
 
 ## Известные ограничения (честно записанные)
 
