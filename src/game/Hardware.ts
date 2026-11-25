@@ -5,6 +5,14 @@ import { bakeByMaterial } from '../rover/models/kit';
 
 type Add = (geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number) => THREE.Mesh;
 
+/** A solid instrument: centre relative to the central station, radius and height (m). */
+export interface Solid {
+  x: number;
+  z: number;
+  r: number;
+  h: number;
+}
+
 /** Materials and a placer that sets each part on the ground under it (relative to the central station). */
 function kit(t: TerrainData, cx: number, cz: number) {
   const g = new THREE.Group();
@@ -25,7 +33,9 @@ function kit(t: TerrainData, cx: number, cz: number) {
     g.add(mesh);
     return mesh;
   };
-  return { g, add, mat };
+  const solids: Solid[] = [];
+  g.userData.solids = solids;
+  return { g, add, mat, solids };
 }
 type Mat = ReturnType<typeof kit>['mat'];
 
@@ -72,9 +82,11 @@ function finish(g: THREE.Group, t: TerrainData, cx: number, cz: number): THREE.G
  * 26.13333° N, 3.62837° E): ~42 m west and ~22 m south of the central station.
  */
 export function buildAlsep(t: TerrainData, cx: number, cz: number): THREE.Group {
-  const { g, add, mat: k } = kit(t, cx, cz);
+  const { g, add, mat: k, solids } = kit(t, cx, cz);
   centralStation(add, k);
   const rtg = new THREE.Vector3(-2.6, 0, 1.2);
+  solids.push({ x: 0, z: 0, r: 0.38, h: 0.65 }, { x: -2.6, z: 1.2, r: 0.42, h: 0.65 }, { x: 3.2, z: -3.8, r: 0.3, h: 0.2 },
+    { x: -5, z: -3, r: 0.25, h: 0.5 }, { x: 4.8, z: 2.2, r: 0.28, h: 0.65 }, { x: -42, z: 22, r: 0.6, h: 0.6 });
   snap27(add, k, rtg);
   // Passive seismometer under its aluminised-Mylar thermal shroud.
   const pse = new THREE.Vector3(3.2, 0, -3.8);
@@ -115,8 +127,9 @@ export function buildAlsep(t: TerrainData, cx: number, cz: number): THREE.Group 
  * The four geophones are fist-sized and buried to the cable - not drawn.
  */
 export function buildAlsep17(t: TerrainData, cx: number, cz: number, items: { type: string; x: number; z: number }[]): THREE.Group {
-  const { g, add, mat: k } = kit(t, cx, cz);
+  const { g, add, mat: k, solids } = kit(t, cx, cz);
   centralStation(add, k);
+  solids.push({ x: 0, z: 0, r: 0.38, h: 0.65 });
   const wired: THREE.Vector3[] = [];
   for (const it of items) {
     const p = new THREE.Vector3(it.x - cx, 0, it.z - cz);
@@ -148,6 +161,7 @@ export function buildAlsep17(t: TerrainData, cx: number, cz: number, items: { ty
     } else if (it.type === 'hfe') box(0.28, 0.16, 0.22, k.white, 0.09);
     else if (it.type === 'gm') box(0.24, 0.14, 0.2, k.gold, 0.08);
     else continue;
+    solids.push({ x: p.x, z: p.z, r: it.type === 'rtg' ? 0.42 : it.type === 'lsg' ? 0.42 : 0.26, h: it.type === 'hfe' || it.type === 'gm' ? 0.18 : 0.55 });
     wired.push(p);
   }
   cables(add, k, wired);

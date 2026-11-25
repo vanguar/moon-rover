@@ -28,7 +28,7 @@ import { Radio } from './audio/Radio';
 import { Meteors } from './fx/Meteors';
 import { Discoveries } from './game/Discoveries';
 import { Missions, type MissionKind } from './game/Missions';
-import { buildAlsep, buildAlsep17 } from './game/Hardware';
+import { buildAlsep, buildAlsep17, type Solid } from './game/Hardware';
 import { buildLrvModel } from './rover/model';
 import { applyWear } from './rover/models/wear';
 import { Rocks } from './terrain/Rocks';
@@ -136,6 +136,8 @@ export class Game {
   cameraMode: CameraMode = 'cabin';
   private evaCam: EvaCamera | null = null;
   private parkedLrv: { x: number; z: number; yaw: number } | null = null;
+  /** Small solid hardware (flag pole, ALSEP instruments): circles for the astronaut. */
+  private solids: { x: number; z: number; r: number }[] = [];
   private baseFov = 68;
   /** Show the full HTML instrument overlay even in the cab. */
   hudOverlay = false;
@@ -499,6 +501,7 @@ export class Game {
     const half = this.rover.spec.wheels.reduce((m, w) => Math.max(m, Math.abs(w[1])), 0) + this.rover.spec.wheelRadius;
     const halfW = this.rover.spec.wheels.reduce((m, w) => Math.max(m, Math.abs(w[0])), 0) + 0.1;
     if (box(rp.x, rp.z, Math.atan2(f.x, f.z), halfW, half)) return true;
+    for (const o of this.solids) if (Math.hypot(x - o.x, z - o.z) < o.r + r) return true;
     const lrv = this.parkedLrv;
     return !!lrv && box(lrv.x, lrv.z, lrv.yaw, 1.0, 1.5);
   }
@@ -667,11 +670,23 @@ export class Game {
       // The flag where it was surveyed (Apollo 17), else ~10 m north-east of the LM.
       const flag = this.terrain.meta.sites?.flag;
       this.addFlag(flag ? flag.x : x + 8, flag ? flag.z : z - 6);
+      // Solid like the real one: the descent stage from ~0.75 m up (struts compressed by the
+      // landing; the LRV's console and seats at ~1.1 m would strike it)
+      // landing) with the ascent stage above, the engine bell under it down to ~0.4 m,
+      // the four primary struts from the body out to the footpads, the pads.
       const R = this.physics.R;
-      this.physics.world.createCollider(R.ColliderDesc.cylinder(1.8, 2.2).setTranslation(x, nasa.position.y + 3.2, z));
+      const gy = this.terrain.height(x, z);
+      this.physics.world.createCollider(R.ColliderDesc.cylinder(2.15, 2.15).setTranslation(x, gy + 2.9, z));
+      this.physics.world.createCollider(R.ColliderDesc.cylinder(0.45, 0.8).setTranslation(x, gy + 0.85, z));
       for (let i = 0; i < 4; i++) {
         const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
-        this.physics.world.createCollider(R.ColliderDesc.ball(0.5).setTranslation(x + Math.cos(a) * 4.4, this.terrain.height(x + Math.cos(a) * 4.4, z + Math.sin(a) * 4.4) + 0.3, z + Math.sin(a) * 4.4));
+        const px = x + Math.cos(a) * 4.4, pz = z + Math.sin(a) * 4.4, py = this.terrain.height(px, pz);
+        this.physics.world.createCollider(R.ColliderDesc.ball(0.5).setTranslation(px, py + 0.3, pz));
+        const top = new THREE.Vector3(x + Math.cos(a) * 2.0, gy + 1.9, z + Math.sin(a) * 2.0);
+        const pad = new THREE.Vector3(px, py + 0.35, pz);
+        const mid = top.clone().add(pad).multiplyScalar(0.5);
+        const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), top.clone().sub(pad).normalize());
+        this.physics.world.createCollider(R.ColliderDesc.capsule(top.distanceTo(pad) / 2, 0.14).setTranslation(mid.x, mid.y, mid.z).setRotation(q));
       }
       return;
     }
@@ -720,6 +735,10 @@ export class Game {
 
   /** The flag planted ~10 m north-east of the LM (aluminium pole, nylon flag on a top bar). */
   private addFlag(x: number, z: number): void {
+    // The pole is solid (2.4 m, driven ~20 cm into the regolith).
+    const R = this.physics.R;
+    this.physics.world.createCollider(R.ColliderDesc.cylinder(1.2, 0.05).setTranslation(x, this.terrain.height(x, z) + 1.2, z));
+    this.solids.push({ x, z, r: 0.05 });
     const g = new THREE.Group();
     const pole = new THREE.MeshStandardMaterial({ color: 0xd6d8da, metalness: 0.9, roughness: 0.3 });
     const c = document.createElement('canvas');
@@ -1235,7 +1254,17 @@ export class Game {
     const s = this.terrain.meta.sites;
     if (!s) return;
     const hw = this.terrain.meta.hardware;
-    if (s.alsep) this.scene.add(hw ? buildAlsep17(this.terrain, s.alsep.x, s.alsep.z, hw) : buildAlsep(this.terrain, s.alsep.x, s.alsep.z));
+    if (s.alsep) {
+      const alsep = hw ? buildAlsep17(this.terrain, s.alsep.x, s.alsep.z, hw) : buildAlsep(this.terrain, s.alsep.x, s.alsep.z);
+      this.scene.add(alsep);
+      // Each instrument is solid for the rover and the astronaut.
+      const R = this.physics.R;
+      for (const o of alsep.userData.solids as Solid[]) {
+        const ox = s.alsep.x + o.x, oz = s.alsep.z + o.z;
+        this.physics.world.createCollider(R.ColliderDesc.cylinder(o.h / 2, o.r).setTranslation(ox, this.terrain.height(ox, oz) + o.h / 2, oz));
+        this.solids.push({ x: ox, z: oz, r: o.r });
+      }
+    }
     if (s.lrv) {
       const m = buildLrvModel();
       applyWear(m.root, { dust: { value: 0.7 }, dustColor: new THREE.Color(0.2, 0.195, 0.188), lowY: -0.4, rootInv: { value: new THREE.Matrix4() } });

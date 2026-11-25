@@ -452,9 +452,15 @@ export class Rover {
       const now = performance.now();
       const key = wheel + 1;
       // One blow per contact, not one per physics step while pressed against the rock.
-      if (rock > 0.12 && strength > 0.9 && now - (this.hitAt[key] ?? 0) > 400) {
+      // Moon: woven steel-wire wheels (LRV, Lunokhod) flexed over rocks - three Apollo
+      // crews drove ~90 km across blocks and craters without losing one; only a hard
+      // blow on a large block at speed bends the mesh. Mars: thin rigid aluminium,
+      // punctured and torn by sharp rocks (Curiosity's wheels), as before.
+      const mesh = world().id === 'moon';
+      const minRock = mesh ? 0.2 : 0.12, minHit = mesh ? 1.4 : 0.9;
+      if (rock > minRock && strength > minHit && now - (this.hitAt[key] ?? 0) > 400) {
         this.hitAt[key] = now;
-        const blow = (strength - 0.9) * (0.08 + rock * 0.12);
+        const blow = (strength - minHit) * (mesh ? 0.02 + rock * 0.04 : 0.08 + rock * 0.12);
         if (wheel >= 0) {
           this.wheelDamage[wheel] = Math.min(1, (this.wheelDamage[wheel] ?? 0) + blow);
           this.lastHit = wheel;
