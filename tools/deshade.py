@@ -1,4 +1,6 @@
-"""Remove the illumination baked into the Mars orthophotos (HiRISE, afternoon Sun).
+"""Remove the illumination baked into a site's orthophotos (used as albedo).
+
+Mars (default): HiRISE, afternoon Sun.
 
 The orthophoto is used as albedo, but HiRISE imaged Jezero with the Sun in the
 west (~35° high, fitted below), so ridges (TARs) carry photographed shading and
@@ -9,7 +11,11 @@ Method: fit the Sun direction by correlating the high-passed orthophoto with a
 Lambert hillshade of the DTM, regress the photo's relative brightness on the
 shading, and divide it out. Detail finer than the DTM (rocks, sand texture) stays.
 
-Usage: python tools/deshade_mars.py   (originals are kept in raw_data/mars/)
+The Moon's Apollo 17 orthomosaic (LROC NAC) carries its own lunar-morning shading the
+same way: python tools/deshade.py --dir public/data/apollo17 --backup raw_data/apollo17/ortho_shaded
+(the Sun direction is then searched over the whole sky).
+
+Usage: python tools/deshade.py   (Mars; originals are kept in raw_data/mars/ortho_shaded)
 """
 import json
 import math
@@ -23,8 +29,20 @@ from scipy import ndimage
 import heightmap_io
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-D = os.path.join(ROOT, "public", "data", "mars")
-BK = os.path.join(ROOT, "raw_data", "mars", "ortho_shaded")
+
+
+def _arg(name, default):
+    import sys
+
+    return os.path.join(ROOT, sys.argv[sys.argv.index(name) + 1]) if name in sys.argv else default
+
+
+D = _arg("--dir", os.path.join(ROOT, "public", "data", "mars"))
+BK = _arg("--backup", os.path.join(ROOT, "raw_data", "mars", "ortho_shaded"))
+# Mars: the HiRISE Sun was in the west; elsewhere search the whole sky.
+MARS = D == os.path.join(ROOT, "public", "data", "mars")
+AZ = range(240, 301, 5) if MARS else range(0, 360, 5)
+EL = range(20, 61, 5) if MARS else range(5, 66, 5)
 
 
 def shade(h, px, az, el):
@@ -42,15 +60,15 @@ def main():
     for f in ("ortho.jpg", "ortho_hi.jpg"):
         if not os.path.exists(os.path.join(BK, f)):
             shutil.copy(os.path.join(D, f), os.path.join(BK, f))
-    h = heightmap_io.load(D).astype(np.float64) * (m["maxHeight"] - m["minHeight"]) / 65535
+    h = heightmap_io.load(D).astype(np.float64) * m.get("heightStep", (m["maxHeight"] - m["minHeight"]) / 65535)
     px = m["pixelSize"]
     o = np.asarray(Image.open(os.path.join(BK, "ortho.jpg")).convert("L")).astype(np.float64)
     o2 = np.asarray(Image.fromarray(o.astype(np.uint8)).resize(h.shape[::-1], Image.BILINEAR)).astype(np.float64)
     hp = lambda a: a - ndimage.gaussian_filter(a, 8)
     sub = (slice(0, None, 3), slice(0, None, 3))
     best = None
-    for az in range(240, 301, 5):
-        for el in range(20, 61, 5):
+    for az in AZ:
+        for el in EL:
             f = hp(shade(h[sub], px * 3, az, el))
             c = np.corrcoef(f.ravel(), hp(o2[sub]).ravel())[0, 1]
             if best is None or c > best[0]:
@@ -61,7 +79,7 @@ def main():
     rel = s / flat - 1.0
     oo = o2 / ndimage.gaussian_filter(o2, 8) - 1.0
     beta = float(np.sum(hp(rel) * oo) / np.sum(hp(rel) ** 2))
-    print(f"HiRISE Sun fit: azimuth {az}°, elevation {el}° (r = {c:.2f}); shading gain {beta:.2f}")
+    print(f"Photo Sun fit: azimuth {az}°, elevation {el}° (r = {c:.2f}); shading gain {beta:.2f}")
     # Relative shading factor on the DTM grid, resampled to each image.
     factor = np.clip(1.0 + beta * ndimage.gaussian_filter(rel, 0.7), 0.35, 2.5)
     fac_img = Image.fromarray(factor.astype(np.float32), mode="F")

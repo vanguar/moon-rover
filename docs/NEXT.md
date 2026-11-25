@@ -60,7 +60,7 @@
   (`src/game/Missions.ts`, `src/game/Discoveries.ts`, `src/i18nMission.ts`), `addApolloHardware`, `placeArtuby`.
 - Подготовка данных: `tools/prepare_terrain.py` (Аполлон-15: NAC DTM + SLDEM2015 по краям),
   `tools/prepare_mars.py` (Езеро: карты навигации Mars 2020, USGS), `prepare_far.py`, `prepare_detail.py`,
-  `deshade_mars.py`, `prepare_rocktex.py`, `tools/heightmap_io.py` (формат карты высот).
+  `deshade.py`, `prepare_rocktex.py`, `tools/heightmap_io.py` (формат карты высот).
   Исходники лежат в `raw_data/` (в `.gitignore`).
 - Аполлон-17: LROC NAC DTM «APOLLO17» в том же архиве PDS, что и Аполлон-15
   (`pds.lroc.im-ldi.com/data/LRO-L-LROC-5-RDR-V1.0/LROLRC_2001/DATA/SDP/NAC_DTM/…`) — точный путь проверить.

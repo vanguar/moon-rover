@@ -10,7 +10,7 @@ Output (public/data/): far_height.png  16-bit heights on a 112 m metric grid, 56
                        shadow.png      near mask updated with shadows cast by distant massifs
                        terrain.json    gains "far": {...}
 
-Usage: python tools/prepare_far.py   (after prepare_terrain.py)
+Usage: python tools/prepare_far.py [--site apollo15|apollo17]   (after the site's terrain)
 """
 import json
 import math
@@ -22,13 +22,16 @@ from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import heightmap_io  # noqa: E402
-from ephemeris import GAME_EPOCH, LunarSky  # noqa: E402
+from ephemeris import LunarSky  # noqa: E402
+from moon_sites import site_arg  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RAW = os.path.join(ROOT, "raw_data")
-OUT = os.path.join(ROOT, "public", "data")
+SITE_ID, SITE = site_arg()
+OUT = SITE["out"]
 R_MOON = 1737400.0
-ROW0, NROWS, NCOLS, PPD = 1470, 1030, 23040, 512
+SLDEM_FILE, ROW0, NROWS = SITE["sldem"]
+NCOLS, PPD = 23040, 512
 SPACING = 112.0
 HALF = 28000.0
 
@@ -66,10 +69,10 @@ def march_shadow(h, step, az_deg, el_deg, max_d):
 def main():
     meta_path = os.path.join(OUT, "terrain.json")
     meta = json.load(open(meta_path, encoding="utf-8"))
-    dem = np.fromfile(os.path.join(RAW, "sldem_512_rows_1470_2500.bin"), "<f4").reshape(NROWS, NCOLS)
+    dem = np.fromfile(SLDEM_FILE, "<f4").reshape(NROWS, NCOLS)
 
     lat_c, lon_c = meta["centerLat"], meta["centerLon"]
-    cos_sp = math.cos(math.radians(26.0))  # DTM projection standard parallel
+    cos_sp = math.cos(math.radians(meta["projection"]["standardParallel"]))  # the game grid's projection
     n = int(round(2 * HALF / SPACING)) + 1
     coords = (np.arange(n) - (n - 1) / 2) * SPACING
     zz, xx = np.meshgrid(coords, coords, indexing="ij")  # rows: z (south), cols: x (east)
@@ -91,7 +94,7 @@ def main():
     q = np.round((rel - lo) / (hi - lo) * 65535).astype(np.uint16)
     Image.fromarray(q, mode="I;16").save(os.path.join(OUT, "far_height.png"), optimize=True)
 
-    sky = LunarSky(GAME_EPOCH, 26.13224, 3.63400)
+    sky = LunarSky(SITE["epoch"], *SITE["lm"])
     az, el = sky.az_el(sky.sun())
     max_d = int((hi - lo) / (math.tan(math.radians(el)) * SPACING)) + 2
     far_lit = march_shadow(rel, SPACING, az, el, max_d)

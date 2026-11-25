@@ -251,11 +251,11 @@ def write_stars(sky, path):
     print(f"Stars: {len(out)} (brightest V={a[:, 2].min():.2f})")
 
 
-def bake_shadow(h, az_deg, el_deg, out_size):
-    """Cast-shadow mask via horizon marching (1 = lit, 0 = shadow)."""
+def bake_shadow(h, az_deg, el_deg, out_size, px=PX):
+    """Cast-shadow mask via horizon marching (1 = lit, 0 = shadow); h on a grid of px metres."""
     k = h.shape[0] // out_size
     hh = h[: out_size * k, : out_size * k].reshape(out_size, k, out_size, k).max(axis=(1, 3))
-    step = PX * k
+    step = px * k
     az, el = math.radians(az_deg), math.radians(el_deg)
     dc, dr = math.sin(az), -math.cos(az)
     tan_el = math.tan(el)

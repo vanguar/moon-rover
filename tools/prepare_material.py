@@ -8,7 +8,7 @@ for the look (plates, cracks, colour) and for the physics (plates are proud of t
 sand, so the rover jolts over them).
 
 Output: public/data/mars/material.png (8-bit, 1024², covering the whole window).
-Usage: python tools/prepare_material.py   (after deshade_mars.py)
+Usage: python tools/prepare_material.py   (after deshade.py)
 """
 import os
 

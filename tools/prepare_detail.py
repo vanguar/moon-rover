@@ -2,7 +2,7 @@
 
 Mars: HiRISE orthomosaic 25 cm (Mars 2020 TRN maps, USGS; read remotely), the
        illumination photographed by HiRISE divided out with the same DTM shading
-       model as tools/deshade_mars.py, so the game lights the ground itself and the
+       model as tools/deshade.py, so the game lights the ground itself and the
        image looks right from any direction.
 Moon: LROC NAC orthophoto M111571816 at 50 cm over the whole DTM strip.
 
@@ -104,8 +104,8 @@ def mars():
     ni, nj = int((x1 - x0) // TILE), int((z1 - z0) // TILE)
     res = 1024  # 0.25 m/px, HiRISE's own resolution
 
-    # Shading factor (same model as deshade_mars.py) on the 2 m DTM grid.
-    import deshade_mars as DS
+    # Shading factor (same model as deshade.py) on the 2 m DTM grid.
+    import deshade as DS
     import heightmap_io
     h = heightmap_io.load(D).astype(np.float64) * (meta["maxHeight"] - meta["minHeight"]) / 65535
     px = meta["pixelSize"]
