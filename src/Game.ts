@@ -444,9 +444,11 @@ export class Game {
       this.scene.add(this.footprints.mesh);
     }
     const fp = this.footprints;
-    this.eva.onLand = (lx, lz, yaw, v) => {
+    this.eva.onStep = (lx, lz, yaw, v, side) => {
       // On a rock top there is no soil to print.
-      if (this.rocks.surfaceAt(lx, lz) < this.terrain.height(lx, lz) + 0.02) fp.land(lx, lz, yaw, v);
+      if (this.rocks.surfaceAt(lx, lz) >= this.terrain.height(lx, lz) + 0.02) return;
+      if (side === 0) fp.land(lx, lz, yaw, v);
+      else fp.step(lx, lz, yaw, v);
     };
     this.scene.add(this.eva.object);
     this.rover.parkBrake = true;
@@ -484,7 +486,7 @@ export class Game {
     if (atLm) this.o2 = Math.min(O2_FULL, this.o2 + dt * 120); // PLSS recharge in the LM
     else {
       // Metabolic rate: seated ~0.75 of the PLSS design average, standing 0.85, hopping up to 1.5.
-      const rate = this.eva ? 0.85 + 0.65 * Math.min(1, this.eva.speed / 2) : 0.75;
+      const rate = this.eva ? 0.85 + 0.65 * Math.min(1, this.eva.speed / 1.5) : 0.75;
       this.o2 = Math.max(0, this.o2 - dt * rate);
     }
     if (this.sky) {

@@ -121,6 +121,11 @@ export class Footprints {
     }
   }
 
+  /** One boot coming down at (x, z) in a walk or a lope. */
+  step(x: number, z: number, yaw: number, v: number, rnd: () => number = Math.random): void {
+    this.add(x, z, yaw + (rnd() - 0.5) * 0.15, 0.011 + rnd() * 0.01 + 0.005 * Math.min(1, v / 1.5), Math.min(1, v / 1.5) * (0.3 + 0.7 * rnd()), rnd());
+  }
+
   private add(x: number, z: number, yaw: number, depth: number, smear: number, seed: number): void {
     const t = this.terrain;
     t.normal(x, z, this.n, 0.3);
