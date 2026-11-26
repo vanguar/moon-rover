@@ -603,6 +603,7 @@ float sandy = 1.0 - dustF;
 // Gone before a pixel spans half a wavelength: drawn further out the 12 cm sine aliases
 // into broad, regular moire bands running to the horizon.
 float wr = (1.0 - smoothstep(0.025, 0.06, fp)) * sandy;
+float crestW = 0.0;
 if (wr > 0.0) {
   // Asymmetric wind ripples (gentle stoss, steep lee), wavelength ~12 cm, crests wander.
   vec2 rd = vec2(0.94, 0.34);
@@ -612,6 +613,26 @@ if (wr > 0.0) {
   float slopeR = cos(sk) * (1.0 + 0.55 * cos(ph));
   grad += rd * slopeR * 0.1 * wr;
   diffuseColor.rgb *= 1.0 + 0.04 * wr * sin(sk);
+  crestW = smoothstep(0.35, 0.95, sin(sk)) * wr;
+}
+// Coarse-grained regolith of the Jezero floor (Vaughan et al. 2023, JGR Planets): rounded
+// grey olivine-rich grains of 1-2 mm, rolled along by the impacts of saltating sand.
+// They armour the ripple crests, gather in patches on the sand and at the foot of the
+// bedrock plates; the fine regolith between is red-brown sand. Up close a grainy
+// grey stipple, farther a grey cast over the red-brown.
+{
+  float patchG = lnoised(vWorldP.xz * 0.09 + 31.0).x * 0.7 + lnoised(vWorldP.xz * 0.37 + 5.0).x * 0.3;
+  float armour = sandy * smoothstep(0.42, 0.78, patchG) + crestW * 0.8;
+#if PAVE > 0
+  // Banked against the plates: where the sand meets the pavement.
+  armour = max(armour, matW * (1.0 - matW) * 3.2 * sandy);
+#endif
+  armour = clamp(armour, 0.0, 1.0);
+  vec3 greyG = vec3(dot(diffuseColor.rgb, vec3(0.35, 0.45, 0.2))) * vec3(0.98, 0.93, 0.88) * 0.92;
+  // 1-2 mm grains: a stipple only where a pixel is under ~1.5 mm (camera close to them).
+  float wg = clamp(1.5 - fp * 700.0, 0.0, 1.0);
+  float stip = wg > 0.0 ? smoothstep(0.55, 0.75, lnoised(mat2(0.6, 0.8, -0.8, 0.6) * vWorldP.xz * 600.0).x) : 0.0;
+  diffuseColor.rgb = mix(diffuseColor.rgb, greyG * (1.0 + 0.25 * stip * wg), armour * 0.42);
 }
 // Pebbles and gravel lying on the surface (Jezero floor): two size classes, more on the
 // pavement than in the sand; dark basalt with a thin dust coat on top.
