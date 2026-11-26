@@ -574,17 +574,21 @@ if (uStorm.x > 0.02) {
   float along = dot(vWorldP.xz, wd), across = dot(vWorldP.xz, wn);
   // Bounded domain warp (metres): the streams bend and braid instead of running as
   // straight ruled lines; broad, blurry streaks plus gusts that come and go.
+  // Snaking, braided streamers: warped on 30 m, 8 m and 3 m scales.
   vec2 wq = vWorldP.xz * 0.03;
-  float warp = (lnoised(wq).x - 0.5) * 14.0 + (lnoised(wq * 2.7 + 9.0).x - 0.5) * 5.0;
+  float warp = (lnoised(wq).x - 0.5) * 14.0 + (lnoised(wq * 4.0 + 9.0).x - 0.5) * 6.0 + (lnoised(wq * 11.0 + 21.0).x - 0.5) * 2.5;
   across += warp;
   along += warp * 0.6;
   float t = uStorm.z;
-  float s1 = lnoised(vec2(along * 0.35 - t * ws * 0.35, across * 1.4)).x;
-  float s2 = lnoised(vec2(along * 0.9 - t * ws * 0.9 + 17.0, across * 3.0)).x;
+  // Streamers only ~2x longer than wide (a few metres): patches of moving sand, not rays.
+  float s1 = lnoised(vec2(along * 0.55 - t * ws * 0.55, across * 1.1)).x;
+  float s2 = lnoised(vec2(along * 1.3 - t * ws * 1.3 + 17.0, across * 2.4)).x;
   float gustP = lnoised(vec2(along * 0.02 - t * ws * 0.02, across * 0.03 + 5.0)).x;
   float streak = ((s1 - 0.5) * 0.65 + (s2 - 0.5) * 0.35) * (0.4 + 1.2 * gustP);
-  float wS = uStorm.x * clamp(1.4 - fp * 0.6, 0.0, 1.0);
-  diffuseColor.rgb *= 1.0 + streak * 0.55 * wS;
+  // Streams a few metres long are seen only near by; farther out the stretched noise
+  // would merge into long ruled lines running to the horizon.
+  float wS = uStorm.x * (1.0 - smoothstep(0.06, 0.35, fp));
+  diffuseColor.rgb *= 1.0 + streak * 0.4 * wS;
   // Moving sand blurs the fine ripple relief.
   grad *= 1.0 - 0.6 * uStorm.x;
 }

@@ -465,7 +465,7 @@ export class MarsWeather {
       vx: this.wind.x * drift, vz: this.wind.z * drift,
       r, h: r * (8 + this.rnd() * 14), life: 50 + this.rnd() * 160, age: 0,
       seed: this.rnd(), spin: this.rnd() < 0.5 ? 1 : -1, s: 0, bend: 0.25 + this.rnd() * 0.6,
-      course: (this.rnd() - 0.5) * 1.2,
+      course: (this.rnd() - 0.5) * 2.8,
     });
   }
 
@@ -492,7 +492,10 @@ export class MarsWeather {
       // Devils travel roughly with the ambient wind (Perseverance saw 3–10 m/s) but each on
       // its own course, wandering on several time scales: their tracks curve and cross
       // instead of running in parallel (cf. HiRISE images of devil tracks).
-      const wander = d.course + 0.55 * Math.sin(this.time * 0.11 + d.seed * 40) + 0.3 * Math.sin(this.time * 0.37 + d.seed * 71);
+      // Near the ground the convective wind keeps veering: the paths meander on several
+      // time scales and now and then curl into a loop.
+      const wander = d.course + 1.0 * Math.sin(this.time * 0.09 + d.seed * 40) + 0.6 * Math.sin(this.time * 0.29 + d.seed * 71)
+        + 0.35 * Math.sin(this.time * 0.83 + d.seed * 13) + 1.6 * Math.max(0, Math.sin(this.time * 0.05 + d.seed * 97) - 0.75) * 4;
       const cw = Math.cos(wander), sw = Math.sin(wander);
       const tx = (this.wind.x * cw - this.wind.z * sw) * 1.3, tz = (this.wind.x * sw + this.wind.z * cw) * 1.3;
       d.vx += (tx - d.vx) * dt * 0.3 + Math.sin(this.time * 0.9 + d.seed * 20) * dt * 1.5;

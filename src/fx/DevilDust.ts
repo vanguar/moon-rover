@@ -19,8 +19,13 @@ import type { TerrainData } from '../terrain/TerrainData';
  * devils leave dark streaks (seen from orbit and by Perseverance's cameras).
  */
 // Kept modest: big soft sprites close to the camera cost a lot of fill rate.
+// Track ribbon: 4800 pieces of 1.5 m - with seven devils (~20 pieces/s) ~4 min, longer
+// than a track lives (TRACK_HOLD + TRACK_FADE), so no visible piece is ever reused.
 const N = 1200;
-const TRACK_N = 1400;
+const TRACK_N = 4800;
+/** Track age (s) at which the wind starts covering it again, and how long that takes. */
+const TRACK_HOLD = 90;
+const TRACK_FADE = 120;
 /** Track ribbon cells across: a band tens of metres wide must follow the ground. */
 const TRACK_K = 4;
 /** Vertices per track segment: a row of TRACK_K + 1 at its start and at its end. */
@@ -54,6 +59,10 @@ export class DevilDust {
   private carry = new Map<number, number>();
   private tPos = new Float32Array(TRACK_N * TRACK_V * 3);
   private tAlpha = new Float32Array(TRACK_N * TRACK_V);
+  /** Time each track vertex was laid (s, this.time). */
+  private tBirth = new Float32Array(TRACK_N * TRACK_V).fill(-1e6);
+  private time = 0;
+  private trackU = { uNow: { value: 0 } };
   private tHead = 0;
   private lastTrack = new Map<number, { x: number; z: number; age: number; along: number; edge?: number[] }>();
   private trackGeo: THREE.BufferGeometry;
@@ -87,6 +96,7 @@ export class DevilDust {
     this.trackGeo = new THREE.BufferGeometry();
     this.trackGeo.setAttribute('position', new THREE.BufferAttribute(this.tPos, 3).setUsage(THREE.DynamicDrawUsage));
     this.trackGeo.setAttribute('aA', new THREE.BufferAttribute(this.tAlpha, 1).setUsage(THREE.DynamicDrawUsage));
+    this.trackGeo.setAttribute('aB', new THREE.BufferAttribute(this.tBirth, 1).setUsage(THREE.DynamicDrawUsage));
     const uv = new Float32Array(TRACK_N * TRACK_V * 2);
     const idx = new Uint32Array(TRACK_N * TRACK_K * 6);
     for (let q = 0; q < TRACK_N; q++) {
@@ -99,11 +109,11 @@ export class DevilDust {
     this.trackGeo.setAttribute('uv', new THREE.BufferAttribute(uv, 2).setUsage(THREE.DynamicDrawUsage));
     this.trackGeo.setIndex(new THREE.BufferAttribute(idx, 1));
     const tm = new THREE.ShaderMaterial({
-      vertexShader: `attribute float aA; varying float vA; varying vec2 vUv; uniform float uCurvK;
-        void main() { vA = aA; vUv = uv; vec4 w = modelMatrix * vec4(position, 1.0);
+      vertexShader: `attribute float aA; attribute float aB; varying float vA; varying float vB; varying vec2 vUv; uniform float uCurvK;
+        void main() { vA = aA; vB = aB; vUv = uv; vec4 w = modelMatrix * vec4(position, 1.0);
           vec2 dc = w.xz - cameraPosition.xz; w.y -= dot(dc, dc) * uCurvK;
           gl_Position = projectionMatrix * viewMatrix * w; }`,
-      fragmentShader: `varying float vA; varying vec2 vUv;
+      fragmentShader: `varying float vA; varying float vB; varying vec2 vUv; uniform float uNow;
         ${HASH2I_GLSL}
         float h(vec2 p) { return hash2i(p); }
         float n(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -117,12 +127,20 @@ export class DevilDust {
           float edge = smoothstep(width, width * 0.1, abs(c + wob));
           // Intermittent: where the vortex weakened or lost contact the scour fades out.
           float patchy = mix(0.3, 1.0, smoothstep(0.25, 0.6, n(vec2(a * 0.025, 11.0))));
-          // Cycloidal scour loops from the rotation while the devil drifts.
-          float loops = 0.65 + 0.35 * smoothstep(0.2, 0.9, sin(a * 1.3 + c * 2.6 + 1.5 * sin(a * 0.4)));
+          // Scour loops from the rotation while the devil drifts: curved, irregular
+          // arcs (warped noise), not a periodic stripe pattern.
+          float lw = n(vec2(a * 0.11, c * 0.9 + 3.0)) * 4.0;
+          float loops = 0.65 + 0.35 * smoothstep(0.35, 0.8, n(vec2(a * 0.45 + c * 1.1 + lw, c * 1.6 - lw * 0.5 + 9.0)));
           float speck = 0.7 + 0.3 * n(vec2(a * 2.3, c * 5.0));
-          float k = 1.0 - 0.24 * vA * edge * loops * speck * patchy;
+          // The wind lays dust back over the track: it pales in patches, here sooner and
+          // there later (noise), never segment by segment, and is gone before its piece
+          // of the ribbon is reused.
+          float cover = (uNow - vB - ${TRACK_HOLD.toFixed(1)}) / ${TRACK_FADE.toFixed(1)};
+          float when = n(vec2(a * 0.06, c * 1.7 + 20.0)) * 0.55 + n(vec2(a * 0.23, c * 4.0 + 40.0)) * 0.3 + n(vec2(a * 0.9, c * 9.0)) * 0.15;
+          float stay = 1.0 - smoothstep(when * 0.75, when * 0.75 + 0.25, cover);
+          float k = 1.0 - 0.24 * vA * edge * loops * speck * patchy * stay;
           gl_FragColor = vec4(vec3(k * 0.5), 1.0); }`,
-      uniforms: { uCurvK: { value: 0.5 / 3389500 } },
+      uniforms: { uCurvK: { value: 0.5 / 3389500 }, uNow: this.trackU.uNow },
       transparent: true,
       depthWrite: false,
       blending: THREE.CustomBlending,
@@ -144,6 +162,8 @@ export class DevilDust {
 
   update(dt: number, devils: DevilIn[], cam: THREE.Vector3): void {
     dt = Math.min(dt, 0.05);
+    this.time += dt;
+    this.trackU.uNow.value = this.time;
     const t = this.terrain;
     // Spawn at the feet of the devils near the camera.
     const byId = new Map<number, DevilIn>();
@@ -291,12 +311,14 @@ export class DevilDust {
       const x = src[c * 2], z = src[c * 2 + 1], vi = q * TRACK_V + k;
       this.tPos.set([x, t.height(x, z) + 0.03, z], vi * 3);
       this.tAlpha[vi] = d.s;
+      this.tBirth[vi] = this.time;
       uvA.setXY(vi, c / TRACK_K, k <= TRACK_K ? a0 : a1);
     }
     uvA.needsUpdate = true;
     last.along = a1;
     (this.trackGeo.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
     (this.trackGeo.getAttribute('aA') as THREE.BufferAttribute).needsUpdate = true;
+    (this.trackGeo.getAttribute('aB') as THREE.BufferAttribute).needsUpdate = true;
     last.x = d.x;
     last.z = d.z;
   }
