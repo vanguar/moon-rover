@@ -28,15 +28,17 @@ vec3 marsSky(vec3 d) {
   day *= exp(-max(uTau - 0.6, 0.0) * 0.28);
   // Path length through the dusty layer: brighter, lighter toward the horizon.
   float air = 1.0 / (el + 0.1);
-  vec3 zen = vec3(0.30, 0.19, 0.115);
-  vec3 hor = vec3(0.68, 0.44, 0.27);
+  // Butterscotch, calibrated on Perseverance natural-colour frames (PIA24264, PIA24802):
+  // sky R/G ≈ 1.2-1.3, G/B ≈ 1.3-1.4 after exposure.
+  vec3 zen = vec3(0.32, 0.18, 0.088);
+  vec3 hor = vec3(0.74, 0.42, 0.205);
   vec3 col = mix(zen, hor, 1.0 - exp(-air * 0.32));
   // Forward-scattering aureole: blue core near the Sun, warm wide glow.
   float blueCore = exp(-ang / mix(0.11, 0.3, storm)) * (1.0 - storm * 0.8);
   float glow = exp(-ang / mix(0.55, 1.2, storm));
   vec3 blue = vec3(0.42, 0.56, 0.86);
   col += blue * blueCore * (0.9 + 1.4 * smoothstep(0.35, 0.0, sunEl));
-  col += vec3(0.85, 0.62, 0.42) * glow * 0.45;
+  col += vec3(0.9, 0.58, 0.33) * glow * 0.45;
   // Antisolar side slightly darker; storms flatten everything into brown murk.
   col *= 0.85 + 0.15 * (mu * 0.5 + 0.5);
   col = mix(col, vec3(0.30, 0.19, 0.12) * (0.8 + 0.4 * glow), storm);
@@ -141,14 +143,15 @@ export class MarsSky {
     day *= Math.exp(-Math.max(tau - 0.6, 0) * 0.28);
     const air = 1 / (el + 0.1);
     const k = 1 - Math.exp(-air * 0.32);
-    let r = 0.3 + (0.68 - 0.3) * k, g = 0.19 + (0.44 - 0.19) * k, b = 0.115 + (0.27 - 0.115) * k;
+    // Same colours as the shader (zen, hor, glow).
+    let r = 0.32 + (0.74 - 0.32) * k, g = 0.18 + (0.42 - 0.18) * k, b = 0.088 + (0.205 - 0.088) * k;
     const lerp = (a: number, c: number, t: number) => a + (c - a) * t;
     const blueCore = Math.exp(-ang / lerp(0.11, 0.3, storm)) * (1 - storm * 0.8);
     const glow = Math.exp(-ang / lerp(0.55, 1.2, storm));
     const bc = 0.9 + 1.4 * ss(0.35, 0, s.y);
-    r += 0.42 * blueCore * bc + 0.85 * glow * 0.45;
-    g += 0.56 * blueCore * bc + 0.62 * glow * 0.45;
-    b += 0.86 * blueCore * bc + 0.42 * glow * 0.45;
+    r += 0.42 * blueCore * bc + 0.9 * glow * 0.45;
+    g += 0.56 * blueCore * bc + 0.58 * glow * 0.45;
+    b += 0.86 * blueCore * bc + 0.33 * glow * 0.45;
     const side = 0.85 + 0.15 * (mu * 0.5 + 0.5);
     r *= side; g *= side; b *= side;
     const m = 0.8 + 0.4 * glow;

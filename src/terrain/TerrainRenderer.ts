@@ -556,7 +556,10 @@ dustF = mix(dustF * 0.5, 1.0, matW);
   paveShade = mix(1.0, mix(0.78, 1.12, smoothstep(0.0, 0.04, hm)), matW * clamp(1.4 - fp * 3.0, 0.0, 1.0));
 }
 #endif
-vec3 darkSoil = vec3(0.66, 0.6, 0.57), brightDust = vec3(1.3, 0.84, 0.54);
+// Calibrated on Perseverance natural-colour frames of the Jezero floor (PIA24264,
+// Kodiak PIA24802): ground R/G ≈ 1.1-1.2, G/B ≈ 1.15-1.25 - butterscotch-brown with
+// grey, not orange.
+vec3 darkSoil = vec3(0.58, 0.585, 0.575), brightDust = vec3(1.08, 0.86, 0.69);
 // Brightness difference kept smaller than in the orbital photo; the hue carries it.
 float albM = mix(aLocal, alb, 0.75);
 // Dust settled by storms: a bright ochre veil, thickest in sheltered and flat spots,
