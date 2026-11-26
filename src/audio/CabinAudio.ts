@@ -34,6 +34,9 @@ export class CabinAudio {
   private sendTimer = 0;
   /** Wind loudness 0..1 (Mars weather), heard through the rover's microphone. */
   wind = 0;
+  /** Sand grains striking the rover per second and their mean speed (m/s). */
+  grains = 0;
+  grainV = 0;
   private roverGain: GainNode | null = null;
 
   /** Silence the rover's mechanical sound (the helicopter is being flown). */
@@ -174,6 +177,8 @@ export class CabinAudio {
             wheelR: rover.wheelRadius,
             crew: rover.spec.crew ? 1 : 0,
             wind: this.wind,
+            grains: this.grains,
+            grainV: this.grainV,
             air: world().atmosphere ? 1 : 0,
             steerRate,
             stress: this.stress,

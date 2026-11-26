@@ -908,6 +908,7 @@ export class Game {
     }
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    this.weather?.sand.setViewport(h);
   }
 
   start(): void {
@@ -1472,7 +1473,27 @@ export class Game {
     const r = this.rover;
     r.solarScale = Math.min(1, trans * 1.15 + 0.3 * Math.exp(-w.tau * 0.3));
     r.panelDust = THREE.MathUtils.clamp(r.panelDust + dt * (2e-5 + w.storm * 1.2e-3) - dt * w.devilNear * 0.08 * r.panelDust, 0, 0.9);
-    const wv = Math.hypot(w.wind.x, w.wind.z) + w.devilNear * 18;
+    // In a devil: its own flow at the rover (Rankine: fastest at the core wall, nearly
+    // calm in the eye) and the sand it carries, striking the rover.
+    const rp = r.object.position, devil = w.nearestDevil(rp.x, rp.z);
+    let wv = Math.hypot(w.wind.x, w.wind.z);
+    if (devil) {
+      const fl = w.sand.flow(devil, rp.x, 1, rp.z, new THREE.Vector3());
+      wv = Math.max(wv, Math.hypot(fl.x, fl.z) * devil.s);
+    }
+    const rf = r.forwardVector(new THREE.Vector3());
+    const sp = r.spec;
+    const top = sp.top.offset[1] + sp.top.half[1] + 0.25, bot = -0.45;
+    w.sand.update(dt, devil, {
+      pos: rp, yaw: Math.atan2(rf.x, rf.z),
+      half: [Math.max(...sp.wheels.map((q) => Math.abs(q[0]))) + sp.wheelWidth / 2, (top - bot) / 2, Math.max(...sp.wheels.map((q) => Math.abs(q[1]))) + sp.wheelRadius],
+      up: (top + bot) / 2,
+    }, this.camera.position);
+    const rate = dt > 0 ? w.sand.hits / dt : 0;
+    this.audio.grains += (rate - this.audio.grains) * Math.min(1, dt * 6);
+    this.audio.grainV = w.sand.hits ? Math.sqrt(w.sand.hitEnergy / w.sand.hits) : this.audio.grainV;
+    // Sandblasting: barely anything per devil (years of it frost the rover's paint).
+    r.sandblast.value = Math.min(1, r.sandblast.value + w.sand.hitEnergy * 1.5e-7);
     const area = r.spec.body.half[0] * 2 * (r.spec.body.half[1] * 2 + 0.3) + 0.2;
     const f = 0.5 * W.airDensity * wv * wv * 1.1 * area;
     r.windForce.set(w.wind.x, 0, w.wind.z).normalize().multiplyScalar(f);

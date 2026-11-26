@@ -28,6 +28,8 @@ const TRACK_HOLD = 90;
 const TRACK_FADE = 120;
 /** Track ribbon cells across: a band tens of metres wide must follow the ground. */
 const TRACK_K = 4;
+/** Segments (1.5 m each) over which a track's head fades in. */
+const RAMP = 8;
 /** Vertices per track segment: a row of TRACK_K + 1 at its start and at its end. */
 const TRACK_V = 2 * (TRACK_K + 1);
 
@@ -64,7 +66,7 @@ export class DevilDust {
   private time = 0;
   private trackU = { uNow: { value: 0 } };
   private tHead = 0;
-  private lastTrack = new Map<number, { x: number; z: number; age: number; along: number; edge?: number[] }>();
+  private lastTrack = new Map<number, { x: number; z: number; age: number; along: number; edge?: number[]; recent: number[]; s: number; count: number }>();
   private trackGeo: THREE.BufferGeometry;
 
   constructor(private terrain: TerrainData) {
@@ -276,7 +278,7 @@ export class DevilDust {
   private trackStep(di: number, d: DevilIn, dt: number): void {
     const last = this.lastTrack.get(di);
     if (!last || Math.hypot(d.x - last.x, d.z - last.z) > 30) {
-      this.lastTrack.set(di, { x: d.x, z: d.z, age: 0, along: Math.random() * 100 });
+      this.lastTrack.set(di, { x: d.x, z: d.z, age: 0, along: Math.random() * 100, recent: [], s: d.s, count: 0 });
       return;
     }
     last.age += dt;
@@ -310,9 +312,26 @@ export class DevilDust {
       const src = k <= TRACK_K ? start : end, c = k % (TRACK_K + 1);
       const x = src[c * 2], z = src[c * 2 + 1], vi = q * TRACK_V + k;
       this.tPos.set([x, t.height(x, z) + 0.03, z], vi * 3);
-      this.tAlpha[vi] = d.s;
       this.tBirth[vi] = this.time;
       uvA.setXY(vi, c / TRACK_K, k <= TRACK_K ? a0 : a1);
+    }
+    // The scour builds up over the last ~12 m behind the devil (and from where its track
+    // begins), so neither end of the band is a straight cut across it; the shader's
+    // patchy noise makes that ramp ragged.
+    last.s = d.s;
+    last.count++;
+    last.recent.push(q);
+    if (last.recent.length > RAMP + 1) last.recent.shift();
+    const n = last.recent.length;
+    for (let m = 0; m < n; m++) {
+      const seg = last.recent[m], fromEnd = n - 1 - m; // 0 = newest
+      for (let k = 0; k < TRACK_V; k++) {
+        const endRow = k > TRACK_K;
+        // Head ramp (from the devil back) times tail ramp (from where the track began).
+        const fromStart = last.count - 1 - fromEnd + (endRow ? 1 : 0);
+        const st = Math.min(1, (fromEnd + (endRow ? 0 : 1)) / RAMP, fromStart / RAMP);
+        this.tAlpha[seg * TRACK_V + k] = last.s * st * st * (3 - 2 * st);
+      }
     }
     uvA.needsUpdate = true;
     last.along = a1;

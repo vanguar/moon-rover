@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { TerrainData } from '../terrain/TerrainData';
 import { mulberry32 } from '../terrain/TerrainData';
 import { DevilDust } from './DevilDust';
+import { SandSpray } from './SandSpray';
 import { StormFront } from './StormFront';
 
 export type WeatherMode = 'auto' | 'calm' | 'devils' | 'storm';
@@ -67,6 +68,8 @@ export class MarsWeather {
   private devilId = 0;
   /** Particles at the devils' feet and their dark tracks. */
   readonly feet: DevilDust;
+  /** Sand grains flying in a devil around the rover. */
+  readonly sand: SandSpray;
   private devilMesh: THREE.InstancedMesh;
   private devilParams: THREE.InstancedBufferAttribute;
   private devilU: Record<string, THREE.IUniform>;
@@ -137,7 +140,11 @@ export class MarsWeather {
         uniform vec3 uFogColor;
         uniform float uFogDensity;
         uniform vec2 uWindDir;
-        float h3(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+        // Exact integer hash (PCG-style) of a lattice point: a float sin/fract hash loses
+        // precision at large coordinates and draws regular stripes.
+        float h3(vec3 p) { uvec3 v = uvec3(ivec3(floor(p)) + 1048576); v = v * 1664525u + 1013904223u;
+          v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y; v ^= v >> 16u; v.x += v.y * v.z;
+          return float(v.x) * (1.0 / 4294967295.0); }
         float n3(vec3 x) {
           vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
           return mix(mix(mix(h3(i), h3(i + vec3(1,0,0)), f.x), mix(h3(i + vec3(0,1,0)), h3(i + vec3(1,1,0)), f.x), f.y),
@@ -176,7 +183,8 @@ export class MarsWeather {
           float phase = 0.7 * hg(0.6, dot(rd, uSun)) + 0.3;
           vec2 sunH = normalize(uSun.xz + 1e-4);
           for (int i = 0; i < N; i++) {
-            float t = t0 + (float(i) + 0.5 + 0.5 * h3(vW * 7.0 + float(i))) * dt;
+            // Per-pixel jitter of the steps (screen-space integer hash): grain, not bands.
+            float t = t0 + (float(i) + 0.5 + 0.5 * (h3(vec3(gl_FragCoord.xy, float(i) + floor(uTime * 30.0))) - 0.5)) * dt;
             vec3 p = ro + rd * t;
             float y = (p.y - vC.y) / H;
             // Axis: wind shear bends the top downwind (stronger wind aloft); the column also
@@ -194,12 +202,19 @@ export class MarsWeather {
             float omega = 3.2 / (0.6 + r * r) * (1.0 - 0.5 * y);
             float sw = ang - vP.z * (uTime * omega - y * 9.0);
             // Upper column: laminar — a few smooth helical dust sheets winding up the wall.
-            float helix = 0.5 + 0.5 * sin(sw * 3.0 + y * 22.0 * vP.z);
+            // Sheets of uneven strength and pitch: the phase wanders (noise), so no regular
+            // stripes show when close.
+            float hw = n3(vec3(cos(sw) * 1.3, sin(sw) * 1.3, y * 3.0 - uTime * 0.2) + vP.y * 5.0) * 5.0;
+            float helix = 0.5 + 0.5 * sin(sw * 3.0 + y * (16.0 + 10.0 * vP.y) * vP.z + hw);
             float lamN = mix(0.55, 1.0, smoothstep(0.25, 0.9, helix)) * (0.75 + 0.25 * n3(vec3(cos(sw), sin(sw), y * 4.0 - uTime * 0.6) * 1.5 + vP.y * 13.0));
             // Foot: turbulent — fast, small, intermittent eddies and bursts of debris.
-            float tA = n3(vec3(cos(sw) * 5.0, sin(sw) * 5.0, y * 60.0 - uTime * 6.0) + vP.y * 7.0);
-            float tB = n3(vec3(q / rc * 3.0, y * 40.0 - uTime * 4.5) + vP.y * 3.0);
-            float tC = n3(vec3(q / rc * 7.0 + uTime * 1.3, y * 90.0) + vP.y);
+            // Billows of equal size every way (metres, in the frame turning with the flow,
+            // rising): clumps and eddies, not the vertical hatching that stretched noise
+            // drew when seen close.
+            vec3 P = vec3(length(q) * vec2(cos(sw), sin(sw)), p.y - vC.y);
+            float tA = n3(P * 0.32 + vec3(0.0, 0.0, -uTime * 1.6) + vP.y * 7.0);
+            float tB = n3(P * 0.85 + vec3(0.0, 0.0, -uTime * 3.0) + vP.y * 3.0);
+            float tC = n3(P * 2.1 + vec3(uTime * 1.3, 0.0, -uTime * 4.0) + vP.y);
             float turbN = smoothstep(0.25, 0.85, tA * 0.5 + tB * 0.35 + tC * 0.25) * 1.4;
             float lam = smoothstep(0.06, 0.3, y);
             float nz = mix(turbN, lamN, lam) * (0.6 + 0.4 * n3(vec3(q / rc * 0.8, y * 5.0 - uTime * 0.7) + vP.y));
@@ -237,6 +252,8 @@ export class MarsWeather {
     this.devilMesh.renderOrder = 3;
     this.group.add(this.devilMesh);
     this.feet = new DevilDust(terrain);
+    this.sand = new SandSpray(terrain);
+    this.group.add(this.sand.lines);
     this.group.add(this.feet.points, this.feet.track);
 
     // ---- Blowing sand and dust: streaks in a box around the camera, advected by the wind.
@@ -397,6 +414,9 @@ export class MarsWeather {
   setLighting(sun: THREE.Color, amb: THREE.Color, fog: THREE.Color, fogDensity: number): void {
     (this.devilU.uLight.value as THREE.Color).copy(sun);
     this.feet.setLight(new THREE.Color(0.92, 0.66, 0.46).multiply(sun.clone().multiplyScalar(0.55).add(amb)));
+    // Basaltic sand is darker than the dust.
+    // Sunlit grains catch the light: a little brighter than the shaded ground between them.
+    this.sand.setLight(new THREE.Color(0.78, 0.58, 0.42).multiply(sun.clone().multiplyScalar(0.9).add(amb)));
     (this.devilU.uAmb.value as THREE.Color).copy(amb);
     (this.devilU.uFogColor.value as THREE.Color).copy(fog);
     this.devilU.uFogDensity.value = fogDensity;
@@ -449,6 +469,19 @@ export class MarsWeather {
     this.frontDist = FRONT_START;
     const ws = Math.hypot(this.baseWind.x, this.baseWind.z) || 3;
     this.baseWind.set(-Math.cos(this.frontAng) * ws, 0, -Math.sin(this.frontAng) * ws);
+  }
+
+  /** The devil whose flow reaches (x, z) (within ~3 core radii + 30 m), or null. */
+  nearestDevil(x: number, z: number): { x: number; z: number; r: number; s: number; spin: number; vx: number; vz: number } | null {
+    let best: Devil | null = null, bd = Infinity;
+    for (const d of this.devils) {
+      const dist = Math.hypot(d.x - x, d.z - z) - d.r * 3;
+      if (d.s > 0.05 && dist < 30 && dist < bd) {
+        bd = dist;
+        best = d;
+      }
+    }
+    return best ? { x: best.x, z: best.z, r: best.r, s: best.s, spin: best.spin, vx: best.vx, vz: best.vz } : null;
   }
 
   private spawnDevil(cx: number, cz: number): void {

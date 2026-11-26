@@ -24,6 +24,8 @@ export interface WearOptions {
   lowY: number;
   /** World → rover-model matrix, updated by the owner every frame. */
   rootInv: { value: THREE.Matrix4 };
+  /** Sandblasting by wind-driven grains 0..1 (Mars): matte, abraded surfaces. */
+  blast?: { value: number };
 }
 
 const WEAR_PARS = /* glsl */ `
@@ -36,6 +38,7 @@ uniform vec3 uWearDustCol;
 uniform float uWearLowY;
 uniform float uWearKind; // 0 metal, 1 paint/plastic, 2 foil
 uniform mat4 uWearRootInv;
+uniform float uWearBlast;
 ${NOISE_GLSL}
 // Noise values shared by the normal, roughness and colour stages (computed once).
 float gWearA = 0.0, gWearB = 0.0;
@@ -85,6 +88,7 @@ function patch(m: THREE.MeshStandardMaterial, opt: WearOptions): void {
       uWearLowY: { value: opt.lowY },
       uWearKind: { value: kind },
       uWearRootInv: opt.rootInv,
+      uWearBlast: opt.blast ?? { value: 0 },
     });
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>\n${WEAR_PARS}`)
@@ -126,6 +130,8 @@ vWearY = (uWearRootInv * modelMatrix * vec4(position, 1.0)).y;`,
   // Fine scratches along x (handling, tools, dust abrasion).
   float scr = smoothstep(0.93, 0.99, lnoised(vec2(vWearP.x * 3.0, (vWearP.y + vWearP.z) * 180.0)).x);
   roughnessFactor = clamp(roughnessFactor * (0.75 + 0.55 * n1) - scr * 0.15, 0.04, 1.0);
+  // Sand-blasted: grains frost glossy surfaces matte (more on the edges facing the wind).
+  roughnessFactor = mix(roughnessFactor, 0.92, uWearBlast * (0.5 + 0.5 * n1));
 }`,
       )
       .replace(

@@ -41,6 +41,9 @@ export interface RoverAudioParams {
   wind: number;
   /** 1 = there is air (Mars): sound also travels through it, thin and quiet. */
   air: number;
+  /** Sand grains striking the rover per second, and their mean speed (m/s). */
+  grains: number;
+  grainV: number;
 }
 
 const GROUSERS = 18;
@@ -102,8 +105,14 @@ class Biquad {
 class RoverProcessor extends AudioWorkletProcessor {
   private p: RoverAudioParams = {
     rim: [0, 0, 0, 0, 0, 0], contact: [false, false, false, false, false, false], slip: [0, 0, 0, 0, 0, 0],
-    load: 0, susp: [0, 0, 0, 0, 0, 0], steerRate: 0, stress: 0, cabin: 1, rough: 1, wheelR: 0.41, crew: 1, wind: 0, air: 0,
+    load: 0, susp: [0, 0, 0, 0, 0, 0], steerRate: 0, stress: 0, cabin: 1, rough: 1, wheelR: 0.41, crew: 1, wind: 0, air: 0, grains: 0, grainV: 0,
   };
+  // Grain impacts: sharp ticks through the structure (as on Perseverance's recording).
+  private grainBp = Biquad.bandpass(3800, 1.4);
+  private grainRes = Biquad.bandpass(1250, 6);
+  private grainEnv = 0;
+  private grainAmp = 0;
+  private grainPan = 0;
   // Wind: low-passed rumble (CO₂ at 6 mbar carries only low frequencies far) with gusts.
   private windLp = Biquad.lowpass(220, 0.7);
   private windLp2 = Biquad.lowpass(500, 0.6);
@@ -326,8 +335,20 @@ class RoverProcessor extends AudioWorkletProcessor {
         const nz = this.rnd() * 2 - 1;
         wind = (this.windLp.tick(this.windLp2.tick(nz)) * 2.2 + this.windBp.tick(nz) * 0.05 * this.windG) * this.windSm * this.windG;
       }
-      L[i] = sl * 0.9 + lifeSupport + wind;
-      R[i] = sr * 0.9 + lifeSupport + wind * 0.92;
+      // Sand grains hitting the body: a Poisson stream of ~1 ms ticks.
+      if (p.grains > 0 && this.rnd() < p.grains / fs) {
+        this.grainEnv = 1;
+        this.grainAmp = (0.25 + 0.75 * this.rnd()) * Math.min(1, 0.15 + p.grainV / 18);
+        this.grainPan = this.rnd() * 2 - 1;
+      }
+      let grain = 0;
+      if (this.grainEnv > 1e-3) {
+        const gn = (this.rnd() * 2 - 1) * this.grainEnv * this.grainAmp;
+        grain = this.grainBp.tick(gn) * 0.5 + this.grainRes.tick(gn) * 0.35;
+        this.grainEnv *= 0.985;
+      }
+      L[i] = sl * 0.9 + lifeSupport + wind + grain * (1 - this.grainPan * 0.4);
+      R[i] = sr * 0.9 + lifeSupport + wind * 0.92 + grain * (1 + this.grainPan * 0.4);
     }
     return true;
   }

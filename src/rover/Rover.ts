@@ -86,6 +86,8 @@ export class Rover {
   readonly wheelLocal: THREE.Vector3[];
   /** Fraction of the solar array covered by settled dust (Mars), 0..1. */
   panelDust = 0;
+  /** Sandblasting by dust-devil grains 0..1 (Mars): accumulates, shown as matte wear. */
+  readonly sandblast = { value: 0 };
   /** Fraction of the solar disc visible from the panels (terrain shadow), 0..1. */
   sunLit = 1;
   /** Electronics box temperature, °C, and the survival heater state. */
@@ -264,6 +266,7 @@ export class Rover {
       dustColor: mars ? new THREE.Color(0.32, 0.17, 0.09) : new THREE.Color(0.2, 0.195, 0.188),
       lowY: spec.axleY + spec.wheelRadius * 0.6,
       rootInv: this.wearInv,
+      blast: this.sandblast,
     });
     this.object.add(this.model.root);
     this.prevPos.set(x, y, z);
