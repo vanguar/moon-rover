@@ -1712,7 +1712,8 @@ export class Game {
     if (lateFrac > 0.12) {
       d.calm = 0;
       d.easy = 0;
-      if (scale > minScale + 1e-3) scale = Math.max(minScale, scale - 0.1);
+      // Badly late (most frames missed, e.g. inside a dust devil): step down faster.
+      if (scale > minScale + 1e-3) scale = Math.max(minScale, scale - (lateFrac > 0.5 ? 0.2 : 0.1));
       // A level change recompiles the big terrain shader (a 1–3 s freeze on an iGPU):
       // only downward; while calibrating after 2 slow checks (4 s apart), later after
       // 4 and at most once per 90 s.

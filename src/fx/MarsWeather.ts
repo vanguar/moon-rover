@@ -196,6 +196,12 @@ export class MarsWeather {
             float rr = radiusAt(y);
             float wall = exp(-pow((r - rr * 0.8) / (rr * 0.35 + 0.05), 2.0));
             float core = smoothstep(rr * 1.05, rr * 0.2, r) * 0.35;
+            float skirt = (1.0 - smoothstep(0.0, 0.07, y)) * smoothstep(1.6, 0.4, r) * 0.9;
+            float top = (1.0 - smoothstep(0.55, 1.0, y)) * (0.35 + 0.65 * (1.0 - y));
+            // Cheap envelope first: where there is no dust to speak of (between the wall
+            // and the eye, outside the column) skip all the noise - most of a ray's steps.
+            float env = (wall + core) * top + skirt;
+            if (env * vP.x < 0.02) continue;
             float ang = atan(q.y, q.x);
             // Rotating, rising spiral streaks: dust is carried round (~2.5 rad/s) and lifted.
             // Angular speed falls with radius and height (Rankine: Ω ∝ 1/r² outside the core).
@@ -204,23 +210,30 @@ export class MarsWeather {
             // Upper column: laminar — a few smooth helical dust sheets winding up the wall.
             // Sheets of uneven strength and pitch: the phase wanders (noise), so no regular
             // stripes show when close.
-            float hw = n3(vec3(cos(sw) * 1.3, sin(sw) * 1.3, y * 3.0 - uTime * 0.2) + vP.y * 5.0) * 5.0;
-            float helix = 0.5 + 0.5 * sin(sw * 3.0 + y * (16.0 + 10.0 * vP.y) * vP.z + hw);
-            float lamN = mix(0.55, 1.0, smoothstep(0.25, 0.9, helix)) * (0.75 + 0.25 * n3(vec3(cos(sw), sin(sw), y * 4.0 - uTime * 0.6) * 1.5 + vP.y * 13.0));
+            float lam = smoothstep(0.06, 0.3, y);
+            // Only what this height needs: the laminar sheets above the foot, the
+            // turbulence at the foot, the finest octave only close to the camera.
+            float lamN = 0.0, turbN = 0.0;
+            if (lam > 0.001) {
+              float hw = n3(vec3(cos(sw) * 1.3, sin(sw) * 1.3, y * 3.0 - uTime * 0.2) + vP.y * 5.0) * 5.0;
+              float helix = 0.5 + 0.5 * sin(sw * 3.0 + y * (16.0 + 10.0 * vP.y) * vP.z + hw);
+              lamN = mix(0.55, 1.0, smoothstep(0.25, 0.9, helix)) * (0.75 + 0.25 * n3(vec3(cos(sw), sin(sw), y * 4.0 - uTime * 0.6) * 1.5 + vP.y * 13.0));
+            }
             // Foot: turbulent — fast, small, intermittent eddies and bursts of debris.
             // Billows of equal size every way (metres, in the frame turning with the flow,
             // rising): clumps and eddies, not the vertical hatching that stretched noise
             // drew when seen close.
-            vec3 P = vec3(length(q) * vec2(cos(sw), sin(sw)), p.y - vC.y);
-            float tA = n3(P * 0.32 + vec3(0.0, 0.0, -uTime * 1.6) + vP.y * 7.0);
-            float tB = n3(P * 0.85 + vec3(0.0, 0.0, -uTime * 3.0) + vP.y * 3.0);
-            float tC = n3(P * 2.1 + vec3(uTime * 1.3, 0.0, -uTime * 4.0) + vP.y);
-            float turbN = smoothstep(0.25, 0.85, tA * 0.5 + tB * 0.35 + tC * 0.25) * 1.4;
-            float lam = smoothstep(0.06, 0.3, y);
+            if (lam < 0.999) {
+              vec3 P = vec3(length(q) * vec2(cos(sw), sin(sw)), p.y - vC.y);
+              float tA = n3(P * 0.32 + vec3(0.0, 0.0, -uTime * 1.6) + vP.y * 7.0);
+              float tB = n3(P * 0.85 + vec3(0.0, 0.0, -uTime * 3.0) + vP.y * 3.0);
+              float tC = t < 40.0 ? n3(P * 2.1 + vec3(uTime * 1.3, 0.0, -uTime * 4.0) + vP.y) : 0.5;
+              turbN = smoothstep(0.25, 0.85, tA * 0.5 + tB * 0.35 + tC * 0.25) * 1.4;
+            }
             float nz = mix(turbN, lamN, lam) * (0.6 + 0.4 * n3(vec3(q / rc * 0.8, y * 5.0 - uTime * 0.7) + vP.y));
-            float dens = (wall + core) * nz * (1.0 - smoothstep(0.55, 1.0, y)) * (0.35 + 0.65 * (1.0 - y));
+            float dens = (wall + core) * nz * top;
             // Dense debris skirt hugging the ground, wider than the column.
-            dens += (1.0 - smoothstep(0.0, 0.07, y)) * smoothstep(1.6, 0.4, r) * 0.9 * nz;
+            dens += skirt * nz;
             dens *= vP.x * 1.3 / max(rc * 0.3, 0.6);
             float lit = 0.55 + 0.45 * dot(normalize(q + 1e-4), sunH);
             // Martian dust: single-scattering albedo ~0.9 in red, lower in blue.
