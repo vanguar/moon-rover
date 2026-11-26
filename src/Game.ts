@@ -244,7 +244,7 @@ export class Game {
     this.scene.add(this.terrainR.group);
     if (terrain.meta.detail && quality.level !== 'low') {
       this.detail = new DetailTiles(this.renderer, terrain, `${import.meta.env.BASE_URL}${site().dataDir}`);
-      this.terrainR.setDetail(this.detail.texture, this.detail.rect, this.detail.slots, terrain.meta.detail.res, !!terrain.meta.detail.slopes);
+      this.terrainR.setDetail(this.detail.texture, this.detail.rect, this.detail.slots, terrain.meta.detail.res, !!terrain.meta.detail.slopes, this.detail.fade);
     }
     this.terrainR.setSun(this.sunDir);
     if (!mars) {
@@ -1000,6 +1000,7 @@ export class Game {
     this.updateCamera(dt);
     this.terrainR.update(this.camera.position, fp);
     this.detail?.update(fp.x, fp.z);
+    this.detail?.tick(dt);
     this.dust.update(dt, rover, this.camera);
     this.tracks.update(rover, dt);
     this.updateEnvironment(dt);

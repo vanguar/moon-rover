@@ -20,6 +20,8 @@ export class DetailTiles {
   readonly rect = new THREE.Vector4(0, 0, 256, 0);
   /** Tile index held by each slot (i + j * 4096), −1 = empty. */
   readonly slots = new Float32Array(N * N).fill(-1);
+  /** Per slot: 0 → 1 over ~1.5 s after its tile arrives (fades in, never pops). */
+  readonly fade = new Float32Array(N * N);
   private have: Set<string>;
   private res: number;
   private want = new Map<number, number>(); // slot -> wanted id
@@ -62,6 +64,11 @@ export class DetailTiles {
     }
   }
 
+  /** Advance the fade-in of freshly loaded tiles. */
+  tick(dt: number): void {
+    for (let i = 0; i < N * N; i++) if (this.fade[i] < 1) this.fade[i] = Math.min(1, this.fade[i] + dt / 1.5);
+  }
+
   private async load(i: number, j: number, slot: number, id: number): Promise<void> {
     if (this.loading.has(id)) return;
     this.loading.add(id);
@@ -83,6 +90,7 @@ export class DetailTiles {
       src.dispose();
       bmp.close();
       this.slots[slot] = id;
+      this.fade[slot] = 0;
     } catch {
       /* offline or decode error: the base orthophoto stays */
     } finally {

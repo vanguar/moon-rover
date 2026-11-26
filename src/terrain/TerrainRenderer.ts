@@ -45,6 +45,7 @@ export class TerrainRenderer {
     uDet: { value: THREE.Texture | null };
     uDetRect: { value: THREE.Vector4 };
     uDetSlots: { value: Float32Array };
+    uDetFade: { value: Float32Array };
     uDetRes: { value: number };
     uDetSlopes: { value: number };
     uFresh: { value: Float32Array };
@@ -99,6 +100,7 @@ export class TerrainRenderer {
       uDet: { value: null },
       uDetRect: { value: new THREE.Vector4(0, 0, 256, 0) },
       uDetSlots: { value: new Float32Array(9).fill(-1) },
+      uDetFade: { value: new Float32Array(9) },
       uDetRes: { value: 512 },
       uDetSlopes: { value: 0 },
       uFresh: { value: new Float32Array(36).fill(-1e6) },
@@ -145,6 +147,7 @@ export class TerrainRenderer {
         uDet: u.uDet,
         uDetRect: u.uDetRect,
         uDetSlots: u.uDetSlots,
+        uDetFade: u.uDetFade,
         uDetRes: u.uDetRes,
         uDetSlopes: u.uDetSlopes,
         uFresh: u.uFresh,
@@ -201,6 +204,7 @@ uniform vec2 uWind;
 uniform sampler2D uDet;
 uniform vec4 uDetRect;
 uniform float uDetSlots[9];
+uniform float uDetFade[9];
 uniform float uDetRes;
 uniform float uDetSlopes;
 uniform vec3 uFresh[12];
@@ -225,6 +229,12 @@ vec2 detSlopeAt(vec2 p, out float ok) {
   return sign(sv) * sv * sv * 2.0;
 }
 ${NOISE_GLSL}
+// Weight of the photo tile (i, j): 0 if not in the atlas, fading in after it arrives.
+float detFade(vec2 ij) {
+  vec2 sl = mod(ij, 3.0);
+  int si = int(sl.x + sl.y * 3.0 + 0.5);
+  return abs(uDetSlots[si] - (ij.x + ij.y * 4096.0)) < 0.5 ? uDetFade[si] : 0.0;
+}
 #if MARS > 0
 #define CRATER_P 0.32
 #define CRATER_D 1.0
@@ -418,15 +428,19 @@ if (uDetRect.w > 0.5) {
   vec2 tp = (vWorldP.xz - uDetRect.xy) / uDetRect.z;
   vec2 ij = floor(tp);
   vec2 sl = mod(ij, 3.0);
-  int si = int(sl.x + sl.y * 3.0 + 0.5);
-  float want = ij.x + ij.y * 4096.0;
   float texM = uDetRect.z / uDetRes;
   float fpD = length(fwidth(vWorldP.xz));
-  float wD = (abs(uDetSlots[si] - want) < 0.5 ? 1.0 : 0.0) * (1.0 - smoothstep(texM * 2.0, texM * 6.0, fpD));
+  float wD = detFade(ij) * (1.0 - smoothstep(texM * 2.0, texM * 6.0, fpD));
   if (wD > 0.0) {
     vec2 lc = fract(tp);
-    // Fade the outer 2 % of each tile: no seam where a neighbour is still loading.
-    wD *= smoothstep(0.0, 0.02, min(min(lc.x, 1.0 - lc.x), min(lc.y, 1.0 - lc.y))) * 0.6 + 0.4;
+    // Toward a neighbour that is missing or still fading in, feather out over ~30 m;
+    // the feather's width wanders (noise), so no straight edge shows. Across the border
+    // the weight is the same from both sides (self · neighbour): no seam between tiles.
+    float fw = 0.12 * (0.45 + 0.9 * lnoised(vWorldP.xz * 0.03 + 7.0).x);
+    wD *= mix(detFade(ij + vec2(-1.0, 0.0)), 1.0, smoothstep(0.0, fw, lc.x));
+    wD *= mix(detFade(ij + vec2(1.0, 0.0)), 1.0, smoothstep(0.0, fw, 1.0 - lc.x));
+    wD *= mix(detFade(ij + vec2(0.0, -1.0)), 1.0, smoothstep(0.0, fw, lc.y));
+    wD *= mix(detFade(ij + vec2(0.0, 1.0)), 1.0, smoothstep(0.0, fw, 1.0 - lc.y));
     float h = 0.5 / uDetRes;
     vec2 base = sl / 3.0;
     vec3 detT = texture2D(uDet, base + clamp(lc, h, 1.0 - h) / 3.0).rgb;
@@ -820,8 +834,9 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`,
   }
 
   /** Attach the streamed full-resolution photo tiles. */
-  setDetail(tex: THREE.Texture, rect: THREE.Vector4, slots: Float32Array, res: number, slopes = false): void {
+  setDetail(tex: THREE.Texture, rect: THREE.Vector4, slots: Float32Array, res: number, slopes = false, fade?: Float32Array): void {
     const u = this.uniforms;
+    if (fade) u.uDetFade.value = fade;
     u.uDetSlopes.value = slopes ? 1 : 0;
     u.uDet.value = tex;
     u.uDetRect.value = rect;
