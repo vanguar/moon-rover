@@ -294,6 +294,7 @@ vec3 iT = instanceMatrix[3].xyz;
 vRockSeed = fract(sin(dot(iT.xz, vec2(12.9898, 78.233))) * 43758.5453);
 #else
 vRockN = normalize(mat3(modelMatrix) * objectNormal);
+vRockSeed = 0.5;
 #endif
 vRockP = position * rScale;
 vRockS = rScale;`,
@@ -339,6 +340,55 @@ ${NOISE_GLSL}
 float tri(vec3 p, vec3 w) {
   return lnoised(p.yz).x * w.x + lnoised(p.xz + 13.1).x * w.y + lnoised(p.xy + 27.7).x * w.z;
 }
+#if ROCK_MARS > 0
+// Calcium-sulfate veins (cf. Cheyava Falls, Perseverance 2024; the veins of Gale seen
+// by Curiosity): water filled fractures with white sulfate. Fractures = level lines of
+// a warped noise field, a coarse set (cm apart) and a fine one between: wandering,
+// branching, of uneven width - no straight or parallel lines. Returns coverage 0..1,
+// faded where the veins would be finer than ~2 px (no moire). Only some rocks.
+float veined() { return step(fract(vRockSeed * 13.7), 0.2); }
+// Cell hash (exact integers): jittered fracture-network nodes.
+vec2 vh2(vec2 c) {
+  uvec2 v = uvec2(ivec2(c) + 1048576) * uvec2(1664525u, 1013904223u);
+  v.x += v.y * 1664525u; v.y += v.x * 1013904223u; v ^= v >> 16u; v.x += v.y * 1664525u; v.y += v.x * 1013904223u; v ^= v >> 16u;
+  return vec2(v) * (1.0 / 4294967295.0);
+}
+// Distance to the nearest fracture of a jittered cell network (F2 - F1): polygons of
+// uneven size and shape, edges meeting at triple junctions. "keep": the share of
+// fracture segments that were filled (each segment, between two given cells, decides
+// on its own) - a few veins crossing and ending, not a net around every cell.
+float fracture(vec2 p, float keep) {
+  vec2 i = floor(p), f = fract(p);
+  float d1 = 8.0, d2 = 8.0;
+  vec2 c1 = vec2(0.0), c2 = vec2(0.0);
+  for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+    vec2 g = vec2(float(x), float(y));
+    vec2 r = g + 0.15 + 0.7 * vh2(i + g) - f;
+    float d = dot(r, r);
+    if (d < d1) { d2 = d1; c2 = c1; d1 = d; c1 = i + g; } else if (d < d2) { d2 = d; c2 = i + g; }
+  }
+  float filled = step(vh2(c1 + c2 + 91.0).x, keep);
+  return mix(9.0, sqrt(d2) - sqrt(d1), filled);
+}
+float veinNet(vec3 p, vec3 w, float fw) {
+  vec3 q = p + vec3(vRockSeed * 31.0, vRockSeed * 7.0, vRockSeed * 19.0);
+  // The plane facing the dominant normal (no ghost lines from blending three).
+  vec2 p2 = w.x > w.y && w.x > w.z ? q.yz : w.y > w.z ? q.xz : q.xy;
+  // A little warp: fractures kink and bow instead of running ruler-straight.
+  vec2 wp = vec2(lnoised(p2 * 6.0).x, lnoised(p2 * 6.0 + 7.3).x) - 0.5;
+  vec2 a2 = p2 * 4.5 + wp * 0.7;
+  vec2 b2 = p2 * 14.0 + wp * 1.4 + 3.7;
+  float ea = fracture(a2, 0.38), eb = fracture(b2, 0.18);
+  // Width pinches and swells along each vein (2-7 mm, fine set 1-3 mm).
+  float wa = 0.04 * (0.4 + 1.2 * lnoised(p2 * 11.0 + 2.0).x);
+  float wb = 0.035 * (0.3 + 1.0 * lnoised(p2 * 27.0 + 6.0).x);
+  float va = (1.0 - smoothstep(wa, wa + fwidth(ea) + 1e-4, ea)) * (1.0 - smoothstep(0.1, 0.22, fw * 4.5));
+  float vb = (1.0 - smoothstep(wb, wb + fwidth(eb) + 1e-4, eb)) * (1.0 - smoothstep(0.1, 0.22, fw * 14.0)) * 0.7;
+  // Not every fracture was filled: the fine set comes and goes.
+  float present = smoothstep(0.35, 0.6, lnoised(p2 * 2.5 + 17.0).x);
+  return max(va, vb * present) * veined();
+}
+#endif
 float rockH(vec3 p, vec3 w) {
   float h = tri(p * 9.0, w) * 0.5 + tri(p * 23.0, w) * 0.3 + tri(p * 61.0, w) * 0.15;
   // Vesicles / pits: sharp small dents.
@@ -358,6 +408,10 @@ float rockH(vec3 p, vec3 w) {
 #if ROCK_PHOTO > 0
   // Relief from the photograph's brightness: fractures, flakes and grains of real rock.
   H = dot(rockPhoto(vRockP, w), vec3(0.33)) * 0.006 + H * 0.4;
+#endif
+#if ROCK_MARS > 0
+  // Sulfate is harder than the host rock: the veins stand out as low ridges.
+  H += veinNet(vRockP, w, fw) * 0.0025;
 #endif
   // Bump from screen-space derivatives (Mikkelsen).
   vec3 sx = dFdx(-vViewPosition), sy = dFdy(-vViewPosition);
@@ -387,6 +441,20 @@ float rockH(vec3 p, vec3 w) {
   diffuseColor.rgb *= rockPhoto(vRockP, w) / 0.5 * (1.0 + 0.3 * mott);
 #else
   diffuseColor.rgb *= (1.0 + grains + mott) * (1.0 - 0.55 * pit * detail);
+#endif
+#if ROCK_MARS > 0
+  {
+    float v = veinNet(vRockP, w, fw);
+    if (v > 0.0) {
+      // Host: reddish sedimentary rock (hematite), the vein cream-white sulfate, with
+      // the ochre dust lying on it on the upper faces.
+      diffuseColor.rgb *= mix(vec3(1.0), vec3(1.12, 0.94, 0.84), veined() * 0.6);
+      float up = smoothstep(0.4, 0.95, normalize(vRockN).y);
+      // Bright where fresh, a thin ochre dusting on the upper faces.
+      vec3 sulfate = mix(vec3(0.78, 0.73, 0.64), vec3(0.6, 0.45, 0.33), up * 0.3);
+      diffuseColor.rgb = mix(diffuseColor.rgb, sulfate, v);
+    } else diffuseColor.rgb *= mix(vec3(1.0), vec3(1.12, 0.94, 0.84), veined() * 0.6);
+  }
 #endif
 #if ROCK_MARS == 0
   // Lunar rocks carry a thin coat of fine soil on their upper faces (zap pits, dust).
