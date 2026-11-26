@@ -53,14 +53,21 @@ export function buildPavement(): Uint8Array {
   const lat3a = Float32Array.from({ length: L3 * L3 }, () => rnd());
   const lat3b = Float32Array.from({ length: L3 * L3 }, () => rnd());
   const lat4 = Float32Array.from({ length: L4 * L4 }, () => rnd());
+  // Larger warps (~6.4 m and ~4 m): fracture lines bow and kink over a plate's length,
+  // and the plates differ in size and shape (a plain Voronoi net looks like ruled lines).
+  const L5 = 10, L6 = 16;
+  const lat5a = Float32Array.from({ length: L5 * L5 }, () => rnd());
+  const lat5b = Float32Array.from({ length: L5 * L5 }, () => rnd());
+  const lat6a = Float32Array.from({ length: L6 * L6 }, () => rnd());
+  const lat6b = Float32Array.from({ length: L6 * L6 }, () => rnd());
   const out = new Uint8Array(N * N);
   for (let j = 0; j < N; j++) {
     const zz = (j + 0.5) * px;
     for (let i = 0; i < N; i++) {
       const xx = (i + 0.5) * px;
       // Domain warp (~1.6 m wavelength, ±0.35 m): fractures wander instead of running straight.
-      const x = xx + (vn(lat3a, L3, xx, zz) - 0.5) * 0.7;
-      const z = zz + (vn(lat3b, L3, xx, zz) - 0.5) * 0.7;
+      const x = xx + (vn(lat3a, L3, xx, zz) - 0.5) * 0.7 + (vn(lat5a, L5, xx, zz) - 0.5) * 1.8 + (vn(lat6a, L6, xx, zz) - 0.5) * 1.2;
+      const z = zz + (vn(lat3b, L3, xx, zz) - 0.5) * 0.7 + (vn(lat5b, L5, xx, zz) - 0.5) * 1.8 + (vn(lat6b, L6, xx, zz) - 0.5) * 1.2;
       const gx = Math.floor(x / cell), gz = Math.floor(z / cell);
       let d1 = 1e9, d2 = 1e9, k1 = 0, dx1 = 0, dz1 = 0;
       for (let b = -1; b <= 1; b++) {

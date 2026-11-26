@@ -27,7 +27,9 @@ const TRACK_N = 4800;
 const TRACK_HOLD = 90;
 const TRACK_FADE = 120;
 /** Track ribbon cells across: a band tens of metres wide must follow the ground. */
-const TRACK_K = 4;
+// 16 across: the band hugs the ground (with 4 the terrain between the vertices cut it
+// off along straight lines).
+const TRACK_K = 16;
 /** Segments (1.5 m each) over which a track's head fades in. */
 const RAMP = 8;
 /** Vertices per track segment: a row of TRACK_K + 1 at its start and at its end. */
@@ -125,10 +127,12 @@ export class DevilDust {
           float a = vUv.y, c = vUv.x * 2.0 - 1.0;
           // Ragged, wandering, diffuse edges - the vortex swept a wavering band, not a strip.
           float wob = (n(vec2(a * 0.12, 1.0)) - 0.5) * 0.5 + (n(vec2(a * 0.5, 7.0)) - 0.5) * 0.25;
-          float width = 0.6 + 0.4 * n(vec2(a * 0.07, 3.0));
-          float edge = smoothstep(width, width * 0.1, abs(c + wob));
+          float width = 0.45 + 0.5 * n(vec2(a * 0.07, 3.0));
+          // Fully soft edges: the scour thins out toward the sides, no rim.
+          float e = abs(c + wob) / width;
+          float edge = exp(-e * e * 2.2) * smoothstep(1.0, 0.75, abs(c));
           // Intermittent: where the vortex weakened or lost contact the scour fades out.
-          float patchy = mix(0.3, 1.0, smoothstep(0.25, 0.6, n(vec2(a * 0.025, 11.0))));
+          float patchy = mix(0.15, 1.0, smoothstep(0.25, 0.65, n(vec2(a * 0.025, 11.0)) * 0.7 + n(vec2(a * 0.09, c * 1.5 + 4.0)) * 0.3));
           // Scour loops from the rotation while the devil drifts: curved, irregular
           // arcs (warped noise), not a periodic stripe pattern.
           float lw = n(vec2(a * 0.11, c * 0.9 + 3.0)) * 4.0;
@@ -140,7 +144,8 @@ export class DevilDust {
           float cover = (uNow - vB - ${TRACK_HOLD.toFixed(1)}) / ${TRACK_FADE.toFixed(1)};
           float when = n(vec2(a * 0.06, c * 1.7 + 20.0)) * 0.55 + n(vec2(a * 0.23, c * 4.0 + 40.0)) * 0.3 + n(vec2(a * 0.9, c * 9.0)) * 0.15;
           float stay = 1.0 - smoothstep(when * 0.75, when * 0.75 + 0.25, cover);
-          float k = 1.0 - 0.24 * vA * edge * loops * speck * patchy * stay;
+          // Seen from the ground a devil track is subtle (it stands out from orbit).
+          float k = 1.0 - 0.12 * vA * edge * loops * speck * patchy * stay;
           gl_FragColor = vec4(vec3(k * 0.5), 1.0); }`,
       uniforms: { uCurvK: { value: 0.5 / 3389500 }, uNow: this.trackU.uNow },
       transparent: true,
@@ -286,7 +291,7 @@ export class DevilDust {
     const len = Math.hypot(dx, dz);
     if (len < 1.5 || d.s < 0.3) return;
     // Wider than the core: the inflow layer scours a band ~2-3 core radii across.
-    const w = d.r * 2.2;
+    const w = Math.min(d.r * 1.6, 25);
     const sx = (-dz / len) * w, sz = (dx / len) * w;
     const q = this.tHead;
     this.tHead = (this.tHead + 1) % TRACK_N;
@@ -311,7 +316,7 @@ export class DevilDust {
     for (let k = 0; k < TRACK_V; k++) {
       const src = k <= TRACK_K ? start : end, c = k % (TRACK_K + 1);
       const x = src[c * 2], z = src[c * 2 + 1], vi = q * TRACK_V + k;
-      this.tPos.set([x, t.height(x, z) + 0.03, z], vi * 3);
+      this.tPos.set([x, t.height(x, z) + 0.06, z], vi * 3);
       this.tBirth[vi] = this.time;
       uvA.setXY(vi, c / TRACK_K, k <= TRACK_K ? a0 : a1);
     }
@@ -333,11 +338,17 @@ export class DevilDust {
         this.tAlpha[seg * TRACK_V + k] = last.s * st * st * (3 - 2 * st);
       }
     }
-    uvA.needsUpdate = true;
+    // Upload only the segments that changed (the buffers are large).
+    const seg = (attr: THREE.BufferAttribute, q0: number) => attr.addUpdateRange(q0 * TRACK_V * attr.itemSize, TRACK_V * attr.itemSize);
+    const posA = this.trackGeo.getAttribute('position') as THREE.BufferAttribute;
+    const birthA = this.trackGeo.getAttribute('aB') as THREE.BufferAttribute;
+    const alphaA = this.trackGeo.getAttribute('aA') as THREE.BufferAttribute;
+    seg(posA, q);
+    seg(uvA, q);
+    seg(birthA, q);
+    for (const r of last.recent) seg(alphaA, r);
+    posA.needsUpdate = uvA.needsUpdate = birthA.needsUpdate = alphaA.needsUpdate = true;
     last.along = a1;
-    (this.trackGeo.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
-    (this.trackGeo.getAttribute('aA') as THREE.BufferAttribute).needsUpdate = true;
-    (this.trackGeo.getAttribute('aB') as THREE.BufferAttribute).needsUpdate = true;
     last.x = d.x;
     last.z = d.z;
   }
