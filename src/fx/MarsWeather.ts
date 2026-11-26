@@ -111,6 +111,7 @@ export class MarsWeather {
       uFogColor: { value: new THREE.Color() },
       uFogDensity: { value: 0 },
       uWindDir: { value: new THREE.Vector2(1, 0) },
+      uSteps: { value: 14 },
     };
     const devilMat = new THREE.ShaderMaterial({
       uniforms: this.devilU,
@@ -140,6 +141,7 @@ export class MarsWeather {
         uniform vec3 uFogColor;
         uniform float uFogDensity;
         uniform vec2 uWindDir;
+        uniform int uSteps;
         // Exact integer hash (PCG-style) of a lattice point: a float sin/fract hash loses
         // precision at large coordinates and draws regular stripes.
         float h3(vec3 p) { uvec3 v = uvec3(ivec3(floor(p)) + 1048576); v = v * 1664525u + 1013904223u;
@@ -176,13 +178,15 @@ export class MarsWeather {
             t1 = min(t1, max(ya, yb));
           }
           if (t1 <= t0) discard;
+          // Up to 14 steps; fewer when the load watchdog asks for relief.
           const int N = 14;
-          float dt = (t1 - t0) / float(N);
+          float dt = (t1 - t0) / float(uSteps);
           float trans = 1.0;
           vec3 col = vec3(0.0);
           float phase = 0.7 * hg(0.6, dot(rd, uSun)) + 0.3;
           vec2 sunH = normalize(uSun.xz + 1e-4);
           for (int i = 0; i < N; i++) {
+            if (i >= uSteps) break;
             // Per-pixel jitter of the steps (screen-space integer hash): grain, not bands.
             float t = t0 + (float(i) + 0.5 + 0.5 * (h3(vec3(gl_FragCoord.xy, float(i) + floor(uTime * 30.0))) - 0.5)) * dt;
             vec3 p = ro + rd * t;
@@ -495,6 +499,13 @@ export class MarsWeather {
       }
     }
     return best ? { x: best.x, z: best.z, r: best.r, s: best.s, spin: best.spin, vx: best.vx, vz: best.vz } : null;
+  }
+
+  /** Load relief 0..3 from the watchdog: thinner particles, fewer ray-march steps. */
+  setRelief(relief: number, budget: number): void {
+    this.devilU.uSteps.value = [14, 12, 10, 8][relief];
+    this.feet.budget = budget;
+    this.sand.budget = budget;
   }
 
   private spawnDevil(cx: number, cz: number): void {

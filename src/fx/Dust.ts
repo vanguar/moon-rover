@@ -21,6 +21,8 @@ const SHUTTER = 1 / 60;
  */
 export class Dust {
   readonly mesh: THREE.InstancedMesh;
+  /** Spawn multiplier set by the load watchdog (1 = full). */
+  budget = 1;
   private pos: Float32Array;
   private vel: Float32Array;
   private ground: Float32Array;
@@ -113,7 +115,7 @@ void RE_IndirectDiffuse_Lambert( const in vec3 irradiance, const in vec3 geometr
       // Part of the throw lands on the vehicle itself (fenders stop most of it on the LRV).
       rover.dustCoat = Math.min(1, rover.dustCoat + (Math.abs(rim) * 0.0006 + slip * 0.002) * dt * (rover.spec.crew ? 0.5 : 1));
       // Grains entrained per second scale with rim speed and with slip (shearing).
-      this.carry[w] += (Math.abs(rim) * 110 + slip * 300) * dt * scale;
+      this.carry[w] += (Math.abs(rim) * 110 + slip * 300) * dt * scale * this.budget;
       const c = rover.wheelWorld[w];
       const gy = this.terrain.height(c.x, c.z);
       while (this.carry[w] >= 1) {

@@ -48,6 +48,8 @@ interface DevilIn {
 
 export class DevilDust {
   readonly points: THREE.Points;
+  /** Spawn multiplier set by the load watchdog (1 = full). */
+  budget = 1;
   readonly track: THREE.Mesh;
   private pos = new Float32Array(N * 3);
   private vel = new Float32Array(N * 3);
@@ -181,7 +183,7 @@ export class DevilDust {
       const dist = Math.hypot(d.x - cam.x, d.z - cam.z);
       if (dist > 350 || d.s < 0.05) return;
       const rc = d.r;
-      const rate = (90 + rc * 12) * d.s * (dist < 150 ? 1 : 0.4);
+      const rate = (90 + rc * 12) * d.s * (dist < 150 ? 1 : 0.4) * this.budget;
       let c = (this.carry.get(di) ?? 0) + rate * dt;
       while (c >= 1) {
         c -= 1;

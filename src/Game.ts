@@ -21,6 +21,7 @@ import { buildLunarModule } from './rover/models/nasa';
 import { ROVERS, type RoverSpec } from './rover/specs';
 import { Astronaut } from './eva/Astronaut';
 import { EvaCamera } from './eva/EvaCamera';
+import { LoadGovernor } from './perf/LoadGovernor';
 import { Footprints } from './eva/Footprints';
 import { fmtHM } from './format';
 import { Helicopter } from './heli/Helicopter';
@@ -135,6 +136,10 @@ export class Game {
   autoQuality: boolean;
   cameraMode: CameraMode = 'cabin';
   private evaCam: EvaCamera | null = null;
+  /** Watches every frame and sheds load at the first signs of stutter. */
+  readonly governor = new LoadGovernor();
+  /** CPU time of the previous frame (update + draw submission), s. */
+  private cpuLast = 0;
   private parkedLrv: { x: number; z: number; yaw: number } | null = null;
   /** Small solid hardware (flag pole, ALSEP instruments): circles for the astronaut. */
   private solids: { x: number; z: number; r: number }[] = [];
@@ -961,6 +966,7 @@ export class Game {
   }
 
   private frame(): void {
+    const cpu0 = performance.now();
     this.clock.update();
     const dt = Math.min(this.clock.getDelta(), 0.1);
     if (this.paused) {
@@ -1032,6 +1038,7 @@ export class Game {
     rover.knocks.length = 0;
     this.adaptQuality(dt);
     this.render();
+    this.cpuLast = (performance.now() - cpu0) / 1000;
   }
 
   render(): void {
@@ -1047,7 +1054,7 @@ export class Game {
     this.sky?.setAdaptation((1 - 0.85 * THREE.MathUtils.smoothstep(groundFrac, 0.1, 0.65)) * (1 - 0.95 * sunGlare));
     // The visor mirrors the scene when the astronaut is seen up close (not from inside the helmet).
     const e = this.eva;
-    if (e && this.cameraMode !== 'cabin' && this.q.level !== 'low' && this.camera.position.distanceTo(e.pos) < 25) {
+    if (e && this.cameraMode !== 'cabin' && this.q.level !== 'low' && this.governor.relief === 0 && this.camera.position.distanceTo(e.pos) < 25) {
       e.updateVisor(this.renderer, this.scene, (on) => this.sky?.hideFlare(on));
     }
     if (this.composer) this.composer.render();
@@ -1385,7 +1392,8 @@ export class Game {
     this.terrainR.setSun(this.sunDir);
     this.baker?.setSun(this.sunDir, jump);
     if (jump) this.baker?.bakeAll();
-    else this.baker?.update();
+    // Under heavy load the shadow re-bake runs every other frame.
+    else if (this.governor.relief < 2 || (this.idleTick++ & 1)) this.baker?.update();
     // Below the horizon (or behind a mountain) the Sun stops lighting; the bounce light goes with it.
     const up = THREE.MathUtils.smoothstep(this.sunDir.y, -0.0046, 0.0046);
     this.sun.intensity = SUN_INTENSITY * up;
@@ -1693,6 +1701,18 @@ export class Game {
     // Display refresh: the shortest frame intervals seen recently (60, 90, 120, 144 Hz).
     d.minDt = Math.min(d.minDt * 1.0005 + 1e-6, dt);
     const period = Math.max(d.minDt, isMobile ? 1 / 30 : 1 / 58);
+    const minScale0 = Math.min(1, Math.max(isMobile ? 0.5 : 0.6, 0.75 / this.q.pixelRatio));
+    // Fast path: the watchdog sheds load within a few frames of a slowdown.
+    const step = this.governor.update(dt, this.cpuLast, period);
+    const g = this.governor;
+    this.dust.budget = g.particleBudget;
+    this.weather?.setRelief(g.relief, g.particleBudget);
+    if (step < 0 && d.scale > minScale0 + 1e-3) {
+      d.scale = Math.max(minScale0, d.scale + step);
+      d.calm = 0;
+      this.renderer.setPixelRatio(this.q.pixelRatio * d.scale);
+      this.resize();
+    }
     d.t += dt;
     d.n++;
     if (dt > period * 1.25) d.late++;

@@ -39,6 +39,8 @@ export interface DevilFlow {
 
 export class SandSpray {
   readonly lines: THREE.Mesh;
+  /** Spawn multiplier set by the load watchdog (1 = full). */
+  budget = 1;
   /** Grain impacts on the rover during the last update, and their summed energy (≈ v²). */
   hits = 0;
   hitEnergy = 0;
@@ -131,7 +133,7 @@ export class SandSpray {
       const reach = Math.min(25, devil.r * 3);
       const dc = Math.hypot(cam.x - devil.x, cam.z - devil.z);
       if (dc < reach + 25) {
-        this.carry += dt * 2600 * devil.s;
+        this.carry += dt * 2600 * devil.s * this.budget;
         while (this.carry >= 1) {
           this.carry -= 1;
           const a = Math.random() * Math.PI * 2, rr = Math.sqrt(Math.random()) * 16;
