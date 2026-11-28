@@ -98,6 +98,8 @@ export class Missions {
         { key: 'ph_photo', target: site('cave'), done: (c) => c.found.has('cave') },
         // Deep in the tube something lies on the floor...
         { key: 'ph_bones', target: site('bones'), done: (c) => c.found.has('bones') },
+        // And home: out through the opening, landed by the rover (the arrow points at it).
+        { key: 'ph_home', target: () => this.home, done: (c) => !!c.heli && c.heli.agl < 0.5 && Math.hypot(c.heli.pos.x - c.heli.pad.x, c.heli.pos.z - c.heli.pad.z) < 12 },
       ];
     } else if (kind === 'mars') {
       // Octavia E. Butler Landing; the delta front ~2 km to the west-northwest (Kodiak and
@@ -203,7 +205,11 @@ export class Missions {
     };
   }
 
+  /** The helicopter's pad by the rover (for the way home). */
+  private home: { x: number; z: number } | null = null;
+
   update(c: MissionCtx, cameraHeadingDeg: number): void {
+    if (c.heli) this.home = { x: c.heli.pad.x, z: c.heli.pad.z };
     if (!this.finished) {
       const s = this.steps[this.index];
       const tg = s.target?.() ?? null;

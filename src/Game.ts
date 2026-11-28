@@ -149,6 +149,7 @@ export class Game {
   /** Eye/camera adaptation to the dark of a cave, 1 = daylight. */
   private caveAdapt = 1;
   private caveMeter = 1;
+  private wallWarnAt = 0;
   private meterTick = 0;
   /** Small solid hardware (flag pole, ALSEP instruments): circles for the astronaut. */
   private solids: { x: number; z: number; r: number }[] = [];
@@ -1057,15 +1058,22 @@ export class Game {
     if (this.heli) {
       const d = this.input.drive;
       this.heli.attachAudio(this.audio.output);
+      // The solar panel needs the Sun: none at night, in a cave, under the pit's rim.
+      const sunUp = THREE.MathUtils.smoothstep(this.sunDir.y, 0.02, 0.15);
+      this.heli.sunlight = sunUp * (this.cave ? this.cave.lightAt(this.heli.pos, this.sunDir).sun : 1);
       this.heli.update(dt, { fwd: d.throttle - d.brake, yaw: d.steer, lift: this.input.lift }, true);
       // Under the cave roof the helicopter cannot climb through the rock.
       const hp = this.heli.pos;
-      if (this.cave?.contains(hp)) {
-        this.cave.confineThroat(hp, this.heli.vel);
-        const ceil = this.cave.ceilingAt(hp.x, hp.z) - 1.2;
-        if (hp.y > ceil) {
-          hp.y = ceil;
-          this.heli.vel.y = Math.min(0, this.heli.vel.y);
+      if (this.cave?.contains(hp) || (this.cave && this.cave.depth(hp) > 0)) {
+        // The rock is solid: a touch pushes back, a knock (> ~1.2 m/s) breaks the rotor
+        // blades (carbon fibre, 1.2 m across) and Ingenuity drops. Warn when close.
+        const hit = this.cave.collide(hp, this.heli.vel, 0.75);
+        if (hit.impact > 1.2 && this.heli.phase !== 'crashed' && this.heli.phase !== 'landed') {
+          this.heli.crash('heliWall');
+          this.toast(t('heliWall'));
+        } else if (hit.clearance < 2.5 && this.heli.phase !== 'crashed' && this.heli.phase !== 'landed' && performance.now() - this.wallWarnAt > 2500) {
+          this.wallWarnAt = performance.now();
+          this.toast(t('heliWallNear'));
         }
       }
       this.heli.setListener(this.camera.position.distanceTo(this.heli.pos));
@@ -1865,6 +1873,8 @@ export class Game {
     const g = this.governor;
     this.dust.budget = g.particleBudget;
     this.weather?.setRelief(g.relief, g.particleBudget);
+    // Under load the cave sheds its pebbles first (thousands of small instances).
+    this.cave?.setRelief(g.relief);
     if (step < 0 && d.scale > minScale0 + 1e-3) {
       d.scale = Math.max(minScale0, d.scale + step);
       d.calm = 0;

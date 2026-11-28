@@ -6,6 +6,8 @@
 type Dict = Record<string, string>;
 
 const ru: Dict = {
+  ph_home: 'Верните Ingenuity к роверу: вылетите через отверстие и сядьте рядом',
+  ph_home_hint: 'Стрелка показывает на ровер. Поднимитесь прямо вверх через отверстие (пробел), затем летите по стрелке; у ровера держите Shift. Потом E - Ingenuity вернётся на ровер.',
   ph_bones: 'В глубине трубы что-то лежит. Долетите и сфотографируйте (F)',
   ph_bones_hint: 'Летите по стрелке вдоль трубы, на высоте 3-5 м. Там почти темно: глазам нужно несколько секунд, чтобы привыкнуть.',
   site_bones: 'Скелет? Нет - камень',
@@ -200,6 +202,8 @@ const ru: Dict = {
 };
 
 const uk: Dict = {
+  ph_home: 'Поверніть Ingenuity до ровера: вилетіть крізь отвір і сядьте поруч',
+  ph_home_hint: 'Стрілка показує на ровер. Підніміться вгору крізь отвір (пробіл), летіть за стрілкою, біля ровера тримайте Shift. Потім E.',
   ph_bones: 'У глибині труби щось лежить. Долетіть і сфотографуйте (F)',
   ph_bones_hint: 'Летіть за стрілкою вздовж труби на висоті 3-5 м. Там майже темно: очам потрібно кілька секунд.',
   site_bones: 'Скелет? Ні - камінь',
@@ -377,6 +381,8 @@ const uk: Dict = {
 };
 
 const en: Dict = {
+  ph_home: 'Bring Ingenuity back to the rover: out through the opening, land beside it',
+  ph_home_hint: 'The arrow points at the rover. Climb straight up through the opening (Space), then follow the arrow; by the rover hold Shift. Then E - Ingenuity goes back aboard.',
   ph_bones: 'Something lies deep in the tube. Fly there and photograph it (F)',
   ph_bones_hint: 'Follow the arrow along the tube, 3-5 m up. It is nearly dark there: the eye needs a few seconds.',
   site_bones: 'A skeleton? No - rock',

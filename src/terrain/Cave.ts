@@ -106,7 +106,7 @@ export class Cave {
     const [x, z] = this.world(this.bonesU, this.bonesV());
     return { x, z };
   }
-  private bonesU = 150;
+  private bonesU = 95;
   private bonesV(): number {
     return -(this.halfWidth(this.bonesU, this.floorTop(this.bonesU, 0) + 0.5) - 6);
   }
@@ -339,21 +339,6 @@ export class Cave {
     if (cp.y < fl) cp.y = fl;
   }
 
-  /**
-   * In the throat (between the tube's roof and the rim) the helicopter is kept inside
-   * the opening's outline: pushed back toward the axis instead of being pressed down.
-   */
-  confineThroat(p: THREE.Vector3, vel: THREE.Vector3): void {
-    if (p.y < this.c.ceilY - 2 || p.y > this.c.rimY) return;
-    const dx = p.x - this.c.x, dz = p.z - this.c.z, d = Math.hypot(dx, dz);
-    const lim = this.outlineR(dx, dz) - 1.3;
-    if (d <= lim || d < 1e-3 || d > lim + 6) return;
-    p.x = this.c.x + (dx / d) * lim;
-    p.z = this.c.z + (dz / d) * lim;
-    const vr = (vel.x * dx + vel.z * dz) / d;
-    if (vr > 0) { vel.x -= (vr * dx) / d; vel.z -= (vr * dz) / d; }
-  }
-
   /** How far below the rim of the opening a point is (m, 0 above it). */
   depth(p: THREE.Vector3): number {
     return this.contains(p) ? Math.max(0, this.c.rimY - p.y) : 0;
@@ -458,13 +443,70 @@ export class Cave {
     }
   }
 
+  /** Wall radius factor of the tube at u and section angle th (what the mesh is built with). */
+  private wallK(u: number, th: number): number {
+    const a0 = this.c.width / 2, L = this.c.length;
+    const cs = Math.cos(th), sn = Math.sin(th);
+    let n = 1 + 0.16 * (fbm(cs * a0 / 26 + 11, sn * a0 / 26, u / 26) - 0.5) * 2 + 0.06 * (fbm(cs * a0 / 7, sn * a0 / 7 + 5, u / 7) - 0.5) * 2;
+    const [wx, wz] = this.world(u, a0 * cs);
+    const near = 1 - THREE.MathUtils.smoothstep(Math.hypot(wx - this.c.x, wz - this.c.z), this.maxR + 6, this.maxR + 30);
+    if (sn > 0) n += (1 - n) * near;
+    return n * (0.45 + 0.55 * THREE.MathUtils.smoothstep(L / 2 - Math.abs(u), 0, 70));
+  }
+
+  /**
+   * Keep a flying body (radius R) inside the rock: tube walls and vault (the same lumpy
+   * surface that is drawn) and the opening's throat. Returns the speed it hit with
+   * (into the rock, m/s) and the clearance to the nearest rock (m).
+   */
+  collide(p: THREE.Vector3, vel: THREE.Vector3, R: number): { impact: number; clearance: number } {
+    let impact = 0, clearance = Infinity;
+    const dx = p.x - this.c.x, dz = p.z - this.c.z, dc = Math.hypot(dx, dz);
+    const lim = this.outlineR(dx, dz) - R;
+    // In the throat (above the tube's roof line): its walls.
+    if (p.y > this.c.ceilY - 2 && p.y < this.c.rimY && dc < this.maxR + 8) {
+      clearance = lim - dc;
+      if (dc > lim && dc > 1e-3) {
+        const vr = (vel.x * dx + vel.z * dz) / dc;
+        if (vr > 0) { impact = vr; vel.x -= (vr * dx) / dc; vel.z -= (vr * dz) / dc; }
+        p.x = this.c.x + (dx / dc) * lim;
+        p.z = this.c.z + (dz / dc) * lim;
+      }
+      return { impact, clearance };
+    }
+    const [u, v] = this.uv(p.x, p.z);
+    if (Math.abs(u) > this.c.length / 2 - 2) return { impact, clearance };
+    // Under the opening the roof is open.
+    if (dc < lim && p.y > this.section(u).yc) return { impact, clearance: lim - dc };
+    const sc = this.section(u), a0 = this.c.width / 2;
+    const ny = (p.y - sc.yc) / sc.b, nv = v / a0;
+    const rr = Math.hypot(nv, ny);
+    const th = Math.atan2(ny, nv);
+    const k = this.wallK(u, th);
+    const scale = Math.min(a0, sc.b);
+    clearance = (k - rr) * scale;
+    const kIn = k - R / scale;
+    if (rr > kIn && rr > 1e-4) {
+      // Outward direction in metres (v across the tube, y up), as a world vector.
+      const ov = (nv / rr) / a0, oy = (ny / rr) / sc.b, ol = Math.hypot(ov, oy);
+      const sideX = -this.az, sideZ = this.ax;
+      const out = new THREE.Vector3(sideX * (ov / ol), oy / ol, sideZ * (ov / ol));
+      const vo = vel.dot(out);
+      if (vo > 0) { impact = vo; vel.addScaledVector(out, -vo); }
+      const f = kIn / rr;
+      const vNew = v * f, yNew = sc.yc + (p.y - sc.yc) * f;
+      const [x, z] = this.world(u, vNew);
+      p.set(x, yNew, z);
+    }
+    return { impact, clearance };
+  }
+
   private tubeGeometry(): THREE.BufferGeometry {
     const U = 240, T = 120, L = this.c.length, a0 = this.c.width / 2;
     const pos: number[] = [];
     for (let i = 0; i <= U; i++) {
       const u = -L / 2 + (L * i) / U;
       // Rubble chokes at both ends: the tube narrows and its floor rises to the roof.
-      const s = THREE.MathUtils.smoothstep(L / 2 - Math.abs(u), 0, 70);
       const ce = this.ceilAt0(u);
       const { yc, b: b0 } = this.section(u);
       for (let k = 0; k < T; k++) {
@@ -472,15 +514,9 @@ export class Cave {
         const cs = Math.cos(th), sn = Math.sin(th);
         // Isotropic: the same scale round the tube as along it (in metres of wall), or the
         // lumps stretch into vertical streaks.
-        let n = 1 + 0.16 * (fbm(cs * a0 / 26 + 11, sn * a0 / 26, u / 26) - 0.5) * 2 + 0.06 * (fbm(cs * a0 / 7, sn * a0 / 7 + 5, u / 7) - 0.5) * 2;
-        // Around the skylight the vault is the plain arch (archY), so the throat meets it exactly.
-        {
-          const [wx, wz] = this.world(u, a0 * cs);
-          const near = 1 - THREE.MathUtils.smoothstep(Math.hypot(wx - this.c.x, wz - this.c.z), this.maxR + 6, this.maxR + 30);
-          if (sn > 0) n += (1 - n) * near;
-        }
+        // (Around the skylight the vault is the plain arch, so the throat meets it exactly.)
         // The end ring closes to a point above the roof, behind the rubble ramp: no gap.
-        const k2 = i === 0 || i === U ? 0 : n * (0.45 + 0.55 * s);
+        const k2 = i === 0 || i === U ? 0 : this.wallK(u, th);
         const v = a0 * cs * k2;
         // Flat floor: the lower part of the section is the solidified lava surface.
         let y = yc + b0 * sn * k2;
@@ -605,12 +641,17 @@ export class Cave {
     return g;
   }
 
+  private relief = 0;
+  /** Load watchdog level (0..3): pebbles go at 2 and above. */
+  setRelief(r: number): void {
+    this.relief = r;
+  }
   /** Per frame: blocks only within sight of the opening, rubble only close to it. */
   updateVisibility(cam: THREE.Vector3): void {
     const d = Math.hypot(cam.x - this.c.x, cam.z - this.c.z);
     const inside = this.contains(cam);
     this.blockGroup.visible = inside || d < 250;
-    this.rubbleGroup.visible = inside || (d < 60 && cam.y < this.c.rimY + 60);
+    this.rubbleGroup.visible = this.relief < 2 && (inside || (d < 60 && cam.y < this.c.rimY + 60));
   }
 
   /** Orientation of a stone lying on the pile at (u, v): up along the ground's normal, turned and tipped a little. */

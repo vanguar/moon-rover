@@ -575,7 +575,7 @@ dustF = mix(dustF * 0.5, 1.0, matW);
   grad += gw * wP;
   // Plates lighter, dusty grey-tan; cracks and sand pockets darker.
   float hm = PAVE_MIN + h0 * PAVE_RANGE;
-  paveShade = mix(1.0, mix(0.78, 1.12, smoothstep(0.0, 0.04, hm)), matW * clamp(1.4 - fp * 3.0, 0.0, 1.0));
+  paveShade = mix(1.0, mix(0.86, 1.1, smoothstep(0.0, 0.04, hm)), matW * clamp(1.4 - fp * 3.0, 0.0, 1.0));
 }
 #endif
 // Calibrated on Perseverance natural-colour frames of the Jezero floor (PIA24264,

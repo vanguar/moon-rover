@@ -1,4 +1,15 @@
-import { mulberry32 } from './TerrainData';
+// Own copy of TerrainData's mulberry32: this module is baked by a Node tool
+// (tools/make_pavement.ts) and must not pull in the game's modules.
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 /**
  * Fractured bedrock pavement (Mars: the Máaz formation on the Jezero floor).
@@ -26,10 +37,12 @@ export function buildPavement(): Uint8Array {
   const G = Math.round(PAVE_SIZE / cell); // seeds per side (tileable)
   const rnd = mulberry32(4242);
   const sx = new Float32Array(G * G), sz = new Float32Array(G * G), sh = new Float32Array(G * G);
-  const tx = new Float32Array(G * G), tz = new Float32Array(G * G);
+  const tx = new Float32Array(G * G), tz = new Float32Array(G * G), sw = new Float32Array(G * G);
   for (let i = 0; i < G * G; i++) {
-    sx[i] = 0.15 + 0.7 * rnd(); // jitter inside the grid cell, 0..1
-    sz[i] = 0.15 + 0.7 * rnd();
+    sx[i] = rnd(); // anywhere in the grid cell
+    sz[i] = rnd();
+    // Weight (additively weighted Voronoi): plates from ~1 m to ~4 m, borders that bend.
+    sw[i] = 1.4 * Math.pow(rnd(), 1.6);
     sh[i] = 0.02 + 0.05 * rnd() * rnd();
     tx[i] = (rnd() - 0.5) * 0.03;
     tz[i] = (rnd() - 0.5) * 0.03;
@@ -69,7 +82,7 @@ export function buildPavement(): Uint8Array {
       const x = xx + (vn(lat3a, L3, xx, zz) - 0.5) * 0.7 + (vn(lat5a, L5, xx, zz) - 0.5) * 1.8 + (vn(lat6a, L6, xx, zz) - 0.5) * 1.2;
       const z = zz + (vn(lat3b, L3, xx, zz) - 0.5) * 0.7 + (vn(lat5b, L5, xx, zz) - 0.5) * 1.8 + (vn(lat6b, L6, xx, zz) - 0.5) * 1.2;
       const gx = Math.floor(x / cell), gz = Math.floor(z / cell);
-      let d1 = 1e9, d2 = 1e9, k1 = 0, dx1 = 0, dz1 = 0;
+      let d1 = 1e9, d2 = 1e9, k1 = 0, k2 = 0, dx1 = 0, dz1 = 0;
       for (let b = -1; b <= 1; b++) {
         for (let a = -1; a <= 1; a++) {
           const cx = gx + a, cz = gz + b;
@@ -77,20 +90,27 @@ export function buildPavement(): Uint8Array {
           const k = wz * G + wx;
           // Seed of grid cell (cx, cz); the jitter repeats with the tile, so the pattern wraps.
           const ddx = x - (cx + sx[k]) * cell, ddz = z - (cz + sz[k]) * cell;
-          const d = ddx * ddx + ddz * ddz;
+          const d = Math.sqrt(ddx * ddx + ddz * ddz) - sw[k];
           if (d < d1) {
             d2 = d1;
+            k2 = k1;
             d1 = d;
             k1 = k;
             dx1 = ddx;
             dz1 = ddz;
-          } else if (d < d2) d2 = d;
+          } else if (d < d2) {
+            d2 = d;
+            k2 = k;
+          }
         }
       }
       // Distance to the cell border ≈ (F2 − F1) / 2 in distance units.
-      const edge = (Math.sqrt(d2) - Math.sqrt(d1)) * 0.5;
-      // Crack width varies along its length (2–12 cm).
-      const cw = 0.02 + 0.1 * vn(lat3b, L3, zz * 1.7, xx * 1.7);
+      const edge = (d2 - d1) * 0.5;
+      // Not every border opened: about a third of the plates are still joined (a faint seam).
+      const pa = Math.min(k1, k2), pb = Math.max(k1, k2);
+      const open = ((Math.imul(pa * 73856093 ^ pb * 19349663, 0x9e3779b1) >>> 0) / 4294967296) > 0.33;
+      // Crack width varies along its length (1–14 cm).
+      const cw = open ? 0.01 + 0.13 * vn(lat3b, L3, zz * 1.7, xx * 1.7) ** 1.5 : 0.004;
       const crack = Math.min(1, Math.max(0, (edge - cw * 0.5) / (0.04 + cw)));
       const round = crack * crack * (3 - 2 * crack); // rounded plate edges
       // Pitted, weathered rock surface: ±5 mm at 0.5 m.

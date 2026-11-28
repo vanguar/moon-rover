@@ -207,6 +207,16 @@ export class Helicopter {
     this.status = '';
   }
 
+  /** Sunlight on the solar panel (0..1, set by the game): no charging in shadow or in a cave. */
+  sunlight = 1;
+
+  /** A collision: the blades break, the rotor stops, it falls (status for the HUD). */
+  crash(status: string): void {
+    this.phase = 'crashed';
+    this.status = status;
+    this.route = [];
+  }
+
   update(dt: number, cmd: { fwd: number; yaw: number; lift: number }, active: boolean): void {
     const g = world().gravity;
     const rho = world().airDensity;
@@ -217,7 +227,11 @@ export class Helicopter {
       this.phase = 'manual';
       this.route = [];
     }
-    if (manualInput && this.phase === 'landed' && cmd.lift >= -0.05) {
+    if (manualInput && this.phase === 'landed' && cmd.lift >= -0.05 && this.endurance < 15) {
+      // Down to the reserve (kept for the night-time heaters): no take-off until the
+      // panel has charged it in sunlight.
+      this.status = 'heliNeedSun';
+    } else if (manualInput && this.phase === 'landed' && cmd.lift >= -0.05) {
       // Any command on the ground: spin up and climb to 3 m, then hover and wait.
       this.flights++;
       this.route = [new THREE.Vector3(this.pos.x, 3, this.pos.z)];
@@ -273,6 +287,13 @@ export class Helicopter {
       }
       if (this.route.length > 1 && this.wp === this.route.length - 1) vzT = Math.max(-0.8, Math.min(vzT, -0.5)); // final descent ~0.6 m/s
     }
+    // The landing waypoint (height 0) is reached when the legs touch: the rotor stops then
+    // (it kept spinning, the craft "hovering" on the ground, after a reserve landing).
+    if (this.phase === 'auto' && this.route.length && this.route[this.route.length - 1].y === 0 && this.wp >= this.route.length - 1 && this.pos.y - ground < 0.06) {
+      this.phase = 'landed';
+      this.route = [];
+      this.status = 'heliLanded';
+    }
     if (this.phase === 'crashed' || this.phase === 'landed') vzT = 0;
 
     // Attitude: tilt toward the velocity error, limited, first-order servo.
@@ -323,7 +344,8 @@ export class Helicopter {
     // (in reality ~ one sol; accelerated in the game).
     const power = flying ? HOVER_W * (1 + 0.15 * Math.max(0, this.vel.y) + 0.01 * this.vel.lengthSq()) * spin : 0;
     this.battery -= (power * dt) / 3600 / BATTERY_WH;
-    if (this.phase === 'landed') this.battery = Math.min(1, this.battery + dt * 0.02);
+    // Charging from the solar panel (accelerated in the game: in reality about a sol per flight).
+    if (this.phase === 'landed') this.battery = Math.min(1, this.battery + dt * 0.02 * this.sunlight);
     if (flying && this.battery <= RESERVE && this.phase === 'manual') {
       // Out of the flight budget: the onboard software lands where it is.
       this.route = [new THREE.Vector3(this.pos.x, 0, this.pos.z)];
