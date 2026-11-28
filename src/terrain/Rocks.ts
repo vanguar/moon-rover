@@ -383,7 +383,8 @@ float tri(vec3 p, vec3 w) {
 // a warped noise field, a coarse set (cm apart) and a fine one between: wandering,
 // branching, of uneven width - no straight or parallel lines. Returns coverage 0..1,
 // faded where the veins would be finer than ~2 px (no moire). Only some rocks.
-float veined() { return step(fract(vRockSeed * 13.7), 0.2); }
+// Small rocks only: on a metre-wide plate the fracture net reads as a grid of lines.
+float veined() { return step(fract(vRockSeed * 13.7), 0.2) * (1.0 - smoothstep(0.35, 0.6, vRockS)); }
 // Cell hash (exact integers): jittered fracture-network nodes.
 vec2 vh2(vec2 c) {
   uvec2 v = uvec2(ivec2(c) + 1048576) * uvec2(1664525u, 1013904223u);

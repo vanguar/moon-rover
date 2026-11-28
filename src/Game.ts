@@ -465,6 +465,7 @@ export class Game {
     this.rover.parkBrake = false;
     this.heliHud?.classList.add('hidden');
     document.body.classList.remove('heli');
+    if (this.roverMark) this.roverMark.style.display = 'none';
     this.setMission(this.groundMission());
     this.orbit.dist = 9 * this.sizeK;
   }
@@ -1712,7 +1713,47 @@ export class Game {
     this.sun.target.updateMatrixWorld();
   }
 
+  /** On-screen marker over the rover while flying Ingenuity (or at the screen edge, pointing to it). */
+  private roverMark: HTMLDivElement | null = null;
+  private updateRoverMark(): void {
+    const h = this.heli;
+    if (!h) {
+      if (this.roverMark) this.roverMark.style.display = 'none';
+      return;
+    }
+    if (!this.roverMark) {
+      const d = document.createElement('div');
+      d.style.cssText = 'position:fixed;z-index:60;pointer-events:none;transform:translate(-50%,-100%);font:600 14px/1.2 system-ui,sans-serif;color:#ffd27a;background:rgba(20,14,8,0.72);padding:3px 8px;border-radius:10px;white-space:nowrap;text-align:center';
+      document.body.appendChild(d);
+      this.roverMark = d;
+    }
+    const m = this.roverMark;
+    const rp = this.rover.object.position;
+    const dist = Math.hypot(rp.x - h.pos.x, rp.z - h.pos.z);
+    const v = new THREE.Vector3(rp.x, rp.y + 3.2, rp.z).project(this.camera);
+    const behind = v.z > 1;
+    const W = window.innerWidth, H = window.innerHeight;
+    let x = (v.x * 0.5 + 0.5) * W, y = (-v.y * 0.5 + 0.5) * H;
+    let arrow = '▼';
+    if (behind || x < 30 || x > W - 30 || y < 40 || y > H - 30) {
+      // Off screen: pinned to the edge, the arrow pointing toward the rover.
+      let dx = v.x, dy = -v.y;
+      if (behind) { dx = -dx; dy = -dy; }
+      const k = 0.85 / Math.max(Math.abs(dx), Math.abs(dy), 1e-3);
+      x = (dx * k * 0.5 + 0.5) * W;
+      // Kept clear of the panels at the bottom.
+      y = Math.min((dy * k * 0.5 + 0.5) * H, H * 0.62);
+      const ang = Math.atan2(dy, dx);
+      arrow = ['→', '↘', '↓', '↙', '←', '↖', '↑', '↗'][((Math.round(ang / (Math.PI / 4)) % 8) + 8) % 8];
+    }
+    m.style.display = '';
+    m.style.left = `${x}px`;
+    m.style.top = `${y}px`;
+    m.textContent = `${t('heliRover')} · ${Math.round(dist)} ${t('hM')} ${arrow}`;
+  }
+
   private updateHeliHud(): void {
+    this.updateRoverMark();
     const h = this.heli, el = this.heliHud;
     if (!h || !el) return;
     const sp = Math.hypot(h.vel.x, h.vel.z);
