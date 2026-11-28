@@ -1,6 +1,6 @@
 /** Planetary body the game runs on. Everything body-specific is read from here. */
 export type WorldId = 'moon' | 'mars';
-export type SiteId = 'apollo15' | 'apollo17' | 'jezero' | 'pavonis';
+export type SiteId = 'apollo15' | 'apollo17' | 'jezero' | 'pavonis' | 'gale';
 
 /** A landing site of a world: its own terrain, sky, mission and finds. */
 export interface SiteConfig {
