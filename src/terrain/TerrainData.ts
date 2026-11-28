@@ -395,8 +395,7 @@ export class TerrainData {
 /** First channel of an 8-bit map, scaled to n × n (native size when n is omitted); null on failure. */
 async function loadGray(url: string, opts: ImageBitmapOptions | undefined, n?: number): Promise<Uint8Array | null> {
   try {
-    const r = await fetch(dataUrl(url));
-    const bmp = await createImageBitmap(await r.blob(), opts);
+    const bmp = await createImageBitmap(await fetchBlob(dataUrl(url)), opts);
     const w = n ?? bmp.width, h = n ?? bmp.height;
     const c = new OffscreenCanvas(w, h);
     const g = c.getContext('2d', { willReadFrequently: true })!;
@@ -412,10 +411,9 @@ async function loadGray(url: string, opts: ImageBitmapOptions | undefined, n?: n
 
 async function loadFar(base: string, far: NonNullable<TerrainMeta['far']>): Promise<FarGrid | null> {
   try {
-    const fr = await fetch(dataUrl(`${base}far_height.png`));
-    if (!fr.ok) return null;
+    const fb = await fetchBlob(dataUrl(`${base}far_height.png`));
     const { decodePng16 } = await import('./png16');
-    const fp = await decodePng16(await fr.arrayBuffer());
+    const fp = await decodePng16(await fb.arrayBuffer());
     const fs = (far.max - far.min) / 65535;
     const fh = new Float32Array(fp.data.length);
     for (let i = 0; i < fh.length; i++) fh[i] = far.min + fp.data[i] * fs;
@@ -437,7 +435,7 @@ export async function loadTerrainData(base: string, onProgress?: (f: number) => 
   // The heightmap does not depend on the metadata: both downloads start at once,
   // and all the smaller maps in parallel as soon as the metadata names them.
   const heightsP = loadHeights(base, onProgress);
-  const meta: TerrainMeta = await (await fetch(dataUrl(`${base}terrain.json`))).json();
+  const meta: TerrainMeta = JSON.parse(await (await fetchBlob(dataUrl(`${base}terrain.json`))).text());
   const [heights, far, material, pave, dtmW] = await Promise.all([
     heightsP,
     meta.far ? loadFar(base, meta.far) : null,
