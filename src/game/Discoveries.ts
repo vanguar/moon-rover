@@ -54,6 +54,12 @@ const KEY_MOON = 'moon-rover-journal';
 const KEY_MARS = 'mars-rover-journal';
 const KEY_MOON17 = 'moon17-rover-journal';
 const KEY_PAVONIS = 'pavonis-rover-journal';
+const KEY_GALE = 'gale-rover-journal';
+
+/** Gale: the butte in the HiRISE colour mosaic (NASA/JPL-Caltech/UArizona). */
+const PHOTOS_GALE: Record<string, { file: string; frame: string; radius: number }> = {
+  butte: { file: 'gale/butte.jpg', frame: 'HiRISE (MSL Gale mosaic)', radius: 160 },
+};
 
 /** Pavonis Mons: the HiRISE frame of the pit (NASA/JPL-Caltech/UArizona). */
 const PHOTOS_PAV: Record<string, { file: string; frame: string; radius: number }> = {
@@ -69,10 +75,10 @@ export class Discoveries {
   private key: string;
 
   constructor(terrain: TerrainData) {
-    const a17 = currentSite().id === 'apollo17', pav = currentSite().id === 'pavonis';
-    this.key = pav ? KEY_PAVONIS : terrain.meta.body === 'mars' ? KEY_MARS : a17 ? KEY_MOON17 : KEY_MOON;
+    const a17 = currentSite().id === 'apollo17', pav = currentSite().id === 'pavonis', gale = currentSite().id === 'gale';
+    this.key = pav ? KEY_PAVONIS : gale ? KEY_GALE : terrain.meta.body === 'mars' ? KEY_MARS : a17 ? KEY_MOON17 : KEY_MOON;
     const base = import.meta.env.BASE_URL;
-    const table = pav ? PHOTOS_PAV : terrain.meta.body === 'mars' ? PHOTOS_MARS : a17 ? PHOTOS_A17 : PHOTOS;
+    const table = pav ? PHOTOS_PAV : gale ? PHOTOS_GALE : terrain.meta.body === 'mars' ? PHOTOS_MARS : a17 ? PHOTOS_A17 : PHOTOS;
     for (const [id, s] of Object.entries(terrain.meta.sites ?? {})) {
       const p = table[id];
       if (!p) continue;

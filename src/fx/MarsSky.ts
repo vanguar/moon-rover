@@ -24,7 +24,8 @@ vec3 marsSky(vec3 d) {
   float ang = acos(clamp(mu, -1.0, 1.0));
   float storm = smoothstep(0.8, 4.0, uTau);
   // Daylight level: falls off as the Sun nears the horizon; storms darken everything.
-  float day = smoothstep(-0.12, 0.35, sunEl) * (0.35 + 0.65 * smoothstep(-0.05, 0.6, sunEl));
+  // Long Martian twilight: high dust stays sunlit until the Sun is ~17° down (up to ~2 h).
+  float day = smoothstep(-0.3, 0.35, sunEl) * (0.35 + 0.65 * smoothstep(-0.05, 0.6, sunEl));
   day *= exp(-max(uTau - 0.6, 0.0) * 0.28);
   // Path length through the dusty layer: brighter, lighter toward the horizon.
   float air = 1.0 / (el + 0.1);
@@ -139,7 +140,7 @@ export class MarsSky {
     const mu = d.dot(s);
     const ang = Math.acos(Math.min(1, Math.max(-1, mu)));
     const storm = ss(0.8, 4, tau);
-    let day = ss(-0.12, 0.35, s.y) * (0.35 + 0.65 * ss(-0.05, 0.6, s.y));
+    let day = ss(-0.3, 0.35, s.y) * (0.35 + 0.65 * ss(-0.05, 0.6, s.y));
     day *= Math.exp(-Math.max(tau - 0.6, 0) * 0.28);
     const air = 1 / (el + 0.1);
     const k = 1 - Math.exp(-air * 0.32);
@@ -161,6 +162,15 @@ export class MarsSky {
     return out.setRGB(r * day, g * day, b * day);
   }
 
+  /** The Sun has moved (Mars clock): sky model and disc follow. */
+  setSun(dir: THREE.Vector3): void {
+    this.sunDir.copy(dir);
+    this.uniforms.uSun.value.copy(dir);
+    this.sunDisc.position.copy(dir).multiplyScalar(8800);
+    this.sunDisc.lookAt(0, 0, 0);
+    this.sunDisc.visible = dir.y > -0.02;
+  }
+
   update(camera: THREE.Camera, time: number, tau: number): void {
     this.mesh.position.copy(camera.position);
     this.uniforms.uTime.value = time;
@@ -170,6 +180,8 @@ export class MarsSky {
   /** Direct-beam transmission (effective, forward scattering folded in). */
   directTransmission(): number {
     const am = 1 / Math.max(this.sunDir.y, 0.05);
-    return Math.exp(-this.uniforms.uTau.value * am * 0.45);
+    // Below the horizon no direct beam at all (the disc sets over ~1 minute).
+    const up = Math.min(1, Math.max(0, (this.sunDir.y + 0.003) / 0.009));
+    return Math.exp(-this.uniforms.uTau.value * am * 0.45) * up;
   }
 }

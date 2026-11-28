@@ -24,7 +24,7 @@ interface Step {
   done: (c: MissionCtx) => boolean;
 }
 
-export type MissionKind = 'moon' | 'moon17' | 'mars' | 'pavonis' | 'pavonisHeli' | 'heli';
+export type MissionKind = 'moon' | 'moon17' | 'mars' | 'pavonis' | 'pavonisHeli' | 'gale' | 'heli';
 
 export class Missions {
   readonly id: string;
@@ -75,6 +75,15 @@ export class Missions {
         { key: 'p_photo', target: site('pit'), done: (c) => c.found.has('pit') },
         // Then Ingenuity (E): its own mission takes over, down into the opening.
         { key: 'p_heli', done: () => false },
+      ];
+    } else if (kind === 'gale') {
+      // Gale: across the clay-bearing trough of Glen Torridon to a layered butte of the
+      // sulfate unit at the foot of Mount Sharp, and its layers photographed.
+      this.steps = [
+        { key: 'r_drive', done: (c) => c.odometer > 30 },
+        { key: 'g_trough', target: site('trough'), reach: 40, done: () => false },
+        { key: 'g_butte', target: site('butte'), reach: 90, done: () => false },
+        { key: 'g_photo', target: site('butte'), done: (c) => c.found.has('butte') },
       ];
     } else if (kind === 'pavonisHeli') {
       // Ingenuity down through the skylight: over the opening, below its rim, then a

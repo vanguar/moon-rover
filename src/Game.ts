@@ -22,6 +22,7 @@ import { ROVERS, type RoverSpec } from './rover/specs';
 import { Astronaut } from './eva/Astronaut';
 import { EvaCamera } from './eva/EvaCamera';
 import { Cave, type CaveMeta } from './terrain/Cave';
+import { azElDir, marsSun } from './astro/marsSun';
 
 import { LoadGovernor } from './perf/LoadGovernor';
 import { Footprints } from './eva/Footprints';
@@ -258,12 +259,13 @@ export class Game {
       this.terrainR.setDetail(this.detail.texture, this.detail.rect, this.detail.slots, terrain.meta.detail.res, !!terrain.meta.detail.slopes, this.detail.fade);
     }
     this.terrainR.setSun(this.sunDir);
+    // Terrain shadows follow the Sun: recomputed on the GPU (see ShadowBaker) - on the
+    // Moon and, now that its Sun moves through the sol, on Mars.
+    this.baker = new ShadowBaker(this.renderer, terrain, isMobile, quality.level === 'high' || quality.level === 'ultra');
+    this.baker.setSun(this.sunDir, true);
+    this.baker.bakeAll();
+    this.terrainR.setShadowMaps(this.baker.near.texture, this.baker.far?.texture ?? null);
     if (!mars) {
-      // Terrain shadows follow the Sun: recomputed on the GPU (see ShadowBaker).
-      this.baker = new ShadowBaker(this.renderer, terrain, isMobile, quality.level === 'high' || quality.level === 'ultra');
-      this.baker.setSun(this.sunDir, true);
-      this.baker.bakeAll();
-      this.terrainR.setShadowMaps(this.baker.near.texture, this.baker.far?.texture ?? null);
       const l = this.lunarSite();
       const m0 = lunarSky(this.simTime, l.lat, l.lon).icrfToGame;
       this.starFrame0.set(m0[0][0], m0[0][1], m0[0][2], 0, m0[1][0], m0[1][1], m0[1][2], 0, m0[2][0], m0[2][1], m0[2][2], 0, 0, 0, 0, 1);
@@ -293,7 +295,7 @@ export class Game {
     this.tracks = new Tracks(terrain, spec, this.sunDir);
     this.scene.add(this.tracks.mesh);
     this.hud = new Hud(terrain);
-    this.hud.siteLabel = site().id === 'pavonis' ? t('siteStart') : mars ? 'M2020' : 'LM';
+    this.hud.siteLabel = site().id === 'pavonis' || site().id === 'gale' ? t('siteStart') : mars ? 'M2020' : 'LM';
     // A skylight into a cave (Pavonis Mons): the void below, and no ground drawn in the throat.
     const caveMeta = (terrain.meta as { cave?: CaveMeta }).cave;
     if (caveMeta) {
@@ -1297,7 +1299,7 @@ export class Game {
   /** The rover mission of the current site. */
   private groundMission(): MissionKind {
     const id = site().id;
-    return id === 'apollo17' ? 'moon17' : id === 'pavonis' ? 'pavonis' : world().id === 'mars' ? 'mars' : 'moon';
+    return id === 'apollo17' ? 'moon17' : id === 'pavonis' ? 'pavonis' : id === 'gale' ? 'gale' : world().id === 'mars' ? 'mars' : 'moon';
   }
 
   setMission(kind: MissionKind): void {
@@ -1458,6 +1460,10 @@ export class Game {
    * recomputed on the GPU, the light level follows the Sun's elevation.
    */
   private updateClock(dt: number, jump = false): void {
+    if (this.marsSky) {
+      this.updateMarsClock(dt, jump);
+      return;
+    }
     if (!this.sky) return;
     this.simTime += dt * 1000 * this.timeScale;
     const l = this.lunarSite();
@@ -1491,6 +1497,40 @@ export class Game {
     }
     this.onTimeChange?.(this.simTime);
   }
+
+  /**
+   * Mars: the sol goes on (Mars24 ephemeris, 1 game minute per second like the Moon's
+   * clock): the Sun crosses the sky, sets in its blue twilight, the shadows follow.
+   */
+  private updateMarsClock(dt: number, jump = false): void {
+    const ms = this.marsSky!;
+    // Stopped by default until the night sky (stars, Phobos, Deimos, Earth) is in.
+    this.simTime += dt * 1000 * this.marsTimeScale;
+    const m = this.terrain.meta;
+    const s = marsSun(this.simTime, m.centerLat, m.centerLon);
+    const dir = new THREE.Vector3();
+    azElDir(s.az, s.el, dir);
+    this.marsLtst = s.ltst;
+    ms.setSun(dir);
+    this.sunDir.copy(dir);
+    this.terrainR.setSun(this.sunDir);
+    this.baker?.setSun(this.sunDir, jump);
+    if (jump) this.baker?.bakeAll();
+    else if (this.governor.relief < 2 || (this.idleTick++ & 1)) this.baker?.update();
+    // The sky light (reflection environment) follows the Sun: dusk darkens it, night ends it.
+    if (jump || this.envSun.angleTo(this.sunDir) > 0.04) {
+      this.envSun.copy(this.sunDir);
+      const old = this.scene.environment;
+      this.scene.environment = this.buildEnvironment();
+      old?.dispose();
+    }
+    this.onTimeChange?.(this.simTime);
+  }
+
+  /** Local true solar time at the site on Mars (h). */
+  marsLtst = 15;
+  /** Rate of the Mars clock (game seconds per real second); 0 = the sol stands still. */
+  marsTimeScale = 0;
 
   /** Sky, haze, sunlight and weather of the current body. */
   private updateEnvironment(dt: number): void {
