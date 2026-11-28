@@ -264,9 +264,13 @@ export class Rocks {
   private abundance: number;
   private mars: boolean;
   private gravelMeshes: THREE.InstancedMesh[] = [];
+  /** A skylight (Pavonis): centre, radius with margin, rim height - no rocks hang over it. */
+  private hole: { x: number; z: number; r: number; rimY: number } | null = null;
 
   constructor(private terrain: TerrainData, private physics: Physics, quality: QualitySettings, photo?: THREE.Texture) {
     this.q = quality;
+    const cave = (terrain.meta as { cave?: { x: number; z: number; rimY: number; holeR: number[] } }).cave;
+    if (cave) this.hole = { x: cave.x, z: cave.z, r: Math.max(...cave.holeR) + 3, rimY: cave.rimY };
     this.abundance = terrain.meta.rockAbundance ?? (terrain.meta.body === 'mars' ? 5 : 1);
     this.mars = terrain.meta.body === 'mars';
     // Moon: grey basalt/breccia; Mars: dark grey-brown basalt under a coat of ferric dust.
@@ -609,7 +613,18 @@ float rockH(vec3 p, vec3 w) {
     }
   }
 
+  /**
+   * Over the opening the ground is not drawn (TerrainRenderer discards it), but the
+   * heightmap there still holds the DTM's sag: a rock placed on it would float in the
+   * void. Nor does a rock sit on the lip just above the throat.
+   */
+  private overHole(x: number, z: number, y: number): boolean {
+    const h = this.hole;
+    return !!h && Math.hypot(x - h.x, z - h.z) < h.r && y < h.rimY + 1.5;
+  }
+
   private addBoulder(b: Rock): void {
+    if (this.overHole(b.x, b.z, b.y)) return;
     const key = `${Math.floor(b.x / BOULDER_CELL)},${Math.floor(b.z / BOULDER_CELL)}`;
     if (!this.boulderGrid.has(key)) this.boulderGrid.set(key, []);
     this.boulderGrid.get(key)!.push(this.boulders.length);
@@ -667,6 +682,7 @@ float rockH(vec3 p, vec3 w) {
       const sx = r * (0.8 + rnd() * 0.6), sy = r * (0.4 + rnd() * 0.4), sz = r * (0.8 + rnd() * 0.6);
       const y = t.height(x, z) - sy * 0.35;
       const q = new THREE.Quaternion().setFromEuler(new THREE.Euler((rnd() - 0.5) * 0.8, rnd() * Math.PI * 2, (rnd() - 0.5) * 0.8));
+      if (this.overHole(x, z, y)) continue;
       out.push({ x, y, z, r, sx, sy, sz, q, v: Math.floor(rnd() * VARIANTS), albedo: 0.7 + rnd() * 0.7 });
     }
     return out;
@@ -690,6 +706,7 @@ float rockH(vec3 p, vec3 w) {
       const y = t.height(x, z) - sy * 0.3;
       const q = new THREE.Quaternion().setFromEuler(new THREE.Euler((rnd() - 0.5) * 0.6, rnd() * Math.PI * 2, (rnd() - 0.5) * 0.6));
       // Fresh rock is brighter than space-weathered regolith; albedo varies by lithology.
+      if (this.overHole(x, z, y)) continue;
       out.push({ x, y, z, r, sx, sy, sz, q, v: Math.floor(rnd() * VARIANTS), albedo: 0.75 + rnd() * 0.6 });
     }
     return out;

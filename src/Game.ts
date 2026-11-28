@@ -148,6 +148,8 @@ export class Game {
   private cave: Cave | null = null;
   /** Eye/camera adaptation to the dark of a cave, 1 = daylight. */
   private caveAdapt = 1;
+  private caveMeter = 1;
+  private meterTick = 0;
   /** Small solid hardware (flag pole, ALSEP instruments): circles for the astronaut. */
   private solids: { x: number; z: number; r: number }[] = [];
   private baseFov = 68;
@@ -1568,6 +1570,7 @@ export class Game {
     this.hemi.color.copy(skyL).multiplyScalar(Math.PI);
     // The cave sees the Sun and the sky only through its opening (its own shader).
     this.cave?.setLight(this.sunDir, this.sun.color.clone().multiplyScalar(this.sun.intensity), skyL);
+    this.cave?.updateVisibility(this.camera.position);
     this.hemi.groundColor.setRGB(0.3, 0.19, 0.12).multiplyScalar(eTot * 0.5);
     // Lightning in an approaching storm front briefly lights the landscape.
     this.hemi.intensity = 1 + w.front.flash * 0.9;
@@ -1600,7 +1603,12 @@ export class Game {
     w.group.visible = !(this.cave && this.cave.depth(this.camera.position) > 12);
     // In a cave the eye (or the camera's auto-exposure) adapts to the dark, slowly.
     const deep = this.cave ? this.cave.depth(this.camera.position) : 0;
-    const adaptT = 1 + 24 * THREE.MathUtils.smoothstep(deep, 4, 40);
+    // Metered on what is in view, like a camera's auto-exposure (Cave.meter): looking at
+    // the sunlit patch it stays low, looking into the dark passage it opens up (to ~300×,
+    // as a dark-adapted eye or a long exposure would). Measured a few times a second.
+    if (this.cave && deep > 1 && (this.meterTick++ & 7) === 0) this.caveMeter = this.cave.meter(this.camera, this.sunDir);
+    const dark = THREE.MathUtils.clamp(Math.pow(0.5 / Math.max(this.caveMeter, 1e-4), 0.9), 1, 300);
+    const adaptT = 1 + (dark - 1) * THREE.MathUtils.smoothstep(deep, 2, 12);
     this.caveAdapt += (adaptT - this.caveAdapt) * (dt > 0 ? 1 - Math.exp(-dt * 0.5) : 1);
     const target = THREE.MathUtils.clamp(1.45 * Math.pow(1.6 / Math.max(eTot, 0.05), 0.55), 0.8, 4.5) * this.caveAdapt;
     this.renderer.toneMappingExposure += (target - this.renderer.toneMappingExposure) * (dt > 0 ? 1 - Math.exp(-dt * 0.8) : 1);
