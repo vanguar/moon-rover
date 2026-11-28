@@ -21,6 +21,8 @@ import { buildLunarModule } from './rover/models/nasa';
 import { ROVERS, type RoverSpec } from './rover/specs';
 import { Astronaut } from './eva/Astronaut';
 import { EvaCamera } from './eva/EvaCamera';
+import { Cave, type CaveMeta } from './terrain/Cave';
+
 import { LoadGovernor } from './perf/LoadGovernor';
 import { Footprints } from './eva/Footprints';
 import { fmtHM } from './format';
@@ -141,6 +143,10 @@ export class Game {
   /** CPU time of the previous frame (update + draw submission), s. */
   private cpuLast = 0;
   private parkedLrv: { x: number; z: number; yaw: number } | null = null;
+  /** The void under a skylight (Pavonis Mons), if this site has one. */
+  private cave: Cave | null = null;
+  /** Eye/camera adaptation to the dark of a cave, 1 = daylight. */
+  private caveAdapt = 1;
   /** Small solid hardware (flag pole, ALSEP instruments): circles for the astronaut. */
   private solids: { x: number; z: number; r: number }[] = [];
   private baseFov = 68;
@@ -288,6 +294,13 @@ export class Game {
     this.scene.add(this.tracks.mesh);
     this.hud = new Hud(terrain);
     this.hud.siteLabel = site().id === 'pavonis' ? t('siteStart') : mars ? 'M2020' : 'LM';
+    // A skylight into a cave (Pavonis Mons): the void below, and no ground drawn in the throat.
+    const caveMeta = (terrain.meta as { cave?: CaveMeta }).cave;
+    if (caveMeta) {
+      this.cave = new Cave(caveMeta);
+      this.scene.add(this.cave.group);
+      this.terrainR.uniforms.uHole.value.set(caveMeta.x, caveMeta.z, caveMeta.rimY, Math.max(...caveMeta.holeR) + 1);
+    }
     if (mars) {
       const lvl = quality.level === 'low' ? 0.35 : quality.level === 'medium' ? 0.6 : 1;
       this.weather = new MarsWeather(terrain, this.sunDir, lvl);
@@ -348,7 +361,7 @@ export class Game {
     this.finds = new Discoveries(terrain);
     // Houston comments on finds on the Moon (1.3 light-seconds away), not on Mars.
     this.finds.onFound = (site) => (mars ? this.toast(t(`site_${site.id}`)) : this.radio.say(`find_${site.id}`, { delay: 0.5 }));
-    this.setMission(spec.heli ? 'heli' : this.groundMission());
+    this.setMission(spec.heli ? this.heliMission() : this.groundMission());
     if (spec.heli) this.enterHeli();
     this.input.onAction((a) => this.onAction(a));
     this.bindLook(this.renderer.domElement);
@@ -398,6 +411,8 @@ export class Game {
     const w = this.weather;
     const zero = new THREE.Vector3();
     this.heli = new Helicopter(this.terrain, px, pz, () => (w ? w.wind : zero));
+    const cave = this.cave;
+    if (cave) this.heli.groundAt = (x, z, y) => cave.groundAt(x, z, y) ?? this.terrain.height(x, z);
     this.heli.yaw = Math.atan2(f.x, f.z);
     this.scene.add(this.heli.object, this.heli.dustObject);
     this.rover.parkBrake = true;
@@ -410,7 +425,7 @@ export class Game {
     this.orbit.dist = 4;
     this.orbit.pitch = 0.35;
     this.cameraMode = 'chase';
-    this.setMission('heli');
+    this.setMission(this.heliMission());
   }
 
   private exitHeli(): void {
@@ -987,6 +1002,15 @@ export class Game {
       const d = this.input.drive;
       this.heli.attachAudio(this.audio.output);
       this.heli.update(dt, { fwd: d.throttle - d.brake, yaw: d.steer, lift: this.input.lift }, true);
+      // Under the cave roof the helicopter cannot climb through the rock.
+      const hp = this.heli.pos;
+      if (this.cave?.contains(hp)) {
+        const ceil = this.cave.ceilingAt(hp.x, hp.z) - 1.2;
+        if (hp.y > ceil) {
+          hp.y = ceil;
+          this.heli.vel.y = Math.min(0, this.heli.vel.y);
+        }
+      }
       this.heli.setListener(this.camera.position.distanceTo(this.heli.pos));
       this.updateHeliHud();
     }
@@ -1221,6 +1245,11 @@ export class Game {
     this.chasePos.set(0, 0, 0);
   }
 
+  /** The helicopter mission of the current site (Pavonis: down into the skylight). */
+  private heliMission(): MissionKind {
+    return site().id === 'pavonis' ? 'pavonisHeli' : 'heli';
+  }
+
   /** The rover mission of the current site. */
   private groundMission(): MissionKind {
     const id = site().id;
@@ -1453,9 +1482,19 @@ export class Game {
     const sinEl = Math.max(0.05, this.sunDir.y);
     const eTot = this.sun.intensity * sinEl + Math.PI * (skyL.r + skyL.g + skyL.b) / 3;
     this.hemi.color.copy(skyL).multiplyScalar(Math.PI);
+    // The cave sees the Sun and the sky only through its opening (its own shader).
+    this.cave?.setLight(this.sunDir, this.sun.color.clone().multiplyScalar(this.sun.intensity), skyL);
     this.hemi.groundColor.setRGB(0.3, 0.19, 0.12).multiplyScalar(eTot * 0.5);
     // Lightning in an approaching storm front briefly lights the landscape.
     this.hemi.intensity = 1 + w.front.flash * 0.9;
+    // With the camera in the cave, what it sees (the helicopter) is lit as the cave is
+    // at that point - the scene's sun and sky would light it through the rock.
+    if (this.cave && this.cave.depth(this.camera.position) > 2) {
+      const at = this.heli ? this.heli.pos : this.camera.position;
+      const l = this.cave.lightAt(at, this.sunDir);
+      this.sun.intensity *= l.sun;
+      this.hemi.intensity *= l.sky;
+    }
     // Ruts: sky light vs. the direct Sun decides how dark the shaded rut wall is.
     this.tracks.setAmbient(Math.max(0.05, (Math.PI * (skyL.r + skyL.g + skyL.b)) / 3 / Math.max(this.sun.intensity, 0.05)));
     // Aerial perspective: fog colour = sky near the horizon in the view direction.
@@ -1473,7 +1512,13 @@ export class Game {
     fog.density = 6.5e-5 * Math.pow(w.tau / 0.62, 1.6) * (1 + inDevil * 60);
     this.far?.setNearRadius(this.q.drawDistance - 250);
     // Camera auto-exposure (partial: storms still look dark).
-    const target = THREE.MathUtils.clamp(1.45 * Math.pow(1.6 / Math.max(eTot, 0.05), 0.55), 0.8, 4.5);
+    // Under the cave roof no weather is seen (devils, blowing sand belong outside).
+    w.group.visible = !(this.cave && this.cave.depth(this.camera.position) > 12);
+    // In a cave the eye (or the camera's auto-exposure) adapts to the dark, slowly.
+    const deep = this.cave ? this.cave.depth(this.camera.position) : 0;
+    const adaptT = 1 + 24 * THREE.MathUtils.smoothstep(deep, 4, 40);
+    this.caveAdapt += (adaptT - this.caveAdapt) * (dt > 0 ? 1 - Math.exp(-dt * 0.5) : 1);
+    const target = THREE.MathUtils.clamp(1.45 * Math.pow(1.6 / Math.max(eTot, 0.05), 0.55), 0.8, 4.5) * this.caveAdapt;
     this.renderer.toneMappingExposure += (target - this.renderer.toneMappingExposure) * (dt > 0 ? 1 - Math.exp(-dt * 0.8) : 1);
     w.setLighting(this.sun.color.clone().multiplyScalar(this.sun.intensity * 0.12), skyL.clone().multiplyScalar(0.35), fogC, fog.density);
     // Reflections follow the sky only when it changes a lot (PMREM is not free).
@@ -1600,8 +1645,17 @@ export class Game {
         const target = new THREE.Vector3(p.x - Math.sin(yaw) * Math.cos(pitch) * d, p.y + aimY + Math.sin(pitch) * d, p.z - Math.cos(yaw) * Math.cos(pitch) * d);
         if (this.chasePos.lengthSq() === 0 || dt === 0) this.chasePos.copy(target);
         else this.chasePos.lerp(target, 1 - Math.exp(-dt * 4));
-        const gy = this.terrain.height(this.chasePos.x, this.chasePos.z) + 0.4;
-        if (this.chasePos.y < gy) this.chasePos.y = gy;
+        const cave = this.cave;
+        if (cave && cave.contains(p)) {
+          // Following into a cave: the camera stays inside it, between floor and roof.
+          const cp = this.chasePos;
+          const fl = (cave.groundAt(cp.x, cp.z, Math.min(cp.y, p.y)) ?? p.y - 2) + 0.5;
+          const ce = Math.min(cave.ceilingAt(cp.x, cp.z), cave.ceilingAt(p.x, p.z)) - 0.8;
+          cp.y = THREE.MathUtils.clamp(cp.y, fl, Math.max(fl, ce));
+        } else {
+          const gy = this.terrain.height(this.chasePos.x, this.chasePos.z) + 0.4;
+          if (this.chasePos.y < gy) this.chasePos.y = gy;
+        }
         this.camera.position.copy(this.chasePos);
         // Stepping off the rover: first seen from in front, then the camera swings behind.
         if (ec && ec.intro > 0) this.camera.position.lerp(ec.from, ec.intro);

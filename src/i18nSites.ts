@@ -6,6 +6,16 @@
 type Dict = Record<string, string>;
 
 const ru: Dict = {
+  'mission-pavonisHeli_title': 'Ingenuity в пещере',
+  'mission-pavonisHeli_intro':
+    'Вертолёт над склоном горы Павлина. Спуститесь через отверстие провала в полость под ним и сфотографируйте осыпь. Внутри темно: свет падает только через отверстие. Форма полости - реконструкция: внутрь пока не заглядывал ни один аппарат.',
+  ph_hole: 'Долетите до отверстия в центре воронки',
+  ph_down: 'Спуститесь через отверстие ниже его края',
+  ph_photo: 'Сфотографируйте осыпь внутри (F)',
+  'mission-pavonisHeli_done': 'Миссия выполнена! Первый снимок изнутри марсианской пещеры (в игре).',
+  site_cave: 'Осыпь под отверстием',
+  site_cave_fact:
+    'Снимок HiRISE: отверстие ~30 м и освещённая солнцем вершина осыпи в 28 м под его краем. Осыпь высотой не меньше 62 м - это грунт, стёкший в полость из воронки. Сама полость, её стены и пол - реконструкция по этим числам.',
   siteBtn_pavonis: 'Гора Павлина · провал над пещерой',
   siteStart: 'старт',
   titleSub_pavonis: 'Гора Павлина · провал в лавовую трубу',
@@ -96,6 +106,16 @@ const ru: Dict = {
 };
 
 const uk: Dict = {
+  'mission-pavonisHeli_title': 'Ingenuity у печері',
+  'mission-pavonisHeli_intro':
+    'Гелікоптер над схилом гори Павича. Спустіться крізь отвір провалу в порожнину під ним і сфотографуйте осип. Усередині темно: світло падає лише крізь отвір. Форма порожнини - реконструкція.',
+  ph_hole: 'Долетіть до отвору в центрі вирви',
+  ph_down: 'Спустіться крізь отвір нижче його краю',
+  ph_photo: 'Сфотографуйте осип усередині (F)',
+  'mission-pavonisHeli_done': 'Місію виконано! Перший знімок зсередини марсіанської печери (у грі).',
+  site_cave: 'Осип під отвором',
+  site_cave_fact:
+    'Знімок HiRISE: отвір ~30 м і освітлена сонцем вершина осипу за 28 м під його краєм. Осип заввишки щонайменше 62 м. Сама порожнина - реконструкція за цими числами.',
   siteBtn_pavonis: 'Гора Павича · провал над печерою',
   siteStart: 'старт',
   titleSub_pavonis: 'Гора Павича · провал у лавову трубу',
@@ -177,6 +197,16 @@ const uk: Dict = {
 };
 
 const en: Dict = {
+  'mission-pavonisHeli_title': 'Ingenuity in the cave',
+  'mission-pavonisHeli_intro':
+    'The helicopter over the flank of Pavonis Mons. Descend through the opening of the collapse into the void below and photograph the debris pile. It is dark inside: light comes only through the opening. The shape of the void is a reconstruction - no spacecraft has looked inside yet.',
+  ph_hole: 'Fly to the opening in the centre of the funnel',
+  ph_down: 'Descend through the opening, below its rim',
+  ph_photo: 'Photograph the debris pile inside (F)',
+  'mission-pavonisHeli_done': 'Mission complete! The first picture from inside a Martian cave (in the game).',
+  site_cave: 'Debris pile under the opening',
+  site_cave_fact:
+    'HiRISE frame: the ~30 m opening and the sunlit top of the debris pile 28 m below its rim. The pile, at least 62 m tall, is the ground that drained in from the funnel. The void itself, its walls and floor, is a reconstruction from these numbers.',
   siteBtn_pavonis: 'Pavonis Mons · cave skylight',
   siteStart: 'start',
   titleSub_pavonis: 'Pavonis Mons · lava-tube skylight',

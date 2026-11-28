@@ -58,6 +58,7 @@ const KEY_PAVONIS = 'pavonis-rover-journal';
 /** Pavonis Mons: the HiRISE frame of the pit (NASA/JPL-Caltech/UArizona). */
 const PHOTOS_PAV: Record<string, { file: string; frame: string; radius: number }> = {
   pit: { file: 'pavonis/pit.jpg', frame: 'HiRISE ESP_023531_1840', radius: 140 },
+  cave: { file: 'pavonis/hole.jpg', frame: 'HiRISE ESP_023531_1840', radius: 45 },
 };
 
 export class Discoveries {

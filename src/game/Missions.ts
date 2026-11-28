@@ -24,7 +24,7 @@ interface Step {
   done: (c: MissionCtx) => boolean;
 }
 
-export type MissionKind = 'moon' | 'moon17' | 'mars' | 'pavonis' | 'heli';
+export type MissionKind = 'moon' | 'moon17' | 'mars' | 'pavonis' | 'pavonisHeli' | 'heli';
 
 export class Missions {
   readonly id: string;
@@ -71,6 +71,17 @@ export class Missions {
         { key: 'r_drive', done: (c) => c.odometer > 30 },
         { key: 'p_rim', target: site('pit'), reach: 125, done: () => false },
         { key: 'p_photo', target: site('pit'), done: (c) => c.found.has('pit') },
+      ];
+    } else if (kind === 'pavonisHeli') {
+      // Ingenuity down through the skylight: over the opening, below its rim, then a
+      // photograph of the debris pile inside.
+      const cave = (terrain.meta as { cave?: { rimY: number } }).cave;
+      const rim = cave ? cave.rimY : 0;
+      this.steps = [
+        { key: 'h_hover', done: (c) => !!c.heli && c.heli.agl > 2.5 },
+        { key: 'ph_hole', target: site('cave'), reach: 12, done: () => false },
+        { key: 'ph_down', target: site('cave'), done: (c) => !!c.heli && c.heli.pos.y < rim - 8 },
+        { key: 'ph_photo', target: site('cave'), done: (c) => c.found.has('cave') },
       ];
     } else if (kind === 'mars') {
       // Octavia E. Butler Landing; the delta front ~2 km to the west-northwest (Kodiak and

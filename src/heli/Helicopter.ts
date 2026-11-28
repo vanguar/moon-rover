@@ -79,6 +79,9 @@ export class Helicopter {
   flightTime = 0;
   flights = 0;
 
+  /** Ground under a point (terrain, or the floor of a cave the helicopter is in). */
+  groundAt: (x: number, z: number, y: number) => number = (x, z) => this.terrain.height(x, z);
+
   constructor(private terrain: TerrainData, padX: number, padZ: number, private wind: () => THREE.Vector3) {
     this.pad.set(padX, terrain.height(padX, padZ), padZ);
     this.pos.copy(this.pad);
@@ -120,7 +123,7 @@ export class Helicopter {
   }
 
   get agl(): number {
-    return this.pos.y - this.terrain.height(this.pos.x, this.pos.z);
+    return this.pos.y - this.groundAt(this.pos.x, this.pos.z, this.pos.y);
   }
 
   /** Remaining flight time to the reserve, s. */
@@ -207,7 +210,7 @@ export class Helicopter {
   update(dt: number, cmd: { fwd: number; yaw: number; lift: number }, active: boolean): void {
     const g = world().gravity;
     const rho = world().airDensity;
-    const ground = this.terrain.height(this.pos.x, this.pos.z);
+    const ground = this.groundAt(this.pos.x, this.pos.z, this.pos.y);
     const manualInput = active && (Math.abs(cmd.fwd) > 0.05 || Math.abs(cmd.lift) > 0.05 || Math.abs(cmd.yaw) > 0.05);
     if (manualInput && this.phase === 'auto') this.status = 'heliManual';
     if (manualInput && this.phase === 'auto' && this.route.length > 1) {

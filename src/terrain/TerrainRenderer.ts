@@ -48,6 +48,8 @@ export class TerrainRenderer {
     uDetFade: { value: Float32Array };
     uDetRes: { value: number };
     uDetSlopes: { value: number };
+    /** A skylight opening: (x, z, rim height, radius); w = 0 none. Ground below the rim inside it is not drawn. */
+    uHole: { value: THREE.Vector4 };
     uFresh: { value: Float32Array };
   };
   private chunks = new Map<string, Chunk>();
@@ -103,6 +105,7 @@ export class TerrainRenderer {
       uDetFade: { value: new Float32Array(9) },
       uDetRes: { value: 512 },
       uDetSlopes: { value: 0 },
+      uHole: { value: new THREE.Vector4(0, 0, 0, 0) },
       uFresh: { value: new Float32Array(36).fill(-1e6) },
     };
     const u = this.uniforms;
@@ -150,6 +153,7 @@ export class TerrainRenderer {
         uDetFade: u.uDetFade,
         uDetRes: u.uDetRes,
         uDetSlopes: u.uDetSlopes,
+        uHole: u.uHole,
         uFresh: u.uFresh,
         uMat: { value: matTex },
         uPave: { value: paveTex },
@@ -179,6 +183,7 @@ export class TerrainRenderer {
 varying vec3 vWorldP;
 varying vec3 vNormalW;
 uniform sampler2D uOrtho;
+uniform vec4 uHole;
 uniform sampler2D uBaked;
 uniform vec2 uMapSize;
 uniform vec2 uRover;
@@ -406,7 +411,10 @@ vec4 pebbleField(vec2 p, float cell, float seed, float density) {
         )
         .replace(
           '#include <map_fragment>',
-          `float microLit = 1.0;
+          `#include <map_fragment>
+// A skylight: below its rim the opening's throat belongs to the cave (src/terrain/Cave.ts).
+if (uHole.w > 0.0 && vWorldP.y < uHole.z - 0.3 && length(vWorldP.xz - uHole.xy) < uHole.w) discard;
+float microLit = 1.0;
 vec2 mapUv = (vWorldP.xz + 0.5 * uMapSize) / uMapSize;
 // Inside the DTM window: 1; outside (SLDEM terrain): 0, with a 150 m blend.
 vec2 edgeD = 0.5 * uMapSize - abs(vWorldP.xz);
