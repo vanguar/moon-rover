@@ -929,6 +929,16 @@ export class Game {
       this.audio.click(700);
     } else if (a === 'const') {
       this.constellationsOn = this.sky?.toggleConstellations() ?? false;
+    } else if (a === 'daytime') {
+      // Mars: on to the next part of the sol (day -> sunset -> night -> dawn -> day).
+      if (this.marsSky) {
+        const order = [15, 17.6, 22, 5.6];
+        const now = this.marsLtst;
+        const next = order.find((h) => ((h - now + 24) % 24) > 0.3 && ((h - now + 24) % 24) <= 9) ?? order[0];
+        this.setMarsLtst(next);
+        this.toast(t(next === 15 ? 'tDay' : next === 17.6 ? 'tSunset' : next === 22 ? 'tNight' : 'tDawn'));
+        this.audio.click(1000);
+      }
     } else if (a === 'weather') {
       if (this.weather) {
         this.weather.cycle();
@@ -1562,6 +1572,22 @@ export class Game {
 
   private nightFix = new THREE.Quaternion();
   private nightState: ReturnType<typeof marsSkyState> | null = null;
+
+  /** Mars: jump the clock forward to the next time the local solar time is h (hours). */
+  setMarsLtst(h: number): void {
+    if (!this.marsSky) return;
+    const m = this.terrain.meta;
+    const SOL = 88775244;
+    for (let k = 1; k <= 740; k++) {
+      const t = this.simTime + (k * SOL) / 720;
+      const l = marsSun(t, m.centerLat, m.centerLon).ltst;
+      if (Math.abs(((l - h + 36) % 24) - 12) < 0.05) {
+        this.simTime = t;
+        this.updateClock(0, true);
+        return;
+      }
+    }
+  }
 
   /** Local true solar time at the site on Mars (h). */
   marsLtst = 15;

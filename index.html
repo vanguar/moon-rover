@@ -107,6 +107,9 @@
       <button class="tb" data-act="reset" data-i18n-title="bReset">
         <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7" /><path d="M4 4v5h5" /></svg>
       </button>
+      <button class="tb mars-only" data-act="daytime" id="tb-daytime" data-i18n-title="bDaytime">
+        <svg viewBox="0 0 24 24"><path d="M3 17h18" /><path d="M7 17a5 5 0 0 1 10 0" /><path d="M12 7V4M5.6 9.6 3.5 7.5M18.4 9.6l2.1-2.1" /><path d="M16.5 4.5a3 3 0 0 0 3 3" /></svg>
+      </button>
       <button class="tb mars-only" data-act="weather" id="tb-weather" data-i18n-title="bWeather">
         <svg viewBox="0 0 24 24"><path d="M3 8h11a3 3 0 1 0-3-3" /><path d="M3 12h16a3 3 0 1 1-3 3" /><path d="M3 16h8" /></svg>
       </button>
@@ -236,6 +239,14 @@
               </label>
               <label class="field"><span data-i18n="volume">Громкость</span><input id="volume" type="range" min="0" max="1" step="0.05" /></label>
               <label class="field check" id="tilt-row"><input id="tilt" type="checkbox" /><span data-i18n="tilt">Руль наклоном телефона</span></label>
+              <label class="field mars-only"><span data-i18n="daytime">Время суток на Марсе</span>
+                <select id="daytime">
+                  <option value="15" data-i18n="tDayOpt">День (15:00)</option>
+                  <option value="17.6" data-i18n="tSunsetOpt">Закат (17:36)</option>
+                  <option value="22" data-i18n="tNightOpt">Ночь (22:00)</option>
+                  <option value="5.6" data-i18n="tDawnOpt">Рассвет (05:36)</option>
+                </select>
+              </label>
               <label class="field mars-only"><span data-i18n="weather">Погода на Марсе</span>
                 <select id="weather">
                   <option value="auto" data-i18n="wxAuto">Авто</option>

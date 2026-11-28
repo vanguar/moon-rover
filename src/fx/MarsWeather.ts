@@ -550,6 +550,8 @@ export class MarsWeather {
     for (let i = this.devils.length - 1; i >= 0; i--) {
       const d = this.devils[i];
       d.age += dt;
+      // No heating, no convection: a devil dies down within ~15 s.
+      if (this.convection < 0.15) d.life = Math.min(d.life, d.age + 15);
       const fadeIn = Math.min(1, d.age / 12), fadeOut = Math.min(1, (d.life - d.age) / 15);
       d.s = Math.max(0, Math.min(fadeIn, fadeOut)) * (devilsOn ? 1 : Math.max(0, 1 - this.storm * 3));
       // Devils travel roughly with the ambient wind (Perseverance saw 3–10 m/s) but each on

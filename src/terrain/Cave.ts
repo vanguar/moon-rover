@@ -99,6 +99,77 @@ export class Cave {
     this.group.add(this.mesh(this.pileGeometry(), 0.2, 2));
     this.group.add(this.blockMesh());
     this.blockGroup.add(this.lavacicles(), this.boneFormation());
+    this.group.add(this.benchMesh());
+  }
+
+  /** Across-tube distance of the wall (m, positive side) at u and height y - the drawn wall. */
+  private wallV(u: number, y: number, side: number): number {
+    const sc = this.section(u), a0 = this.c.width / 2;
+    const ny = (y - sc.yc) / sc.b;
+    let nv = Math.sqrt(Math.max(0.01, 1 - ny * ny));
+    for (let it = 0; it < 4; it++) {
+      const th = Math.atan2(ny, side * nv);
+      const k = this.wallK(u, th);
+      nv = Math.sqrt(Math.max(0.0001, k * k - ny * ny));
+    }
+    return nv * a0;
+  }
+
+  /**
+   * Lava benches (as in Earth's tubes - Lava Beds, Hawaii): shelves left along the walls
+   * where the flow stood at one level for a time. Fitted to the drawn wall (wallV), their
+   * back buried in it; height wanders, width swells to ~2 m and pinches out, they break
+   * off and start again, the lip ragged; each wall its own levels.
+   */
+  private benchMesh(): THREE.Mesh {
+    const pos: number[] = [], idx: number[] = [];
+    const L = this.c.length, N = 640;
+    for (const side of [-1, 1]) {
+      for (const level of [0, 1]) {
+        const base = pos.length / 3;
+        for (let i = 0; i <= N; i++) {
+          const u = -L / 2 + 80 + ((L - 160) * i) / N;
+          const H = this.ceilAt0(u) - this.floorAt0(u);
+          const hL = this.floorAt0(u) + H * (level ? 0.34 : 0.17) + H * 0.05 * (fbm(u / 60, side * 3.1 + level * 9, 0.2) - 0.5) + 1.2 * (fbm(u / 11, side + level * 5, 4.4) - 0.5);
+          // Width 0..~2 m: it swells, pinches out, breaks off (most of the length on the
+          // lower level, patches on the upper); none under the skylight's debris.
+          const f = fbm(u / 22, side * 7.7 + level * 13, 1.7);
+          let w = 2.2 * Math.max(0, f - (level ? 0.55 : 0.45)) / 0.35;
+          w *= THREE.MathUtils.smoothstep(Math.abs(u), 70, 110) * (1 - this.choke(u));
+          const vw = this.wallV(u, hL, side);
+          const lip = 0.35 + 0.45 * fbm(u / 2.5, side + level, 8.8);
+          const rag = 0.25 * (fbm(u / 1.3, side * 2 + level, 3.3) - 0.5);
+          // Profile across: buried in the wall above, the shelf top, the ragged lip, back into the wall below.
+          const prof: [number, number][] = [
+            [vw + 0.8, hL + 0.2],
+            [vw - w * 0.5, hL + 0.04 * (fbm(u / 3, side, 3) - 0.5)],
+            [vw - w + rag * Math.min(1, w), hL - 0.05],
+            [vw - w * 0.9 + rag, hL - lip],
+            [this.wallV(u, hL - lip - 1.2, side) + 0.8, hL - lip - 1.2],
+          ];
+          // Where it pinches out the whole profile goes into the rock (no coplanar flicker).
+          const hide = 0.7 * (1 - THREE.MathUtils.smoothstep(w, 0.0, 0.25));
+          for (const [vv, yy] of prof) {
+            const [x, z] = this.world(u, side * (vv + hide));
+            pos.push(x, yy, z);
+          }
+        }
+        const P = 5;
+        for (let i = 0; i < N; i++) {
+          for (let j = 0; j < P - 1; j++) {
+            const a = base + i * P + j, b = a + 1, c = a + P, d = c + 1;
+            idx.push(a, b, c, b, d, c);
+          }
+        }
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    const m = new THREE.Mesh(g, this.material(0.09, 0.5));
+    m.frustumCulled = false;
+    return m;
   }
 
   /** Where the bone-like formation lies (world x, z): a site for the journal. */
