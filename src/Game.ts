@@ -676,7 +676,9 @@ export class Game {
       envScene.add(skyMesh);
       const ground = new THREE.Mesh(
         new THREE.SphereGeometry(9, 48, 24, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
-        new THREE.MeshBasicMaterial({ color: new THREE.Color(0.11, 0.065, 0.04), side: THREE.BackSide }),
+        // The lit ground below the horizon: as bright as the Sun makes it (black at night;
+        // a constant here lit the rover and the far slopes from below in the dark).
+        new THREE.MeshBasicMaterial({ color: new THREE.Color(0.11, 0.065, 0.04).multiplyScalar(THREE.MathUtils.smoothstep(this.sunDir.y, -0.25, 0.3)), side: THREE.BackSide }),
       );
       envScene.add(ground);
       const rt = pmrem.fromScene(envScene, 0, 0.1, 100);
@@ -1560,17 +1562,18 @@ export class Game {
     this.baker?.setSun(this.sunDir, jump);
     if (jump) this.baker?.bakeAll();
     else if (this.governor.relief < 2 || (this.idleTick++ & 1)) this.baker?.update();
-    // The sky light (reflection environment) follows the Sun: dusk darkens it, night ends it.
+    // The sky light (reflection environment) follows the Sun: dusk darkens it, night ends
+    // it. Rebuilt in updateEnvironment, once the sky's brightness is set for this Sun (built
+    // here it kept the previous - daytime - sky: rover and far slopes glowing at night).
     if (jump || this.envSun.angleTo(this.sunDir) > 0.04) {
       this.envSun.copy(this.sunDir);
-      const old = this.scene.environment;
-      this.scene.environment = this.buildEnvironment();
-      old?.dispose();
+      this.envDirty = true;
     }
     this.onTimeChange?.(this.simTime);
   }
 
   private nightFix = new THREE.Quaternion();
+  private envDirty = false;
   private nightState: ReturnType<typeof marsSkyState> | null = null;
 
   /** Mars: jump the clock forward to the next time the local solar time is h (hours). */
@@ -1627,6 +1630,12 @@ export class Game {
     // Sky light: irradiance = π · (mean sky radiance); the sky dome is drawn with the same model.
     const bright = sunTop * 0.3;
     ms.uniforms.uBright.value = bright;
+    if (this.envDirty) {
+      this.envDirty = false;
+      const old = this.scene.environment;
+      this.scene.environment = this.buildEnvironment();
+      old?.dispose();
+    }
     const c1 = ms.colorAt(new THREE.Vector3(0, 1, 0), new THREE.Color());
     const c2 = ms.colorAt(new THREE.Vector3(this.sunDir.x, 0.15, this.sunDir.z).normalize(), new THREE.Color());
     const c3 = ms.colorAt(new THREE.Vector3(-this.sunDir.x, 0.15, -this.sunDir.z).normalize(), new THREE.Color());
