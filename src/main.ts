@@ -305,7 +305,10 @@ function setupMenu(game: Game): void {
   // Mars: start at a chosen part of the sol (the clock then runs on).
   const daytimeSel = $<HTMLSelectElement>('#daytime');
   daytimeSel.value = '15';
-  daytimeSel.addEventListener('change', () => game.setMarsLtst(Number(daytimeSel.value)));
+  daytimeSel.addEventListener('change', () => {
+    if (daytimeSel.value === 'eclipse') game.showPhobosTransit();
+    else game.setMarsLtst(Number(daytimeSel.value));
+  });
   weatherSel.addEventListener('change', () => {
     settings.weather = weatherSel.value as WeatherMode;
     saveSettings(settings);

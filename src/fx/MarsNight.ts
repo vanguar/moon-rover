@@ -11,6 +11,14 @@ import { buildMilkyWayMap, buildStars } from './Sky';
  *   in the east twice a sol;
  * - Deimos: a bright star-like point; the Earth: a blue-white evening or morning star.
  */
+/** Area of the overlap of two discs of radii a and b with centres d apart. */
+function discOverlap(d: number, a: number, b: number): number {
+  if (d >= a + b) return 0;
+  if (d <= Math.abs(a - b)) return Math.PI * Math.min(a, b) ** 2;
+  const x = (d * d + a * a - b * b) / (2 * d * a), y = (d * d + b * b - a * a) / (2 * d * b);
+  return a * a * Math.acos(x) + b * b * Math.acos(y) - 0.5 * Math.sqrt((-d + a + b) * (d + a - b) * (d - a + b) * (d + a + b));
+}
+
 export class MarsNight {
   readonly group = new THREE.Group();
   private celestial = new THREE.Group();
@@ -19,6 +27,10 @@ export class MarsNight {
   private phobos: THREE.Mesh;
   private phobosMat: THREE.ShaderMaterial;
   private points: THREE.Points;
+  /** Fraction of the Sun's disc covered by Phobos (0 most of the time). */
+  eclipse = 0;
+  /** Angle Phobos - Sun (rad). */
+  sunSep = Math.PI;
 
   constructor(stars: Float32Array | undefined) {
     this.stars = buildStars(stars, 2000);
@@ -118,7 +130,15 @@ export class MarsNight {
     this.phobosMat.uniforms.uSun.value.copy(sun);
     this.phobosMat.uniforms.uLight.value = ph.eclipsed ? 0.02 : 1;
     // Faint by day (seen through the bright dusty sky), plain at night; gone below the horizon.
-    this.phobosMat.uniforms.uAlpha.value = (0.25 + 0.75 * dark) * THREE.MathUtils.smoothstep(dir.y, -0.01, 0.02);
+    // In front of the Sun it is a black silhouette (its night side) on the disc.
+    const sep = dir.angleTo(sun);
+    this.sunSep = dir.y > 0 ? sep : Math.PI;
+    const nearSun = 1 - THREE.MathUtils.smoothstep(sep, 0.01, 0.03);
+    this.phobosMat.uniforms.uAlpha.value = Math.max((0.25 + 0.75 * dark), nearSun) * THREE.MathUtils.smoothstep(dir.y, -0.01, 0.02);
+    // Covered fraction: overlap of two discs (the Sun ~0.17 deg in radius from Mars, Phobos
+    // ~0.1 deg; its true outline is irregular - a disc is close enough for the light).
+    const rs = 0.0030, rp = Math.atan(11.1 / ph.dist);
+    this.eclipse = dir.y > 0 ? discOverlap(sep, rs, rp) / (Math.PI * rs * rs) : 0;
     // Deimos and the Earth.
     const pos = this.points.geometry.getAttribute('position') as THREE.BufferAttribute;
     const col = this.points.geometry.getAttribute('color') as THREE.BufferAttribute;

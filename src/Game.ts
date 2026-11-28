@@ -883,6 +883,7 @@ export class Game {
       if (this.cameraMode === 'top') {
         this.orbit.yaw -= dx;
       } else if (this.cameraMode === 'cabin') {
+        this.sunTrack = false;
         this.look.yaw = THREE.MathUtils.clamp(this.look.yaw - dx, -2.4, 2.4);
         this.look.pitch = THREE.MathUtils.clamp(this.look.pitch - dy, -1.0, 1.2);
       } else {
@@ -900,13 +901,24 @@ export class Game {
   }
 
   /** Zoom the chase/top camera: +1 = out, -1 = in. */
+  /** Field of view of the camera view as a fraction of the normal one (zoom, like Mastcam-Z). */
+  private cabinZoom = 1;
+  /** Camera view held on the Sun, through Mastcam-Z's solar filter (Phobos transit). */
+  private sunTrack = false;
+  private sunTrackAge = 0;
+
   zoom(dir: number): void {
+    if (this.cameraMode === 'cabin') this.cabinZoom = THREE.MathUtils.clamp(this.cabinZoom * (1 + dir * 0.18), 4 / this.baseFov, 1);
     if (this.cameraMode === 'chase') this.orbit.dist = THREE.MathUtils.clamp(this.orbit.dist * (1 + dir * 0.12), 4 * this.sizeK, 60 * this.sizeK);
     else if (this.cameraMode === 'top') this.topHeight = THREE.MathUtils.clamp(this.topHeight * (1 + dir * 0.15), 12, 1500);
   }
 
   setCameraMode(m: CameraMode): void {
     this.cameraMode = m;
+    if (m !== 'cabin') {
+      this.camera.fov = this.baseFov;
+      this.camera.updateProjectionMatrix();
+    }
     this.audio.setCabin(m === 'cabin');
     this.chasePos.set(0, 0, 0);
     this.applyHudMode();
@@ -1559,7 +1571,9 @@ export class Game {
    */
   private updateMarsClock(dt: number, jump = false): void {
     const ms = this.marsSky!;
-    this.simTime += dt * 1000 * this.marsTimeScale;
+    // Real time while Phobos is within ~1 deg of the Sun: a transit lasts ~40 s.
+    const scale = this.marsNight && this.marsNight.sunSep < 0.02 ? 1 : this.marsTimeScale;
+    this.simTime += dt * 1000 * scale;
     const m = this.terrain.meta;
     const s = marsSun(this.simTime, m.centerLat, m.centerLon);
     const dir = new THREE.Vector3();
@@ -1591,6 +1605,54 @@ export class Game {
   private nightFix = new THREE.Quaternion();
   private envDirty = false;
   private nightState: ReturnType<typeof marsSkyState> | null = null;
+
+  /**
+   * Mars: jump to just before the next transit of Phobos across the Sun (within ~300
+   * sols), as Perseverance filmed in April 2022. Returns false if none is found.
+   */
+  jumpToPhobosTransit(): boolean {
+    if (!this.marsSky) return false;
+    const m = this.terrain.meta, v = new THREE.Vector3();
+    const ang = (t: number) => {
+      const st = marsSkyState(t, m.centerLat, m.centerLon), s = marsSun(t, m.centerLat, m.centerLon);
+      azElDir(s.az, s.el, v);
+      const fix = new THREE.Quaternion().setFromUnitVectors(st.sun, v);
+      return { sep: st.moons[0].dir.clone().applyQuaternion(fix).angleTo(v), el: s.el };
+    };
+    let t = this.simTime + 60000;
+    const end = t + 690 * 88775244; // a whole Mars year: transits come in two seasons a year
+    while (t < end) {
+      const a = ang(t);
+      if (a.el < 5) { t += 30 * 60000; continue; }
+      if (a.sep < 0.07) {
+        // Refine to the closest approach, then start a little before it.
+        let best = t, bs = a.sep;
+        for (let k = -600; k <= 600; k += 2) {
+          const s2 = ang(t + k * 1000).sep;
+          if (s2 < bs) { bs = s2; best = t + k * 1000; }
+        }
+        if (bs > 0.0045) { t += 60 * 60000; continue; }
+        this.simTime = best - 45000;
+        this.updateClock(0, true);
+        return true;
+      }
+      t += a.sep > 0.6 ? 10 * 60000 : 60000;
+    }
+    return false;
+  }
+
+  /** Jump to the next Phobos transit and turn the view to the Sun, zoomed in. */
+  showPhobosTransit(): void {
+    const ok = this.jumpToPhobosTransit();
+    this.toast(t(ok ? 'tEclipse' : 'tEclipseNone'));
+    if (!ok) return;
+    // Look at the Sun from the rover's mast camera, narrow field (Mastcam-Z zooms to ~5 deg).
+    this.setCameraMode('cabin');
+    this.cabinZoom = 5 / this.baseFov;
+    // Held on the Sun through its solar filter until the view is turned by hand.
+    this.sunTrack = true;
+    this.sunTrackAge = 0;
+  }
 
   /** Mars: jump the clock forward to the next time the local solar time is h (hours). */
   setMarsLtst(h: number): void {
@@ -1641,7 +1703,8 @@ export class Game {
     this.terrainR.uniforms.uStorm.value.set(w.storm, w.settled, this.time);
     this.terrainR.uniforms.uWind.value.set(w.wind.x, w.wind.z);
     const reddening = 1 - trans;
-    this.sun.intensity = sunTop * trans;
+    // Phobos in front of the Sun: the light drops by the covered fraction (~40 % at most).
+    this.sun.intensity = sunTop * trans * (1 - (this.marsNight?.eclipse ?? 0));
     this.sun.color.setRGB(1, 0.93 - 0.12 * reddening, 0.84 - 0.25 * reddening);
     // Sky light: irradiance = π · (mean sky radiance); the sky dome is drawn with the same model.
     const bright = sunTop * 0.3;
@@ -1702,7 +1765,9 @@ export class Game {
     const adaptT = 1 + (dark - 1) * THREE.MathUtils.smoothstep(deep, 2, 12);
     this.caveAdapt += (adaptT - this.caveAdapt) * (dt > 0 ? 1 - Math.exp(-dt * 0.5) : 1);
     const target = THREE.MathUtils.clamp(1.45 * Math.pow(1.6 / Math.max(eTot, 0.05), 0.55), 0.8, 4.5) * this.caveAdapt;
-    this.renderer.toneMappingExposure += (target - this.renderer.toneMappingExposure) * (dt > 0 ? 1 - Math.exp(-dt * 0.8) : 1);
+    // Through the solar filter (Phobos transit view) the sky goes dark around the disc.
+    const filt = this.sunTrack && this.cameraMode === 'cabin' ? 0.03 : 1;
+    this.renderer.toneMappingExposure += (target * filt - this.renderer.toneMappingExposure) * (dt > 0 ? 1 - Math.exp(-dt * (filt < 1 ? 6 : 0.8)) : 1);
     w.setLighting(this.sun.color.clone().multiplyScalar(this.sun.intensity * 0.12), skyL.clone().multiplyScalar(0.35), fogC, fog.density);
     // Reflections follow the sky only when it changes a lot (PMREM is not free).
     if (Math.abs(w.tau - this.envTau) > 0.4) {
@@ -1927,9 +1992,20 @@ export class Game {
         q.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.sin(this.shake.ph) * sa, Math.sin(this.shake.ph * 0.73 + 1.3) * sa * 0.4, Math.sin(this.shake.ph * 1.31 + 0.4) * sa * 0.7)));
         this.camera.position.y += Math.sin(this.shake.ph * 0.9) * sa * 0.35;
       }
+      if (this.sunTrack) {
+        const sl = this.sunDir.clone().applyQuaternion(q.clone().invert());
+        this.look.pitch = Math.asin(THREE.MathUtils.clamp(sl.y, -1, 1));
+        this.look.yaw = Math.atan2(-sl.x, -sl.z) - Math.PI;
+        // Ends once Phobos has left the Sun (checked after the first seconds: the separation
+        // of the frame before the jump is stale).
+        this.sunTrackAge += dt;
+        if (this.sunTrackAge > 3 && (!this.marsNight || this.marsNight.sunSep > 0.05)) this.sunTrack = false;
+      }
       const look = new THREE.Quaternion().setFromEuler(new THREE.Euler(this.look.pitch, Math.PI + this.look.yaw, 0, 'YXZ'));
       this.camera.quaternion.copy(q).multiply(look);
       this.camera.near = Math.min(0.08, 0.1 * this.sizeK);
+      this.camera.fov = this.baseFov * this.cabinZoom;
+      this.camera.updateProjectionMatrix();
     } else if (this.cameraMode === 'top') {
       // Bird's-eye view, north up (drag rotates), zoom with the wheel or buttons.
       const p = rover.object.position;
