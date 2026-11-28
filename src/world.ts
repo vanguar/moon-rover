@@ -1,6 +1,6 @@
 /** Planetary body the game runs on. Everything body-specific is read from here. */
 export type WorldId = 'moon' | 'mars';
-export type SiteId = 'apollo15' | 'apollo17' | 'jezero';
+export type SiteId = 'apollo15' | 'apollo17' | 'jezero' | 'pavonis';
 
 /** A landing site of a world: its own terrain, sky, mission and finds. */
 export interface SiteConfig {
@@ -44,7 +44,10 @@ export const WORLDS: Record<WorldId, WorldConfig> = {
     // Sol 0 of Mars 2020 (Ls 5.6°): Mars 1.63 AU from the Sun -> 38 % of the irradiance at Earth.
     id: 'mars', gravity: 3.721, radius: 3389500, commonDir: 'data/mars/', atmosphere: true, airDensity: 0.017,
     solarFactor: 0.38, rockDensity: 1.5,
-    sites: [{ id: 'jezero', dataDir: 'data/mars/' }],
+    sites: [
+      { id: 'jezero', dataDir: 'data/mars/' },
+      { id: 'pavonis', dataDir: 'data/pavonis/' },
+    ],
     upcoming: ['gale'],
   },
 };

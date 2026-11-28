@@ -24,7 +24,7 @@ interface Step {
   done: (c: MissionCtx) => boolean;
 }
 
-export type MissionKind = 'moon' | 'moon17' | 'mars' | 'heli';
+export type MissionKind = 'moon' | 'moon17' | 'mars' | 'pavonis' | 'heli';
 
 export class Missions {
   readonly id: string;
@@ -64,6 +64,13 @@ export class Missions {
           key: `m17_${id}`, target: site(id), done: (c: MissionCtx) => c.found.has(id),
         })),
         { key: 'm_home', target: () => ({ x: L.x, z: L.z }), done: (c) => c.atBase },
+      ];
+    } else if (kind === 'pavonis') {
+      // Pavonis Mons: drive to the lip of the collapse pit (~95 m radius), photograph it.
+      this.steps = [
+        { key: 'r_drive', done: (c) => c.odometer > 30 },
+        { key: 'p_rim', target: site('pit'), reach: 125, done: () => false },
+        { key: 'p_photo', target: site('pit'), done: (c) => c.found.has('pit') },
       ];
     } else if (kind === 'mars') {
       // Octavia E. Butler Landing; the delta front ~2 km to the west-northwest (Kodiak and

@@ -51,6 +51,10 @@ FAR_DEM = "/vsicurl/https://planetarymaps.usgs.gov/mosaic/Mars/HRSC_MOLA_Blend/M
 SRC_CRS = CRS.from_proj4(f"+proj=eqc +lat_ts=0 +lat_0=0 +lon_0=248.5 +x_0=0 +y_0=0 +R={R_MARS} +units=m +no_defs")
 SIZE, PX = 3300, 1.0
 ORTHO_OUT, HI_OUT, HI_SIZE = 4096, 4096, 1024.0
+# The HiRISE RED frame is stretched near white over the dust; the game reads the photo
+# as albedo. Tharsis dust (TES albedo ~0.27) is ~1.5x brighter than the Jezero floor
+# (~0.18): with the Jezero ortho at a mean of 105 (sRGB-coded), that is a mean of 126.
+ORTHO_MEAN = 126.0
 FAR_N, FAR_SP = 501, 60.0
 
 
@@ -103,12 +107,14 @@ def main():
         o = np.zeros((ORTHO_OUT, ORTHO_OUT), np.uint8)
         reproject(rasterio.band(s, 1), o, dst_transform=from_origin(-SIZE * PX / 2, SIZE * PX / 2, SIZE * PX / ORTHO_OUT, SIZE * PX / ORTHO_OUT),
                   dst_crs=game, src_crs=SRC_CRS, resampling=Resampling.average, src_nodata=0, dst_nodata=0)
-        Image.fromarray(fill_mean(o)).save(os.path.join(OUT, "ortho.jpg"), quality=84, optimize=True, progressive=True)
+        o = fill_mean(o)
+        gain = ORTHO_MEAN / float(o.mean())
+        Image.fromarray(np.clip(o * gain, 0, 255).astype(np.uint8)).save(os.path.join(OUT, "ortho.jpg"), quality=84, optimize=True, progressive=True)
         px_g, pz_g = gxz(pit_lat, pit_lon)
         hi = np.zeros((HI_OUT, HI_OUT), np.uint8)
         reproject(rasterio.band(s, 1), hi, dst_transform=from_origin(px_g - HI_SIZE / 2, -pz_g + HI_SIZE / 2, HI_SIZE / HI_OUT, HI_SIZE / HI_OUT),
                   dst_crs=game, src_crs=SRC_CRS, resampling=Resampling.lanczos, src_nodata=0, dst_nodata=0)
-        Image.fromarray(fill_mean(hi)).save(os.path.join(OUT, "ortho_hi.jpg"), quality=84, optimize=True, progressive=True)
+        Image.fromarray(np.clip(fill_mean(hi) * gain, 0, 255).astype(np.uint8)).save(os.path.join(OUT, "ortho_hi.jpg"), quality=84, optimize=True, progressive=True)
 
     # Afternoon (~15:00 local true solar time) of a sol in northern spring: the cone's
     # walls half in shadow, the opening dark.

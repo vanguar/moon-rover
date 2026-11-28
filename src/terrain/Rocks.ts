@@ -267,7 +267,7 @@ export class Rocks {
 
   constructor(private terrain: TerrainData, private physics: Physics, quality: QualitySettings, photo?: THREE.Texture) {
     this.q = quality;
-    this.abundance = terrain.meta.body === 'mars' ? 5 : 1;
+    this.abundance = terrain.meta.rockAbundance ?? (terrain.meta.body === 'mars' ? 5 : 1);
     this.mars = terrain.meta.body === 'mars';
     // Moon: grey basalt/breccia; Mars: dark grey-brown basalt under a coat of ferric dust.
     const mars = terrain.meta.body === 'mars';

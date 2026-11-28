@@ -28,6 +28,8 @@ export interface TerrainMeta {
   sites?: Record<string, { lat: number; lon: number; x: number; z: number }>;
   /** Surveyed surface hardware (Apollo 17 ALSEP instruments), game x/z. */
   hardware?: { type: string; x: number; z: number }[];
+  /** Rock abundance multiplier (default: Mars 5, Moon 1); low on dust-mantled Tharsis. */
+  rockAbundance?: number;
   /** Largest crater radius the game adds (m); default 45 on the Moon. */
   craterRMax?: number;
   orthoSun?: { azimuth: number; incidence: number };

@@ -287,7 +287,7 @@ export class Game {
     this.tracks = new Tracks(terrain, spec, this.sunDir);
     this.scene.add(this.tracks.mesh);
     this.hud = new Hud(terrain);
-    this.hud.siteLabel = mars ? 'M2020' : 'LM';
+    this.hud.siteLabel = site().id === 'pavonis' ? t('siteStart') : mars ? 'M2020' : 'LM';
     if (mars) {
       const lvl = quality.level === 'low' ? 0.35 : quality.level === 'medium' ? 0.6 : 1;
       this.weather = new MarsWeather(terrain, this.sunDir, lvl);
@@ -348,7 +348,7 @@ export class Game {
     this.finds = new Discoveries(terrain);
     // Houston comments on finds on the Moon (1.3 light-seconds away), not on Mars.
     this.finds.onFound = (site) => (mars ? this.toast(t(`site_${site.id}`)) : this.radio.say(`find_${site.id}`, { delay: 0.5 }));
-    this.setMission(mars ? (spec.heli ? 'heli' : 'mars') : site().id === 'apollo17' ? 'moon17' : 'moon');
+    this.setMission(spec.heli ? 'heli' : this.groundMission());
     if (spec.heli) this.enterHeli();
     this.input.onAction((a) => this.onAction(a));
     this.bindLook(this.renderer.domElement);
@@ -423,7 +423,7 @@ export class Game {
     this.rover.parkBrake = false;
     this.heliHud?.classList.add('hidden');
     document.body.classList.remove('heli');
-    this.setMission('mars');
+    this.setMission(this.groundMission());
     this.orbit.dist = 9 * this.sizeK;
   }
 
@@ -1219,6 +1219,12 @@ export class Game {
     c.peakY = Number.NaN;
     c.failed = false;
     this.chasePos.set(0, 0, 0);
+  }
+
+  /** The rover mission of the current site. */
+  private groundMission(): MissionKind {
+    const id = site().id;
+    return id === 'apollo17' ? 'moon17' : id === 'pavonis' ? 'pavonis' : world().id === 'mars' ? 'mars' : 'moon';
   }
 
   setMission(kind: MissionKind): void {

@@ -6,6 +6,27 @@
 type Dict = Record<string, string>;
 
 const ru: Dict = {
+  siteBtn_pavonis: 'Гора Павлина · провал над пещерой',
+  siteStart: 'старт',
+  titleSub_pavonis: 'Гора Павлина · провал в лавовую трубу',
+  worldMarsSub_pavonis: 'Гора Павлина · провал над пещерой',
+  lead_pavonis:
+    'Реальный рельеф склона вулкана Павлина (Pavonis Mons) на высоте 5,4 км: конический провал ~190 м с отверстием ~30 м в пустоту под ним - «окно» в подземную полость глубиной не меньше 90 м (HiRISE DTM 1 м, снимок 25 см). Вокруг - гладкий пыльный покров Тарсиса.',
+  chipCoords_pavonis: '3.75°N 248.49°E',
+  chipDtm_pavonis: 'DTM 1 м · 3,3×3,3 км',
+  chipEpoch_pavonis: '15:00 LTST',
+  chipSun_pavonis: 'Солнце 248° / 42°',
+  credit_pavonis:
+    'Данные: NASA / JPL-Caltech / University of Arizona - HiRISE DTM DTEEC_023531_1840_023953_1840 и снимок ESP_023531_1840; рельеф вулкана: HRSC + MOLA (ESA / DLR / FU Berlin, NASA, USGS).',
+  'mission-pavonis_title': 'Окно в лавовую трубу',
+  'mission-pavonis_intro':
+    'Склон вулкана Павлина. Когда-то здесь под застывшей коркой текла лава; труба опустела, её свод рухнул, и грунт осыпался внутрь, оставив воронку с отверстием в полость. Подъедьте к краю воронки и сфотографируйте её. Склоны воронки - под углом естественного откоса: в неё не съехать.',
+  p_rim: 'Подъедьте к краю воронки (~95 м от центра)',
+  p_photo: 'Сфотографируйте провал (F)',
+  'mission-pavonis_done': 'Миссия выполнена! Провал над пещерой снят.',
+  site_pit: 'Провал над пещерой',
+  site_pit_fact:
+    'Коническая воронка ~190 м со склонами под углом естественного откоса. Грунт стёк через отверстие ~30 м в пустоту; вершина осыпи видна в 28 м под его краем. По объёму воронки полость была глубиной не меньше 90 м - на Земле таких пещер единицы.',
   siteBtn_jezero: 'Кратер Езеро · Perseverance',
   siteBtn_gale: 'Кратер Гейл · Curiosity',
   siteSoon: 'скоро',
@@ -75,6 +96,23 @@ const ru: Dict = {
 };
 
 const uk: Dict = {
+  siteBtn_pavonis: 'Гора Павича · провал над печерою',
+  siteStart: 'старт',
+  titleSub_pavonis: 'Гора Павича · провал у лавову трубу',
+  worldMarsSub_pavonis: 'Гора Павича · провал над печерою',
+  lead_pavonis:
+    'Реальний рельєф схилу вулкана Павича (Pavonis Mons) на висоті 5,4 км: конічний провал ~190 м з отвором ~30 м у порожнину під ним - «вікно» в підземну порожнину глибиною щонайменше 90 м (HiRISE DTM 1 м, знімок 25 см).',
+  chipDtm_pavonis: 'DTM 1 м · 3,3×3,3 км',
+  chipSun_pavonis: 'Сонце 248° / 42°',
+  'mission-pavonis_title': 'Вікно в лавову трубу',
+  'mission-pavonis_intro':
+    'Схил вулкана Павича. Колись тут під застиглою кіркою текла лава; труба спорожніла, її склепіння обвалилося, і ґрунт осипався всередину. Під’їдьте до краю вирви й сфотографуйте її. Схили вирви - під кутом природного укосу: у неї не з’їхати.',
+  p_rim: 'Під’їдьте до краю вирви (~95 м від центру)',
+  p_photo: 'Сфотографуйте провал (F)',
+  'mission-pavonis_done': 'Місію виконано! Провал над печерою знято.',
+  site_pit: 'Провал над печерою',
+  site_pit_fact:
+    'Конічна вирва ~190 м зі схилами під кутом природного укосу. Ґрунт стік крізь отвір ~30 м у порожнину; вершина осипу видна за 28 м під його краєм. За об’ємом вирви порожнина була глибиною щонайменше 90 м.',
   siteBtn_jezero: 'Кратер Єзеро · Perseverance',
   siteBtn_gale: 'Кратер Гейл · Curiosity',
   siteSoon: 'незабаром',
@@ -139,6 +177,27 @@ const uk: Dict = {
 };
 
 const en: Dict = {
+  siteBtn_pavonis: 'Pavonis Mons · cave skylight',
+  siteStart: 'start',
+  titleSub_pavonis: 'Pavonis Mons · lava-tube skylight',
+  worldMarsSub_pavonis: 'Pavonis Mons · cave skylight',
+  lead_pavonis:
+    'Real terrain of the flank of Pavonis Mons, 5.4 km up: a conical collapse ~190 m across with a ~30 m opening into a void below - a skylight into a cavity at least 90 m deep (HiRISE DTM 1 m, image 25 cm). Around it, the smooth dust mantle of Tharsis.',
+  chipCoords_pavonis: '3.75°N 248.49°E',
+  chipDtm_pavonis: 'DTM 1 m · 3.3×3.3 km',
+  chipEpoch_pavonis: '15:00 LTST',
+  chipSun_pavonis: 'Sun 248° / 42°',
+  credit_pavonis:
+    'Data: NASA / JPL-Caltech / University of Arizona - HiRISE DTM DTEEC_023531_1840_023953_1840 and image ESP_023531_1840; volcano terrain: HRSC + MOLA (ESA / DLR / FU Berlin, NASA, USGS).',
+  'mission-pavonis_title': 'A window into a lava tube',
+  'mission-pavonis_intro':
+    'The flank of Pavonis Mons. Lava once flowed here under a frozen crust; the tube drained, its roof fell in and the ground poured into it, leaving a funnel with an opening into the void. Drive to the lip of the funnel and photograph it. Its walls stand at the angle of repose: no rover drives down them.',
+  p_rim: 'Drive to the lip of the funnel (~95 m from its centre)',
+  p_photo: 'Photograph the collapse (F)',
+  'mission-pavonis_done': 'Mission complete! The cave skylight is photographed.',
+  site_pit: 'Collapse over a cave',
+  site_pit_fact:
+    'A conical funnel ~190 m across with walls at the angle of repose. The ground drained through a ~30 m opening into a void; the top of its debris pile is seen 28 m below the rim. From the funnel volume the cavity was at least 90 m deep - only a handful of caves on Earth are that big.',
   siteBtn_jezero: 'Jezero crater · Perseverance',
   siteBtn_gale: 'Gale crater · Curiosity',
   siteSoon: 'coming soon',
@@ -209,6 +268,9 @@ const en: Dict = {
 };
 
 const de: Dict = {
+  siteBtn_pavonis: 'Pavonis Mons · Höhlenschacht',
+  titleSub_pavonis: 'Pavonis Mons · Lavaröhren-Schacht',
+  worldMarsSub_pavonis: 'Pavonis Mons · Höhlenschacht',
   siteBtn_jezero: 'Krater Jezero · Perseverance',
   siteBtn_gale: 'Krater Gale · Curiosity',
   siteSoon: 'bald',
@@ -224,6 +286,9 @@ const de: Dict = {
 };
 
 const ar: Dict = {
+  siteBtn_pavonis: 'جبل بافونيس · فتحة كهف',
+  titleSub_pavonis: 'جبل بافونيس · فتحة أنبوب حمم',
+  worldMarsSub_pavonis: 'جبل بافونيس · فتحة كهف',
   siteBtn_jezero: 'فوهة جيزيرو · Perseverance',
   siteBtn_gale: 'فوهة غيل · Curiosity',
   siteSoon: 'قريبًا',
@@ -237,6 +302,9 @@ const ar: Dict = {
 };
 
 const zh: Dict = {
+  siteBtn_pavonis: '孔雀山 · 洞穴天窗',
+  titleSub_pavonis: '孔雀山 · 熔岩管天窗',
+  worldMarsSub_pavonis: '孔雀山 · 洞穴天窗',
   siteBtn_jezero: '耶泽罗陨石坑 · Perseverance',
   siteBtn_gale: '盖尔陨石坑 · Curiosity',
   siteSoon: '即将推出',

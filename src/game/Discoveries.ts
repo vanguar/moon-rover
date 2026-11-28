@@ -53,6 +53,12 @@ const PHOTOS_MARS: Record<string, { file: string; frame: string; radius: number 
 const KEY_MOON = 'moon-rover-journal';
 const KEY_MARS = 'mars-rover-journal';
 const KEY_MOON17 = 'moon17-rover-journal';
+const KEY_PAVONIS = 'pavonis-rover-journal';
+
+/** Pavonis Mons: the HiRISE frame of the pit (NASA/JPL-Caltech/UArizona). */
+const PHOTOS_PAV: Record<string, { file: string; frame: string; radius: number }> = {
+  pit: { file: 'pavonis/pit.jpg', frame: 'HiRISE ESP_023531_1840', radius: 140 },
+};
 
 export class Discoveries {
   readonly sites: Site[] = [];
@@ -62,10 +68,10 @@ export class Discoveries {
   private key: string;
 
   constructor(terrain: TerrainData) {
-    const a17 = currentSite().id === 'apollo17';
-    this.key = terrain.meta.body === 'mars' ? KEY_MARS : a17 ? KEY_MOON17 : KEY_MOON;
+    const a17 = currentSite().id === 'apollo17', pav = currentSite().id === 'pavonis';
+    this.key = pav ? KEY_PAVONIS : terrain.meta.body === 'mars' ? KEY_MARS : a17 ? KEY_MOON17 : KEY_MOON;
     const base = import.meta.env.BASE_URL;
-    const table = terrain.meta.body === 'mars' ? PHOTOS_MARS : a17 ? PHOTOS_A17 : PHOTOS;
+    const table = pav ? PHOTOS_PAV : terrain.meta.body === 'mars' ? PHOTOS_MARS : a17 ? PHOTOS_A17 : PHOTOS;
     for (const [id, s] of Object.entries(terrain.meta.sites ?? {})) {
       const p = table[id];
       if (!p) continue;
