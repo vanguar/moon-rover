@@ -74,7 +74,8 @@ export class Missions {
         { key: 'p_rim', target: site('pit'), reach: 125, done: () => false },
         { key: 'p_photo', target: site('pit'), done: (c) => c.found.has('pit') },
         // Then Ingenuity (E): its own mission takes over, down into the opening.
-        { key: 'p_heli', done: () => false },
+        // Nothing to drive to: E works anywhere; the arrow shows the pit Ingenuity will fly into.
+        { key: 'p_heli', target: site('cave'), done: () => false },
       ];
     } else if (kind === 'gale') {
       // Gale: across the clay-bearing trough of Glen Torridon to a layered butte of the
