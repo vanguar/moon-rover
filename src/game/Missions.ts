@@ -83,7 +83,7 @@ export class Missions {
       this.steps = [
         { key: 'r_drive', done: (c) => c.odometer > 30 },
         { key: 'g_trough', target: site('trough'), reach: 40, done: () => false },
-        { key: 'g_butte', target: site('butte'), reach: 90, done: () => false },
+        { key: 'g_butte', target: site('butte'), reach: 150, done: () => false },
         { key: 'g_photo', target: site('butte'), done: (c) => c.found.has('butte') },
       ];
     } else if (kind === 'pavonisHeli') {

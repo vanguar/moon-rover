@@ -1,0 +1,53 @@
+{
+  "body": "mars",
+  "source": "MSL Gale merged DEM 1 m (HiRISE/CTX/HRSC on MOLA; Calef & Parker, USGS) + HiRISE colour mosaic; HRSC+MOLA 200 m",
+  "width": 2500,
+  "height": 2500,
+  "pixelSize": 2.0,
+  "sizeX": 4998.0,
+  "sizeZ": 4998.0,
+  "minHeight": -4314.86962890625,
+  "maxHeight": -3419.66015625,
+  "heightStep": 0.01377245342548077,
+  "centerLat": -4.749716350544042,
+  "centerLon": 137.40917019099948,
+  "landing": {
+    "x": -244.0,
+    "z": -140.0
+  },
+  "orthoHi": {
+    "x": 0.0,
+    "z": 0.0,
+    "size": 1200.0
+  },
+  "epoch": "2024-06-15T02:34:00+00:00",
+  "sun": {
+    "azimuth": 239.6524717094031,
+    "elevation": 42.328928369507366
+  },
+  "ls": 274.945756205565,
+  "far": {
+    "n": 501,
+    "spacing": 120.0,
+    "size": 60000.0,
+    "min": -311.47705078125,
+    "max": 4809.98681640625,
+    "offset": 6.46044921875,
+    "source": "HRSC+MOLA blended DEM 200 m"
+  },
+  "sites": {
+    "trough": {
+      "lat": -4.728898024149128,
+      "lon": 137.4031097022111,
+      "x": -358.0,
+      "z": -1234.0
+    },
+    "butte": {
+      "lat": -4.752010752804746,
+      "lon": 137.40778203434962,
+      "x": -82.0,
+      "z": 136.0
+    }
+  },
+  "rockAbundance": 3.0
+}

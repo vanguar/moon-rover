@@ -123,6 +123,7 @@ const ru: Dict = {
   chipDtm_pavonis: 'DTM 1 м · 3,3×3,3 км',
   chipEpoch_pavonis: '15:00 LTST',
   chipSun_pavonis: 'Солнце 248° / 42°',
+  chipSun_gale: 'Солнце 240° / 42°',
   credit_pavonis:
     'Данные: NASA / JPL-Caltech / University of Arizona - HiRISE DTM DTEEC_023531_1840_023953_1840 и снимок ESP_023531_1840; рельеф вулкана: HRSC + MOLA (ESA / DLR / FU Berlin, NASA, USGS).',
   'mission-pavonis_title': 'Окно в лавовую трубу',
@@ -309,6 +310,7 @@ const uk: Dict = {
     'Реальний рельєф схилу вулкана Павича (Pavonis Mons) на висоті 5,4 км: конічний провал ~190 м з отвором ~30 м у порожнину під ним - «вікно» в підземну порожнину глибиною щонайменше 90 м (HiRISE DTM 1 м, знімок 25 см).',
   chipDtm_pavonis: 'DTM 1 м · 3,3×3,3 км',
   chipSun_pavonis: 'Сонце 248° / 42°',
+  chipSun_gale: 'Сонце 240° / 42°',
   'mission-pavonis_title': 'Вікно в лавову трубу',
   'mission-pavonis_intro':
     'Схил вулкана Павича. Колись тут під застиглою кіркою текла лава; труба спорожніла, її склепіння обвалилося, і ґрунт осипався всередину. Під’їдьте до краю вирви й сфотографуйте її. Схили вирви - під кутом природного укосу: у неї не з’їхати.',
@@ -498,6 +500,7 @@ const en: Dict = {
   chipDtm_pavonis: 'DTM 1 m · 3.3×3.3 km',
   chipEpoch_pavonis: '15:00 LTST',
   chipSun_pavonis: 'Sun 248° / 42°',
+  chipSun_gale: 'Sun 240° / 42°',
   credit_pavonis:
     'Data: NASA / JPL-Caltech / University of Arizona - HiRISE DTM DTEEC_023531_1840_023953_1840 and image ESP_023531_1840; volcano terrain: HRSC + MOLA (ESA / DLR / FU Berlin, NASA, USGS).',
   'mission-pavonis_title': 'A window into a lava tube',

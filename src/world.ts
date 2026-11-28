@@ -47,8 +47,8 @@ export const WORLDS: Record<WorldId, WorldConfig> = {
     sites: [
       { id: 'jezero', dataDir: 'data/mars/' },
       { id: 'pavonis', dataDir: 'data/pavonis/' },
+      { id: 'gale', dataDir: 'data/gale/' },
     ],
-    upcoming: ['gale'],
   },
 };
 
