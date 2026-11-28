@@ -49,7 +49,7 @@ function preloadData() {
     name: 'preload-data',
     transformIndexHtml(html: string) {
       // Site data directories and the hashes of the preloaded files (as src/version.ts).
-      const files = ['terrain.json', 'heightmap.bin', 'ortho.jpg', 'shadow.png'];
+      const files = ['terrain.json', 'heightmap.bin', 'ortho.webp', 'shadow.png'];
       const dirs: Record<string, Record<string, string>> = {};
       const hashes: Record<string, string> = {};
       for (const w of Object.values(WORLDS)) {
@@ -63,7 +63,7 @@ try{s=JSON.parse(localStorage.getItem('moon-rover-settings')||'{}')}catch(e){}
 var w=u.get('world')||s.world;if(!D[w])w='moon';
 var st=u.get('site')||(s.site||{})[w],d=D[w][st]||D[w][Object.keys(D[w])[0]];
 function l(f,hi){var e=document.createElement('link');e.rel='preload';e.as='fetch';e.href=d+f+'?v='+H[d+f];e.crossOrigin='anonymous';if(hi)e.setAttribute('fetchpriority','high');document.head.appendChild(e)}
-l('terrain.json',1);l('heightmap.bin',1);l('ortho.jpg');l('shadow.png');
+l('terrain.json',1);l('heightmap.bin',1);l('ortho.webp');l('shadow.png');
 }catch(e){}})();</script>`;
       return html.replace('<head>', `<head>
     ${script}`);

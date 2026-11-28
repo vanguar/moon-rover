@@ -181,13 +181,13 @@ async function boot(): Promise<void> {
       progress.height = f;
       showProgress();
     }),
-    loadTexture(dataUrl(`${D}ortho.jpg`), 'ortho', false),
+    loadTexture(dataUrl(`${D}ortho.webp`), 'ortho', false),
     loadTexture(dataUrl(`${D}shadow.png`), 'other', false),
     moon ? bin('stars.bin') : Promise.resolve(undefined),
     moon ? bin('constellations.bin') : Promise.resolve(undefined),
     loadTexture(dataUrl(`${D}far_shadow.png`), 'other', false).catch(() => undefined),
-    moon ? Promise.resolve(undefined) : loadTexture(dataUrl(`${D}far_albedo.jpg`), 'other', false).catch(() => undefined),
-    loadTexture(dataUrl(`${C}rocks.jpg`), 'other', true).catch(() => undefined),
+    moon ? Promise.resolve(undefined) : loadTexture(dataUrl(`${D}far_albedo.webp`), 'other', false).catch(() => undefined),
+    loadTexture(dataUrl(`${C}rocks.webp`), 'other', true).catch(() => undefined),
   ]);
   if (rockPhoto) {
     rockPhoto.colorSpace = THREE.SRGBColorSpace;
@@ -197,7 +197,7 @@ async function boot(): Promise<void> {
   // Not needed for the first frame (7 MB on the Moon): the 0.6 m/px centre orthophoto
   // and the photographic Milky Way start only now, so they do not share the bandwidth
   // with the essential data, and are attached when they arrive (title screen or later).
-  const orthoHi = loadTexture(dataUrl(`${D}ortho_hi.jpg`), 'late', false).catch(() => undefined);
+  const orthoHi = loadTexture(dataUrl(`${D}ortho_hi.webp`), 'late', false).catch(() => undefined);
   const milkyWay = moon ? loadTexture(dataUrl(`${C}milkyway.jpg`), 'late', true).catch(() => undefined) : undefined;
   await models;
   loadText.textContent = t('loadPhysics');
