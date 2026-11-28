@@ -6,6 +6,24 @@
 type Dict = Record<string, string>;
 
 const ru: Dict = {
+  r_drive_hint: 'W - газ, S - тормоз и назад, A/D - руль. Камеру крутите мышью, колесо - приближение.',
+  r_drive_hint_touch: 'Педаль «ГАЗ» справа, руль - джойстик слева. Проведите по экрану, чтобы осмотреться.',
+  p_rim_hint: 'Стрелка на панели миссии и мини-карта ведут к воронке. У края сработает «Обрыв впереди» - дальше склон 34°, туда не съехать.',
+  p_photo_hint: 'Остановитесь у края, наведите камеру на воронку (мышь) и нажмите F.',
+  p_photo_hint_touch: 'Остановитесь у края, проведите по экрану, чтобы навести камеру на воронку, и нажмите кнопку фото.',
+  p_heli_hint: 'Ingenuity сядет на ровное место рядом. Полёт: пробел - вверх, Shift - вниз, W/S - вперёд/назад, A/D - поворот.',
+  'mission-pavonis_done_hint': 'Нажмите E, чтобы выпустить Ingenuity и спуститься в пещеру.',
+  h_hover_hint: 'Пробел - взлёт и набор высоты. Вертолёт держит высоту сам, пока вы не нажмёте пробел или Shift.',
+  ph_hole_hint: 'Летите по стрелке к центру воронки, на высоте 10-30 м. Отверстие - тёмное пятно в её центре.',
+  ph_down_hint: 'Зависните прямо над отверстием (стрелка почти исчезнет) и держите Shift - спускайтесь медленно. Внутри темно: глазам нужно несколько секунд.',
+  ph_photo_hint: 'Под вами осыпь. Разверните камеру на неё (мышь) и нажмите F. Свод пещеры не даст подняться выше - выход только через отверстие.',
+  'mission-pavonisHeli_done_hint': 'Можно облететь пещеру. Чтобы вернуться: поднимитесь через отверстие, посадите Ingenuity у ровера и нажмите E.',
+  p_heli: 'Теперь заглянем внутрь: нажмите E - Perseverance выпустит Ingenuity',
+  heliNoRover: 'Ingenuity возит только Perseverance',
+  heliOut: 'Ingenuity на грунте. W/S/A/D - полёт, пробел/Shift - вверх/вниз',
+  heliLandFirst: 'Сначала посадите Ingenuity',
+  heliIn: 'Ingenuity снова под Perseverance',
+  bEva_mars: 'Выпустить / забрать Ingenuity (E)',
   'mission-pavonisHeli_title': 'Ingenuity в пещере',
   'mission-pavonisHeli_intro':
     'Вертолёт над склоном горы Павлина. Спуститесь через отверстие провала в полость под ним и сфотографируйте осыпь. Внутри темно: свет падает только через отверстие. Форма полости - реконструкция: внутрь пока не заглядывал ни один аппарат.',
@@ -106,6 +124,22 @@ const ru: Dict = {
 };
 
 const uk: Dict = {
+  r_drive_hint: 'W - газ, S - гальмо й назад, A/D - кермо. Камеру обертайте мишею, коліщатко - наближення.',
+  p_rim_hint: 'Стрілка на панелі місії й мінікарта ведуть до вирви. Біля краю спрацює «Урвище попереду» - далі схил 34°.',
+  p_photo_hint: 'Зупиніться біля краю, наведіть камеру на вирву (миша) і натисніть F.',
+  p_heli_hint: 'Ingenuity сяде на рівне місце поруч. Політ: пробіл - вгору, Shift - вниз, W/S - вперед/назад, A/D - поворот.',
+  'mission-pavonis_done_hint': 'Натисніть E, щоб випустити Ingenuity й спуститися в печеру.',
+  h_hover_hint: 'Пробіл - зліт і набір висоти.',
+  ph_hole_hint: 'Летіть за стрілкою до центру вирви на висоті 10-30 м. Отвір - темна пляма в її центрі.',
+  ph_down_hint: 'Зависніть над отвором і тримайте Shift - спускайтеся повільно. Усередині темно: очам потрібно кілька секунд.',
+  ph_photo_hint: 'Під вами осип. Наведіть на нього камеру (миша) і натисніть F.',
+  'mission-pavonisHeli_done_hint': 'Щоб повернутися: підніміться крізь отвір, посадіть Ingenuity біля ровера й натисніть E.',
+  p_heli: 'Тепер зазирнемо всередину: натисніть E - Perseverance випустить Ingenuity',
+  heliNoRover: 'Ingenuity возить лише Perseverance',
+  heliOut: 'Ingenuity на ґрунті. W/S/A/D - політ, пробіл/Shift - вгору/вниз',
+  heliLandFirst: 'Спершу посадіть Ingenuity',
+  heliIn: 'Ingenuity знову під Perseverance',
+  bEva_mars: 'Випустити / забрати Ingenuity (E)',
   'mission-pavonisHeli_title': 'Ingenuity у печері',
   'mission-pavonisHeli_intro':
     'Гелікоптер над схилом гори Павича. Спустіться крізь отвір провалу в порожнину під ним і сфотографуйте осип. Усередині темно: світло падає лише крізь отвір. Форма порожнини - реконструкція.',
@@ -197,6 +231,24 @@ const uk: Dict = {
 };
 
 const en: Dict = {
+  r_drive_hint: 'W - throttle, S - brake and reverse, A/D - steer. Drag the mouse to look around, wheel to zoom.',
+  r_drive_hint_touch: 'GAS pedal on the right, steering joystick on the left. Swipe the screen to look around.',
+  p_rim_hint: 'The arrow on the mission panel and the minimap lead to the funnel. Near the lip "Cliff ahead" warns you - beyond it the slope is 34°, no way down.',
+  p_photo_hint: 'Stop at the lip, turn the camera to the funnel (mouse) and press F.',
+  p_photo_hint_touch: 'Stop at the lip, swipe to turn the camera to the funnel and tap the photo button.',
+  p_heli_hint: 'Ingenuity lands on flat ground nearby. Flying: Space - up, Shift - down, W/S - forward/back, A/D - turn.',
+  'mission-pavonis_done_hint': 'Press E to set Ingenuity down and descend into the cave.',
+  h_hover_hint: 'Space - take off and climb. The helicopter holds its height until you press Space or Shift.',
+  ph_hole_hint: 'Follow the arrow to the centre of the funnel, 10-30 m up. The opening is the dark patch in its middle.',
+  ph_down_hint: 'Hover right over the opening (the arrow nearly vanishes) and hold Shift - go down slowly. It is dark inside: the eyes need a few seconds.',
+  ph_photo_hint: 'The debris pile is below you. Turn the camera to it (mouse) and press F. The roof stops you climbing - the only way out is the opening.',
+  'mission-pavonisHeli_done_hint': 'Fly around the cave if you like. To return: climb out through the opening, land Ingenuity by the rover and press E.',
+  p_heli: 'Now look inside: press E - Perseverance sets Ingenuity down',
+  heliNoRover: 'Only Perseverance carries Ingenuity',
+  heliOut: 'Ingenuity is down. W/S/A/D - fly, Space/Shift - up/down',
+  heliLandFirst: 'Land Ingenuity first',
+  heliIn: 'Ingenuity is back under Perseverance',
+  bEva_mars: 'Set down / take back Ingenuity (E)',
   'mission-pavonisHeli_title': 'Ingenuity in the cave',
   'mission-pavonisHeli_intro':
     'The helicopter over the flank of Pavonis Mons. Descend through the opening of the collapse into the void below and photograph the debris pile. It is dark inside: light comes only through the opening. The shape of the void is a reconstruction - no spacecraft has looked inside yet.',

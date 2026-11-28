@@ -33,6 +33,8 @@ export class Missions {
   private panel = document.getElementById('mission');
   private arrow: HTMLElement | null = null;
   private text: HTMLElement | null = null;
+  /** How to do the current step (keys, where to look) - a line under the task. */
+  private hint: HTMLElement | null = null;
   private dist: HTMLElement | null = null;
   private nav = document.getElementById('navarrow');
   private navText = this.nav?.querySelector('span') ?? null;
@@ -71,6 +73,8 @@ export class Missions {
         { key: 'r_drive', done: (c) => c.odometer > 30 },
         { key: 'p_rim', target: site('pit'), reach: 125, done: () => false },
         { key: 'p_photo', target: site('pit'), done: (c) => c.found.has('pit') },
+        // Then Ingenuity (E): its own mission takes over, down into the opening.
+        { key: 'p_heli', done: () => false },
       ];
     } else if (kind === 'pavonisHeli') {
       // Ingenuity down through the skylight: over the opening, below its rim, then a
@@ -152,13 +156,15 @@ export class Missions {
     head.className = 'mh';
     this.text = document.createElement('div');
     this.text.className = 'mt';
+    this.hint = document.createElement('div');
+    this.hint.className = 'mhint';
     const row = document.createElement('div');
     row.className = 'md';
     this.arrow = document.createElement('i');
     this.arrow.className = 'marrow';
     this.dist = document.createElement('span');
     row.append(this.arrow, this.dist);
-    p.append(head, this.text, row);
+    p.append(head, this.text, this.hint, row);
     this.render();
   }
 
@@ -168,6 +174,12 @@ export class Missions {
     const head = this.panel.querySelector('.mh')!;
     head.textContent = `${t(`${this.id}_title`)} · ${Math.min(this.index + 1, this.steps.length)}/${this.steps.length}`;
     this.text.textContent = this.text_(this.stepKey);
+    if (this.hint) {
+      // Optional "<step>_hint" (and "<step>_hint_touch" on phones).
+      const hk = `${this.stepKey}_hint`, h = this.text_(hk);
+      this.hint.textContent = h === hk ? '' : h;
+      this.hint.style.display = h === hk ? 'none' : '';
+    }
   }
 
   /** Full briefing text for the overlay (mission goal + all steps with ticks). */

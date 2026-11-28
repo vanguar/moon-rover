@@ -407,7 +407,21 @@ export class Game {
     if (this.heli) return;
     const r = this.rover.object.position;
     const f = this.rover.forwardVector(new THREE.Vector3());
-    const px = r.x + f.x * 14 + f.z * 4, pz = r.z + f.z * 14 - f.x * 4;
+    // An airfield on flat ground: ahead of the rover if it is level there, else to a
+    // side or behind (not on the slope of a funnel, nor over its opening).
+    let px = r.x + f.x * 14 + f.z * 4, pz = r.z + f.z * 14 - f.x * 4;
+    const n = [0, 1, 0];
+    for (const [a, s] of [[14, 4], [6, 12], [6, -12], [-12, 4], [-12, -6]]) {
+      const x = r.x + f.x * a + f.z * s, z = r.z + f.z * a - f.x * s;
+      this.terrain.normal(x, z, n, 3);
+      // Over the opening the ground (seen from above) is below the rim and inside the cave.
+      const inHole = this.cave ? this.cave.contains(new THREE.Vector3(x, this.terrain.height(x, z) - 0.5, z)) : false;
+      if (n[1] > Math.cos(THREE.MathUtils.degToRad(8)) && !inHole) {
+        px = x;
+        pz = z;
+        break;
+      }
+    }
     const w = this.weather;
     const zero = new THREE.Vector3();
     this.heli = new Helicopter(this.terrain, px, pz, () => (w ? w.wind : zero));
@@ -447,7 +461,37 @@ export class Game {
    * flat or the rover is stuck, the target can still be reached on foot - and gets
    * back on within a few metres of it.
    */
+  /**
+   * Mars: Perseverance carried Ingenuity under its belly - E sets it down on flat ground
+   * near the rover, and takes it back once it has landed.
+   */
+  private toggleIngenuity(): void {
+    if (!this.heli) {
+      if (this.rover.spec.id !== 'perseverance') {
+        this.toast(t('heliNoRover'));
+        return;
+      }
+      if (Math.abs(this.rover.speed) > 0.4) {
+        this.toast(t('evaMoving'));
+        return;
+      }
+      this.enterHeli();
+      this.toast(t('heliOut'));
+      return;
+    }
+    if (this.heli.phase !== 'landed') {
+      this.toast(t('heliLandFirst'));
+      return;
+    }
+    this.exitHeli();
+    this.toast(t('heliIn'));
+  }
+
   toggleEva(): void {
+    if (world().id === 'mars') {
+      this.toggleIngenuity();
+      return;
+    }
     if (this.eva) {
       const r = this.rover.object.position;
       if (Math.hypot(this.eva.pos.x - r.x, this.eva.pos.z - r.z) > 4) {
