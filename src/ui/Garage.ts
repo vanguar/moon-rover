@@ -156,7 +156,10 @@ export class Garage {
       [t('sPower'), t(`r_${s.id}_power`)],
       [t('sRealSpeed'), `${num(s.real.speedKmh, s.real.speedKmh < 1 ? 3 : 0)} ${t('hKmh')}`],
       [t('sGameSpeed'), `${num(s.maxSpeed * 3.6, 0)} ${t('hKmh')}`],
-      [t('sDistance'), s.real.distanceKm !== undefined ? `${num(s.real.distanceKm, 1)} ${t('hKm')}` : t('sActive')],
+      [t('sDistance'), (() => {
+        const km = s.real.distanceBySite?.[site().id] ?? s.real.distanceKm;
+        return km !== undefined ? `${num(km, 1)} ${t('hKm')}` : t('sActive');
+      })()],
       [t('sView'), t(s.heli ? 'sViewHeli' : s.crew ? 'sViewCrew' : 'sViewCam')],
     ];
     const dl = $('#d-specs');

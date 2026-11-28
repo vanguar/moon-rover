@@ -57,7 +57,7 @@ export interface RoverSpec {
   build(): RoverModel;
   photo: { file: string; credit: string; license: string; url: string; parts: PhotoPart[] };
   /** Real-mission facts; distance only for completed missions (active rovers keep driving). */
-  real: { massKg: number; lengthM: number; speedKmh: number; wheels: number; power: string; distanceKm?: number };
+  real: { massKg: number; lengthM: number; speedKmh: number; wheels: number; power: string; distanceKm?: number; distanceBySite?: Record<string, number> };
 }
 
 const fill = (n: number, v: number) => new Array(n).fill(v);
@@ -80,7 +80,8 @@ export const ROVERS: Record<RoverId, RoverSpec> = {
         { kind: 'glint', poly: [[0.48, 0.5], [0.87, 0.5], [0.87, 0.72], [0.48, 0.72]], period: 6 },
       ],
     },
-    real: { massKg: 210, lengthM: 3.1, speedKmh: 18, wheels: 4, power: '2 × 36 V Ag-Zn', distanceKm: 27.8 },
+    // Each mission had its own LRV: Apollo 15 drove 27.8 km, Apollo 17 35.7 km (NASA mission reports).
+    real: { massKg: 210, lengthM: 3.1, speedKmh: 18, wheels: 4, power: '2 × 36 V Ag-Zn', distanceKm: 27.8, distanceBySite: { apollo17: 35.7 } },
   },
   lunokhod: {
     id: 'lunokhod', world: 'moon', country: 'ussr', year: 1970,
