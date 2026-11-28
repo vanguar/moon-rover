@@ -24,7 +24,7 @@ interface Step {
   done: (c: MissionCtx) => boolean;
 }
 
-export type MissionKind = 'moon' | 'moon17' | 'mars' | 'pavonis' | 'pavonisHeli' | 'gale' | 'heli';
+export type MissionKind = 'moon' | 'moon17' | 'mars' | 'pavonis' | 'pavonisHeli' | 'pavonisScout' | 'gale' | 'heli';
 
 export class Missions {
   readonly id: string;
@@ -85,6 +85,32 @@ export class Missions {
         { key: 'g_trough', target: site('trough'), reach: 40, done: () => false },
         { key: 'g_butte', target: site('butte'), reach: 150, done: () => false },
         { key: 'g_photo', target: site('butte'), done: (c) => c.found.has('butte') },
+      ];
+    } else if (kind === 'pavonisScout') {
+      // A scouting flight, as Ingenuity flew for Perseverance: the depth with its laser
+      // rangefinder (reaches ~40 m), the funnel from all sides, then down the tube.
+      const cave = (terrain.meta as { cave?: { x: number; z: number; rimY: number } }).cave;
+      const cx = cave?.x ?? 0, cz = cave?.z ?? 0, rim = cave?.rimY ?? 0;
+      let hold = 0;
+      const sectors = new Set<number>();
+      this.steps = [
+        { key: 'sc_depth', target: site('cave'), done: (c) => {
+          const h = c.heli;
+          if (!h || Math.hypot(h.pos.x - cx, h.pos.z - cz) > 6 || h.pos.y < rim + 1.5 || h.agl < 20) { hold = 0; return false; }
+          hold++;
+          if (hold > 90) { this.depth = h.agl; this.depthAbove = h.pos.y - rim; return true; }
+          return false;
+        } },
+        { key: 'sc_ring', target: site('cave'), done: (c) => {
+          const h = c.heli;
+          if (h) {
+            const d = Math.hypot(h.pos.x - cx, h.pos.z - cz);
+            if (d > 60 && d < 130 && h.agl > 8) sectors.add(Math.floor(((Math.atan2(h.pos.x - cx, cz - h.pos.z) / (Math.PI / 2)) + 4.5) % 4));
+          }
+          return sectors.size >= 4;
+        } },
+        { key: 'sc_choke', target: site('choke'), reach: 25, done: () => false },
+        { key: 'ph_home', target: () => this.home, done: (c) => !!c.heli && c.heli.agl < 0.5 && Math.hypot(c.heli.pos.x - c.heli.pad.x, c.heli.pos.z - c.heli.pad.z) < 12 },
       ];
     } else if (kind === 'pavonisHeli') {
       // Ingenuity down through the skylight: over the opening, below its rim, then a
@@ -204,6 +230,10 @@ export class Missions {
       steps: this.steps.map((s, i) => ({ text: this.text_(s.key), done: i < this.index, current: i === this.index })),
     };
   }
+
+  /** The laser range to the pile and the height above the rim when it was measured (m). */
+  depth = 0;
+  depthAbove = 0;
 
   /** The helicopter's pad by the rover (for the way home). */
   private home: { x: number; z: number } | null = null;

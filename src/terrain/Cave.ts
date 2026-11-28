@@ -172,6 +172,21 @@ export class Cave {
     return m;
   }
 
+  /** Where the tube chokes with rubble, down-tube (world x, z): the scouting flight's goal. */
+  chokeSite(): { x: number; z: number } {
+    const u = this.c.length / 2 - 95;
+    const [x, z] = this.world(u, 0);
+    return { x, z };
+  }
+
+  /** Over the opening: the top of the debris pile under it (what a downward rangefinder sees). */
+  pileUnder(x: number, z: number): number | null {
+    const dx = x - this.c.x, dz = z - this.c.z;
+    if (Math.hypot(dx, dz) > this.outlineR(dx, dz)) return null;
+    const [u, v] = this.uv(x, z);
+    return this.groundTop(u, v);
+  }
+
   /** Where the bone-like formation lies (world x, z): a site for the journal. */
   bonesSite(): { x: number; z: number } {
     const [x, z] = this.world(this.bonesU, this.bonesV());

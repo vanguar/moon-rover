@@ -6,6 +6,16 @@
 type Dict = Record<string, string>;
 
 const ru: Dict = {
+  'mission-pavonisScout_title': 'Разведка провала',
+  'mission-pavonisScout_intro': 'Ingenuity летал на разведку для Perseverance. Здесь та же работа: измерить глубину провала лазерным высотомером, облететь воронку со всех сторон и пролететь по трубе до завала.',
+  'mission-pavonisScout_done': 'Разведка выполнена!',
+  'sc_depth': 'Измерьте глубину: зависните над отверстием выше его края',
+  'sc_depth_hint': 'Лазерный дальномер Ingenuity смотрит вниз и достаёт до ~40 м. Встаньте над центром отверстия (стрелка) на 2-10 м выше края и держите 3 секунды - высота на панели и есть глубина до вершины осыпи.',
+  'sc_ring': 'Облетите воронку по кругу (60-120 м от центра, выше 8 м)',
+  'sc_ring_hint': 'Пролетите над всеми четырьмя сторонами воронки - север, восток, юг, запад. Так снимают местность перед маршрутом ровера.',
+  'sc_choke': 'Пролетите по трубе до завала',
+  'sc_choke_hint': 'Спуститесь через отверстие и летите вдоль трубы по стрелке, на высоте 5-15 м. Держитесь середины: стены и свод твёрдые. В конце труба перекрыта обрушением.',
+  'scDepth': 'Лазерный высотомер: {d} м до осыпи, вы на {a} м выше края → вершина осыпи на {p} м ниже края. HiRISE (2011): 28 м.',
   ph_home: 'Верните Ingenuity к роверу: вылетите через отверстие и сядьте рядом',
   ph_home_hint: 'Стрелка показывает на ровер. Поднимитесь прямо вверх через отверстие (пробел), затем летите по стрелке; у ровера держите Shift. Потом E - Ingenuity вернётся на ровер.',
   ph_bones: 'В глубине трубы что-то лежит. Долетите и сфотографируйте (F)',
@@ -203,6 +213,16 @@ const ru: Dict = {
 };
 
 const uk: Dict = {
+  'mission-pavonisScout_title': 'Розвідка провалу',
+  'mission-pavonisScout_intro': 'Ingenuity літав на розвідку для Perseverance. Тут та сама робота: виміряти глибину лазерним висотоміром, облетіти вирву й пролетіти трубою до завалу.',
+  'mission-pavonisScout_done': 'Розвідку виконано!',
+  'sc_depth': 'Виміряйте глибину: зависніть над отвором вище його краю',
+  'sc_depth_hint': 'Лазерний далекомір Ingenuity дивиться вниз і дістає до ~40 м. Станьте над центром отвору на 2-10 м вище краю й тримайте 3 секунди.',
+  'sc_ring': 'Облетіть вирву по колу (60-120 м від центру, вище 8 м)',
+  'sc_ring_hint': 'Пролетіть над усіма чотирма сторонами вирви.',
+  'sc_choke': 'Пролетіть трубою до завалу',
+  'sc_choke_hint': 'Спустіться крізь отвір і летіть уздовж труби за стрілкою на висоті 5-15 м, тримайтеся середини.',
+  'scDepth': 'Лазерний висотомір: {d} м до осипу, ви на {a} м вище краю → вершина осипу на {p} м нижче краю. HiRISE (2011): 28 м.',
   ph_home: 'Поверніть Ingenuity до ровера: вилетіть крізь отвір і сядьте поруч',
   ph_home_hint: 'Стрілка показує на ровер. Підніміться вгору крізь отвір (пробіл), летіть за стрілкою, біля ровера тримайте Shift. Потім E.',
   ph_bones: 'У глибині труби щось лежить. Долетіть і сфотографуйте (F)',
@@ -383,6 +403,16 @@ const uk: Dict = {
 };
 
 const en: Dict = {
+  'mission-pavonisScout_title': 'Scouting the pit',
+  'mission-pavonisScout_intro': 'Ingenuity flew scouting flights for Perseverance. The same job here: measure the pit with the laser altimeter, fly round the funnel and down the tube to the rubble choke.',
+  'mission-pavonisScout_done': 'Scouting done!',
+  'sc_depth': 'Measure the depth: hover over the opening, above its rim',
+  'sc_depth_hint': "Ingenuity's laser rangefinder looks down and reaches ~40 m. Hold over the opening's centre (arrow), 2-10 m above the rim, for 3 seconds - the altitude on the panel is the depth to the top of the pile.",
+  'sc_ring': 'Fly round the funnel (60-120 m from the centre, above 8 m)',
+  'sc_ring_hint': 'Pass over all four sides of the funnel - north, east, south, west - as the ground is surveyed before a rover drive.',
+  'sc_choke': 'Fly down the tube to the rubble choke',
+  'sc_choke_hint': 'Go down through the opening and follow the arrow along the tube, 5-15 m up. Keep to the middle: walls and roof are solid. At the end the tube is blocked by a collapse.',
+  'scDepth': 'Laser altimeter: {d} m to the pile, you are {a} m above the rim → the top of the pile is {p} m below the rim. HiRISE (2011): 28 m.',
   ph_home: 'Bring Ingenuity back to the rover: out through the opening, land beside it',
   ph_home_hint: 'The arrow points at the rover. Climb straight up through the opening (Space), then follow the arrow; by the rover hold Shift. Then E - Ingenuity goes back aboard.',
   ph_bones: 'Something lies deep in the tube. Fly there and photograph it (F)',

@@ -318,6 +318,7 @@ export class Game {
       // The bone-like formation deep in the tube is a journal site too.
       const sites = (terrain.meta.sites ??= {}) as Record<string, { x: number; z: number }>;
       sites.bones = this.cave.bonesSite();
+      sites.choke = this.cave.chokeSite();
       this.scene.add(this.cave.group);
       this.terrainR.uniforms.uHole.value.set(caveMeta.x, caveMeta.z, caveMeta.rimY, Math.max(...caveMeta.holeR) + 1);
     }
@@ -446,7 +447,8 @@ export class Game {
     const zero = new THREE.Vector3();
     this.heli = new Helicopter(this.terrain, px, pz, () => (w ? w.wind : zero));
     const cave = this.cave;
-    if (cave) this.heli.groundAt = (x, z, y) => cave.groundAt(x, z, y) ?? this.terrain.height(x, z);
+    // Over the opening the laser altimeter looks down the hole to the debris pile.
+    if (cave) this.heli.groundAt = (x, z, y) => cave.groundAt(x, z, y) ?? cave.pileUnder(x, z) ?? this.terrain.height(x, z);
     this.heli.yaw = Math.atan2(f.x, f.z);
     this.scene.add(this.heli.object, this.heli.dustObject);
     this.rover.parkBrake = true;
@@ -1332,7 +1334,15 @@ export class Game {
 
   /** The helicopter mission of the current site (Pavonis: down into the skylight). */
   private heliMission(): MissionKind {
-    return site().id === 'pavonis' ? 'pavonisHeli' : 'heli';
+    if (site().id !== 'pavonis') return 'heli';
+    // After the cave: the scouting flight (depth by laser, round the funnel, down the tube).
+    let done = 0;
+    try {
+      done = Number(localStorage.getItem('mission-pavonisHeli') ?? 0) || 0;
+    } catch {
+      /* storage unavailable */
+    }
+    return done >= 6 ? 'pavonisScout' : 'pavonisHeli';
   }
 
   /** The rover mission of the current site. */
@@ -1348,6 +1358,12 @@ export class Game {
       // Mars is 5–20 light-minutes away: no live voice loop there.
       if (this.sky) this.radio.say(finished ? 'missionDone' : 'nextStep', { repeat: true, delay: 0.3 });
       this.toast(finished ? t(`${this.mission.id}_done`) : `${t('newTask')}: ${t(key)}`);
+      // The depth just measured by the laser altimeter, against the HiRISE value.
+      if (key === 'sc_ring' && this.mission.depth > 0) {
+        const m = this.mission;
+        const msg = t('scDepth').replace('{d}', m.depth.toFixed(1)).replace('{a}', m.depthAbove.toFixed(1)).replace('{p}', (m.depth - m.depthAbove).toFixed(1));
+        setTimeout(() => this.toast(msg), 3500);
+      }
     };
   }
 
