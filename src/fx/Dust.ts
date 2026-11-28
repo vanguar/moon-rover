@@ -44,17 +44,28 @@ export class Dust {
     this.size = new Float32Array(max);
     this.alive = new Uint8Array(max);
 
+    // A round puff, Gaussian falloff to exactly zero at the edge. No mipmaps: averaged down
+    // to 2 x 2 texels a radial gradient turns into a square, and small or distant puffs
+    // showed as grey squares.
+    const N = 64;
     const c = document.createElement('canvas');
-    c.width = 32;
-    c.height = 32;
+    c.width = N;
+    c.height = N;
     const g = c.getContext('2d')!;
-    const grd = g.createRadialGradient(16, 16, 0, 16, 16, 16);
-    grd.addColorStop(0, 'rgb(255,255,255)');
-    grd.addColorStop(0.5, 'rgb(140,140,140)');
-    grd.addColorStop(1, 'rgb(0,0,0)');
-    g.fillStyle = grd;
-    g.fillRect(0, 0, 32, 32);
+    const img = g.createImageData(N, N);
+    for (let j = 0; j < N; j++) {
+      for (let i = 0; i < N; i++) {
+        const r = Math.hypot(i + 0.5 - N / 2, j + 0.5 - N / 2) / (N / 2);
+        const a = r >= 1 ? 0 : Math.exp(-r * r * 3.2) * (1 - r * r);
+        const o = (j * N + i) * 4;
+        img.data[o] = img.data[o + 1] = img.data[o + 2] = Math.round(a * 255);
+        img.data[o + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
     const alpha = new THREE.CanvasTexture(c);
+    alpha.generateMipmaps = false;
+    alpha.minFilter = THREE.LinearFilter;
 
     const mat = new THREE.MeshLambertMaterial({ color: world().id === 'mars' ? 0xb48a66 : 0x9a948b, alphaMap: alpha, transparent: true, depthWrite: false, side: THREE.DoubleSide });
     mat.onBeforeCompile = (shader) => {
