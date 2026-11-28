@@ -161,7 +161,13 @@ function slabGeometry(seed: number, tint: RockTint): THREE.BufferGeometry {
       if (Math.cos(a - bite) > 0.6) r *= 0.7 + 0.1 * rnd();
       const x = Math.cos(a) * r * 1.1 + ox, z = Math.sin(a) * r * (0.6 + 0.3 * rnd()) + oz;
       const tk = th * (0.55 + 0.5 * rnd());
-      pts.push(new THREE.Vector3(x, y + th * 0.15 * rnd(), z), new THREE.Vector3(x * (0.85 + 0.12 * rnd()), y + tk, z * (0.85 + 0.12 * rnd())));
+      pts.push(new THREE.Vector3(x, y + th * 0.25 * rnd(), z), new THREE.Vector3(x * (0.85 + 0.12 * rnd()), y + tk, z * (0.85 + 0.12 * rnd())));
+    }
+    // Inner points: the top and bottom of the plate are not planes (spalls, a hump, a dip).
+    for (let k = 0; k < 10; k++) {
+      const a = rnd() * Math.PI * 2, r = Math.sqrt(rnd()) * shrink * 0.7;
+      const x = Math.cos(a) * r + ox, z = Math.sin(a) * r * 0.75 + oz;
+      pts.push(new THREE.Vector3(x, y + th * (0.95 + 0.35 * rnd()), z), new THREE.Vector3(x, y - th * 0.2 * rnd(), z));
     }
     let g: THREE.BufferGeometry = new ConvexGeometry(pts);
     g.rotateZ((rnd() - 0.5) * 0.3);
@@ -265,6 +271,8 @@ export class Rocks {
   private abundance: number;
   private mars: boolean;
   private gravelMeshes: THREE.InstancedMesh[] = [];
+  /** Where layered ledges crop out (for checks). */
+  readonly ledgeSpots: { x: number; z: number }[] = [];
   /** A skylight (Pavonis): centre, radius with margin, rim height - no rocks hang over it. */
   private hole: { x: number; z: number; r: number; rimY: number } | null = null;
 
@@ -522,7 +530,8 @@ float rockH(vec3 p, vec3 w) {
     }
     // Outcrops: bedded slabs (stacked plates breaking along bedding planes).
     if (mars) for (let v = 0; v < OUTCROP_VARIANTS_MARS; v++) this.outcropMeshes.push(new THREE.InstancedMesh(plateGeometry(41 + v * 17, tint), mat, 500));
-    else this.outcropMeshes.push(new THREE.InstancedMesh(slabGeometry(5, tint), mat, 800));
+    // Four lunar slab shapes (one shape everywhere was a visible repeat).
+    else for (let v = 0; v < 4; v++) this.outcropMeshes.push(new THREE.InstancedMesh(slabGeometry(5 + v * 29, tint), mat, 400));
     for (const m of [...this.boulderNear, ...this.boulderFar, ...this.outcropMeshes]) this.prep(m);
     for (const m of this.boulderFar) m.castShadow = false;
     this.placeBoulders();
@@ -643,6 +652,23 @@ float rockH(vec3 p, vec3 w) {
 
   private placeBoulders(): void {
     const t = this.terrain;
+    // Apollo 15: where a deep depression's upper wall is steep - Hadley Rille, and the
+    // walls of the larger mare craters - the layered mare basalt crops out in ledges
+    // (Scott and Irwin at station 9a; AS15-89-12104...).
+    const layered = currentSite().id === 'apollo15';
+    // Upper wall of a deep depression: the rim within 150 m is 5-60 m above, and the
+    // ground within 400 m drops more than 80 m below (the rille is ~300 m deep; small
+    // craters on the plain are not).
+    const upperWall = (x: number, z: number, h: number) => {
+      let up = -Infinity, down = Infinity;
+      for (let k = 0; k < 12; k++) {
+        const c = Math.cos(k * 0.5236), sn = Math.sin(k * 0.5236);
+        up = Math.max(up, t.height(x + c * 150, z + sn * 150));
+        down = Math.min(down, t.height(x + c * 400, z + sn * 400));
+      }
+      return up - h > 5 && up - h < 60 && h - down > 80;
+    };
+    const nB = [0, 0, 0];
     const n = Math.floor(t.meta.sizeX / BOULDER_GRID);
     for (let j = 0; j < n; j++) {
       for (let i = 0; i < n; i++) {
@@ -662,6 +688,18 @@ float rockH(vec3 p, vec3 w) {
         const rnd = mulberry32(Math.floor(hash2(i, j, 4242) * 4294967296));
         const px = x + (rnd() - 0.5) * BOULDER_GRID, pz = z + (rnd() - 0.5) * BOULDER_GRID;
         const outcrop = (slopeDeg > 24 && rnd() < 0.35) || (mat > 0.7 && rnd() < 0.45);
+        if (layered && slopeDeg > 22 && rnd() < 0.65) {
+          t.normal(px, pz, nB, 12);
+          if (Math.acos(Math.min(1, nB[1])) > 0.42 && upperWall(px, pz, t.height(px, pz))) {
+            this.ledgeSpots.push({ x: px, z: pz });
+            // Ledges along the contour; often a second bed a few metres lower.
+            const strike = Math.atan2(this.tmpN[0], -this.tmpN[2]);
+            const dn = Math.hypot(this.tmpN[0], this.tmpN[2]) || 1;
+            this.placePlateRow(px, pz, rnd, strike + (rnd() - 0.5) * 0.25, 0.55 + rnd() * 0.2, 1.9);
+            if (rnd() < 0.6) this.placePlateRow(px + (this.tmpN[0] / dn) * 2.8, pz + (this.tmpN[2] / dn) * 2.8, rnd, strike + (rnd() - 0.5) * 0.25, 0.55 + rnd() * 0.2, 1.9);
+            continue;
+          }
+        }
         // Mars bedrock on flat ground: a row of low plates along the strike (Rochette ridge).
         if (outcrop && this.mars && slopeDeg <= 24) {
           this.placePlateRow(px, pz, rnd);
@@ -744,12 +782,12 @@ float rockH(vec3 p, vec3 w) {
    * buried) strung along the strike with sand between them, each following the
    * ground's tilt, as along the Rochette ridge and across the Máaz pavement.
    */
-  placePlateRow(x0: number, z0: number, rnd: () => number, strike = rnd() * Math.PI): void {
+  placePlateRow(x0: number, z0: number, rnd: () => number, strike = rnd() * Math.PI, albedoBase?: number, scale = 1): void {
     const t = this.terrain;
     const dx = Math.cos(strike), dz = Math.sin(strike);
     const count = 2 + Math.floor(rnd() * 4);
-    const r0 = 0.7 + rnd() * 1.3;
-    const albedo = 1.05 + rnd() * 0.25;
+    const r0 = (0.7 + rnd() * 1.3) * scale;
+    const albedo = albedoBase ?? 1.05 + rnd() * 0.25;
     // The bedding dips: the plates of one row lean the same way (tilted ledges).
     const dip = (rnd() - 0.5) * 0.35;
     let along = -r0 * count * 0.5, prev = 0;
@@ -767,8 +805,8 @@ float rockH(vec3 p, vec3 w) {
         .setFromUnitVectors(Y, up)
         .multiply(new THREE.Quaternion().setFromAxisAngle(Y, -strike + (rnd() - 0.5) * 0.6))
         .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), dip + (rnd() - 0.5) * 0.15));
-      const sx = r * (0.9 + 0.3 * rnd()), sz = r * (0.75 + 0.3 * rnd()), sy = 0.25 + rnd() * 0.35;
-      this.addBoulder({ x, y: t.height(x, z) - sy * 0.45, z, r, sx, sy, sz, q, v: Math.floor(rnd() * OUTCROP_VARIANTS_MARS), albedo: albedo + (rnd() - 0.5) * 0.08, outcrop: true });
+      const sx = r * (0.9 + 0.3 * rnd()), sz = r * (0.75 + 0.3 * rnd()), sy = (0.25 + rnd() * 0.35) * scale;
+      this.addBoulder({ x, y: t.height(x, z) - sy * 0.45, z, r, sx, sy, sz, q, v: Math.floor(rnd() * (this.mars ? OUTCROP_VARIANTS_MARS : 4)), albedo: albedo + (rnd() - 0.5) * 0.08, outcrop: true });
     }
   }
 
