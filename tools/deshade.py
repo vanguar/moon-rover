@@ -42,6 +42,9 @@ BK = _arg("--backup", os.path.join(ROOT, "raw_data", "mars", "ortho_shaded"))
 # Mars: the HiRISE Sun was in the west; elsewhere search the whole sky.
 MARS = D == os.path.join(ROOT, "public", "data", "mars")
 AZ = range(240, 301, 5) if MARS else range(0, 360, 5)
+# --steep: fit only where the ground slopes (> 4°) - for a site that is flat dust save
+# for one landform (the Pavonis pit), where flat ground would swamp the fit.
+STEEP = "--steep" in __import__("sys").argv
 EL = range(20, 61, 5) if MARS else range(5, 66, 5)
 
 
@@ -64,21 +67,41 @@ def main():
     px = m["pixelSize"]
     o = np.asarray(Image.open(os.path.join(BK, "ortho.jpg")).convert("L")).astype(np.float64)
     o2 = np.asarray(Image.fromarray(o.astype(np.uint8)).resize(h.shape[::-1], Image.BILINEAR)).astype(np.float64)
-    hp = lambda a: a - ndimage.gaussian_filter(a, 8)
-    sub = (slice(0, None, 3), slice(0, None, 3))
+    # High-pass of 8 cells; a lone landform (--steep) is fitted on its own scale (~30 m),
+    # since the fine scale there is mostly DTM noise.
+    hp = lambda a: a - ndimage.gaussian_filter(a, 30 if STEEP else 8)
+    if STEEP:
+        # Only the steep landform: a box around it, fitted where the slope is over 4°.
+        sl = np.degrees(np.arctan(np.hypot(*np.gradient(h, px))))
+        # The largest steep patch (the landform itself, not scattered DTM noise).
+        lab, n = ndimage.label(ndimage.binary_opening(sl > 12, iterations=2))
+        sizes = ndimage.sum(lab > 0, lab, range(1, n + 1))
+        rr, cc = np.where(lab == int(np.argmax(sizes)) + 1)
+        r0, r1 = max(0, rr.min() - 40), min(h.shape[0], rr.max() + 40)
+        c0, c1 = max(0, cc.min() - 40), min(h.shape[1], cc.max() + 40)
+        hs_, os_ = h[r0:r1, c0:c1], o2[r0:r1, c0:c1]
+        sel = sl[r0:r1, c0:c1] > 4
+        stp = 1
+        print(f"Fit on the steep landform: box {r1 - r0} x {c1 - c0} m-cells, {sel.mean() * 100:.0f}% of it sloping")
+    else:
+        hs_, os_ = h[::3, ::3], o2[::3, ::3]
+        sel = np.ones(hs_.shape, bool)
+        stp = 3
+    ohp = hp(os_)[sel]
     best = None
     for az in AZ:
         for el in EL:
-            f = hp(shade(h[sub], px * 3, az, el))
-            c = np.corrcoef(f.ravel(), hp(o2[sub]).ravel())[0, 1]
+            f = hp(shade(hs_, px * stp, az, el))[sel]
+            c = np.corrcoef(f.ravel(), ohp.ravel())[0, 1]
             if best is None or c > best[0]:
                 best = (c, az, el)
     c, az, el = best
     s = shade(h, px, az, el)
     flat = math.sin(math.radians(el))
     rel = s / flat - 1.0
-    oo = o2 / ndimage.gaussian_filter(o2, 8) - 1.0
-    beta = float(np.sum(hp(rel) * oo) / np.sum(hp(rel) ** 2))
+    oo = o2 / ndimage.gaussian_filter(o2, 30 if STEEP else 8) - 1.0
+    full_sel = (np.hypot(*np.gradient(h, px)) > math.tan(math.radians(4))) if STEEP else np.ones(h.shape, bool)
+    beta = float(np.sum((hp(rel) * oo)[full_sel]) / np.sum((hp(rel) ** 2)[full_sel]))
     print(f"Photo Sun fit: azimuth {az}°, elevation {el}° (r = {c:.2f}); shading gain {beta:.2f}")
     # Relative shading factor on the DTM grid, resampled to each image.
     factor = np.clip(1.0 + beta * ndimage.gaussian_filter(rel, 0.7), 0.35, 2.5)
