@@ -50,6 +50,7 @@ export class TerrainRenderer {
     uDetSlopes: { value: number };
     /** A skylight opening: (x, z, rim height, radius); w = 0 none. Ground below the rim inside it is not drawn. */
     uHole: { value: THREE.Vector4 };
+    uOrange: { value: THREE.Vector4 };
     uFresh: { value: Float32Array };
   };
   private chunks = new Map<string, Chunk>();
@@ -106,6 +107,8 @@ export class TerrainRenderer {
       uDetRes: { value: 512 },
       uDetSlopes: { value: 0 },
       uHole: { value: new THREE.Vector4(0, 0, 0, 0) },
+      // Orange glass soil (Apollo 17, Shorty): centre x, z, along-strike angle, 0 = none.
+      uOrange: { value: new THREE.Vector4(0, 0, 0, 0) },
       uFresh: { value: new Float32Array(36).fill(-1e6) },
     };
     const u = this.uniforms;
@@ -154,6 +157,7 @@ export class TerrainRenderer {
         uDetRes: u.uDetRes,
         uDetSlopes: u.uDetSlopes,
         uHole: u.uHole,
+        uOrange: u.uOrange,
         uFresh: u.uFresh,
         uMat: { value: matTex },
         uPave: { value: paveTex },
@@ -184,6 +188,7 @@ varying vec3 vWorldP;
 varying vec3 vNormalW;
 uniform sampler2D uOrtho;
 uniform vec4 uHole;
+uniform vec4 uOrange;
 uniform sampler2D uBaked;
 uniform vec2 uMapSize;
 uniform vec2 uRover;
@@ -711,6 +716,20 @@ float aMean = textureLod(uOrtho, mapUv, 7.0).r * 0.9;
 float aRel = alb / max(aMean, 0.01);
 alb = aMean * (aRel < 1.35 ? aRel : 1.35 + (aRel - 1.35) * 0.35);
 diffuseColor.rgb = regolith * alb;
+// Shorty's orange soil (74220): volcanic glass beads, a band a metre or two wide and some
+// metres long on the rim where Schmitt trenched it - ragged edges, brightest in its core.
+if (uOrange.w > 0.0) {
+  vec2 od = vWorldP.xz - uOrange.xy;
+  vec2 oa = vec2(cos(uOrange.z), sin(uOrange.z));
+  vec2 ol = vec2(dot(od, oa), dot(od, vec2(-oa.y, oa.x)));
+  float wob = (lnoised(vWorldP.xz * 0.9 + 3.1).x - 0.5) * 1.6 + (lnoised(vWorldP.xz * 4.0 + 7.7).x - 0.5) * 0.5;
+  float band = 1.0 - smoothstep(0.45, 0.6, abs(ol.y + wob * 0.25) / (0.8 + 0.6 * lnoised(vec2(ol.x * 0.4, 1.7)).x));
+  band *= 1.0 - smoothstep(2.0, 2.8, abs(ol.x + wob * 0.5));
+  // Muted orange-brown (as in AS17-137-20990), at the grey soil's brightness.
+  float lum0 = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11));
+  vec3 orangeSoil = vec3(1.45, 0.86, 0.48) * lum0 * (0.85 + 0.3 * lnoised(vWorldP.xz * 9.0).x);
+  diffuseColor.rgb = mix(diffuseColor.rgb, orangeSoil, band * 0.9);
+}
 // Fresh craters from impacts during play: bright, immature ejecta out to ~3 radii,
 // broken into rays; the bowl floor bright too (fresh material is ~1.5-2x brighter).
 for (int k = 0; k < 12; k++) {

@@ -299,6 +299,11 @@ export class Game {
     this.hud = new Hud(terrain);
     this.hud.siteLabel = site().id === 'pavonis' || site().id === 'gale' ? t('siteStart') : mars ? 'M2020' : 'LM';
     // A skylight into a cave (Pavonis Mons): the void below, and no ground drawn in the throat.
+    // Apollo 17 station 4: the orange soil on Shorty's rim, a few metres from the station mark.
+    if (site().id === 'apollo17' && terrain.meta.sites?.st4) {
+      const s4 = terrain.meta.sites.st4;
+      this.terrainR.uniforms.uOrange.value.set(s4.x + 3, s4.z + 2, 0.6, 1);
+    }
     const caveMeta = (terrain.meta as { cave?: CaveMeta }).cave;
     if (caveMeta) {
       this.cave = new Cave(caveMeta);

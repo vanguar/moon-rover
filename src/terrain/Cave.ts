@@ -771,6 +771,8 @@ export class Cave {
             // Penumbra: the Sun's 0.35° disc over the distance from the rim (~0.25 m at 40 m).
             float pen = 0.003 * t + 0.03;
             float lit = 1.0 - smoothstep(-pen, pen, length(q) - holeRadius(q));
+            // At the rim the rock is the surface itself: open to the Sun.
+            lit = max(lit, smoothstep(rim - 2.0, rim - 0.2, vW.y));
             // Under the direct beam the relief shades softly (fine bumps do not cast black spots).
             E += uSunE * lit * max(dot(nSun, uSun), 0.0);
           }
@@ -781,6 +783,14 @@ export class Cave {
           float A = 3.14159 * uMeanR * uMeanR;
           float omega = A * max(dH.y, 0.0) / (D2 + A);
           E += uSky * omega * max(dot(n, dH), 0.0) * 3.14159;
+          // In the throat: the sky it sees falls off with depth (view factor of the opening:
+          // half the sky at the rim for a wall, R²/(R²+d²) for an upward face) - the walls
+          // fade gradually into the dark, no sharp black edge.
+          float dDeep = max(rim - vW.y, 0.0);
+          float inThroat = (1.0 - smoothstep(uMeanR * 1.1, uMeanR * 1.5, length(vW.xz - hc))) * smoothstep(ceil - 12.0, ceil - 4.0, vW.y);
+          float Fside = 0.5 * (1.0 - dDeep / sqrt(dDeep * dDeep + 4.0 * uMeanR * uMeanR));
+          float Fup = uMeanR * uMeanR / (uMeanR * uMeanR + dDeep * dDeep);
+          E += uSky * 3.14159 * inThroat * mix(Fside, Fup, max(n.y, 0.0)) * (1.0 - min(omega * 4.0, 1.0));
           // Bounce from the sunlit patch of the pile (its flux over the distance squared).
           vec3 toS = uSpot - vW;
           float S2 = dot(toS, toS) + 40.0;

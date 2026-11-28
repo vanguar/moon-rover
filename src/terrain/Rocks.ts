@@ -6,6 +6,7 @@ import type { QualitySettings } from '../config';
 import type { Physics } from '../physics/Physics';
 import { makeLunar, NOISE_GLSL } from '../render/lunar';
 import { hash2, mulberry32, type TerrainData } from './TerrainData';
+import { site as currentSite } from '../world';
 
 const CELL = 32;
 const VARIANTS = 6;
@@ -526,6 +527,89 @@ float rockH(vec3 p, vec3 w) {
     for (const m of this.boulderFar) m.castShadow = false;
     this.placeBoulders();
     if (this.mars && terrain.meta.sites?.rochette) this.placeArtuby(terrain.meta.sites.rochette.x, terrain.meta.sites.rochette.z);
+    this.placeLandmarks(mat, tint);
+  }
+
+  /**
+   * Real, photographed rocks at their stations:
+   * - Apollo 17 station 6: the split boulder at the foot of the North Massif (AS17-140-
+   *   21497 and the pan around it): a house-sized block of breccia that rolled down the
+   *   massif and broke into five pieces, the cracks open by up to a metre or so.
+   * - Apollo 15 station 7, Spur crater: the "Genesis Rock" (15415), a fist-sized piece of
+   *   white anorthosite that Scott and Irwin found perched on top of a larger dusty rock.
+   */
+  private placeLandmarks(mat: THREE.Material, tint: RockTint): void {
+    const id = currentSite().id, sites = this.terrain.meta.sites ?? {};
+    const t = this.terrain;
+    const add = (g: THREE.BufferGeometry, pos: THREE.Vector3, q: THREE.Quaternion, s: THREE.Vector3, albedo: number, collide = true) => {
+      const m = new THREE.InstancedMesh(g, mat, 1);
+      m.setMatrixAt(0, new THREE.Matrix4().compose(pos, q, s));
+      m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array([albedo, albedo, albedo]), 3);
+      m.castShadow = true;
+      m.receiveShadow = true;
+      m.frustumCulled = false;
+      this.group.add(m);
+      if (collide) {
+        g.computeBoundingBox();
+        const bb = g.boundingBox!, c = bb.getCenter(new THREE.Vector3()).multiply(s).applyQuaternion(q).add(pos);
+        const e = bb.getSize(new THREE.Vector3()).multiply(s).multiplyScalar(0.5);
+        this.makeCollider({ x: c.x, y: c.y, z: c.z, r: Math.max(e.x, e.z), sx: e.x / 0.82, sy: e.y / 0.82, sz: e.z / 0.82, q, v: 0, albedo });
+      }
+    };
+    if (id === 'apollo17' && sites.st6) {
+      const rnd = mulberry32(21497);
+      const base = rockGeometry(21497, 5, tint, true);
+      // Along the slope (the boulder rolled down it): the long axis across the fall line.
+      t.normal(sites.st6.x, sites.st6.z, this.tmpN, 8);
+      const down = new THREE.Vector3(this.tmpN[0], 0, this.tmpN[2]).normalize();
+      const yaw = Math.atan2(down.x, down.z) + Math.PI / 2;
+      const S = new THREE.Vector3(5.5, 3.2, 3.6);
+      // Four fracture planes, roughly across the long axis, each tilted its own way.
+      const cuts: { n: THREE.Vector3; d: number }[] = [];
+      for (let k = 0; k < 4; k++) {
+        const n = new THREE.Vector3(1, (rnd() - 0.5) * 0.5, (rnd() - 0.5) * 0.7).normalize();
+        cuts.push({ n, d: -0.62 + k * 0.42 + (rnd() - 0.5) * 0.12 });
+      }
+      const cx = sites.st6.x - down.x * 6, cz = sites.st6.z - down.z * 6;
+      const bp = base.getAttribute('position') as THREE.BufferAttribute;
+      for (let piece = 0; piece < 5; piece++) {
+        // Each piece: the boulder's points clipped to its slab, then their convex hull -
+        // flat, exact fracture faces (clamping the mesh itself folded triangles onto them).
+        const pts: THREE.Vector3[] = [];
+        for (let i = 0; i < bp.count; i++) {
+          const v = new THREE.Vector3().fromBufferAttribute(bp, i);
+          // Keep the slab between cut piece-1 and cut piece: outside vertices onto the planes.
+          if (piece > 0) { const c = cuts[piece - 1], k = v.dot(c.n) - c.d; if (k < 0) v.addScaledVector(c.n, -k); }
+          if (piece < 4) { const c = cuts[piece], k = v.dot(c.n) - c.d; if (k > 0) v.addScaledVector(c.n, -k); }
+          pts.push(v);
+        }
+        const g = new ConvexGeometry(pts);
+        const col = new Float32Array(g.getAttribute('position').count * 3);
+        for (let i = 0; i < col.length; i += 3) { const k = 0.9 + 0.2 * rnd(); col[i] = tint.base.r * k; col[i + 1] = tint.base.g * k; col[i + 2] = tint.base.b * k; }
+        g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        // The pieces moved apart along the axis and settled a little down the slope.
+        const along = (piece - 2) * (0.35 + rnd() * 0.35);
+        const q = new THREE.Quaternion().setFromEuler(new THREE.Euler((rnd() - 0.5) * 0.08, yaw + (rnd() - 0.5) * 0.06, (rnd() - 0.5) * 0.1));
+        const ax = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
+        const pos = new THREE.Vector3(cx + ax.x * along + down.x * rnd() * 0.6, 0, cz + ax.z * along + down.z * rnd() * 0.6);
+        pos.y = t.height(pos.x, pos.z) + S.y * (0.45 - rnd() * 0.1);
+        add(g, pos, q, S, 1.05 + rnd() * 0.15);
+      }
+    }
+    if (id === 'apollo15' && sites.spur && sites.lm) {
+      // On the rim of Spur (~50 m from its centre), on the side facing the LM.
+      const sx = sites.spur.x, sz = sites.spur.z;
+      const dir = new THREE.Vector3(sites.lm.x - sx, 0, sites.lm.z - sz).normalize();
+      const px = sx + dir.x * 52, pz = sz + dir.z * 52;
+      const y0 = t.height(px, pz);
+      const ped = rockGeometry(15415, 4, tint, true);
+      const qp = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.15, 0.7, -0.1));
+      const sp = new THREE.Vector3(0.45, 0.28, 0.38);
+      add(ped, new THREE.Vector3(px, y0 + sp.y * 0.55, pz), qp, sp, 0.95);
+      // The white anorthosite on top: a bright, clean, angular fragment ~ 10 x 6 cm.
+      const gen = rockGeometry(15416, 3, { base: new THREE.Color(0.62, 0.62, 0.6), dust: null }, true);
+      add(gen, new THREE.Vector3(px + 0.04, y0 + sp.y * 0.55 + sp.y * 0.85 + 0.03, pz - 0.03), new THREE.Quaternion().setFromEuler(new THREE.Euler(0.3, 1.9, 0.2)), new THREE.Vector3(0.055, 0.032, 0.04), 1.0, false);
+    }
   }
 
   private capacity(): number {
