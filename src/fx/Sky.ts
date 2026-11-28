@@ -67,7 +67,7 @@ function earthTexture(): THREE.CanvasTexture {
 }
 
 /** Sky sphere textured with the all-sky Milky Way map (celestial coordinates). */
-function buildMilkyWayMap(tex: THREE.Texture, icrfToGame0: THREE.Matrix4): THREE.Mesh {
+export function buildMilkyWayMap(tex: THREE.Texture, icrfToGame0: THREE.Matrix4): THREE.Mesh {
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = THREE.RepeatWrapping;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
@@ -337,7 +337,7 @@ function blackbody(T: number): [number, number, number] {
  * site and epoch. Point sources with flux 10^(-0.4 V), colour from temperature;
  * no twinkling (no atmosphere). Falls back to a random field if data is missing.
  */
-function buildStars(data: Float32Array | undefined, fallbackCount: number): THREE.Points {
+export function buildStars(data: Float32Array | undefined, fallbackCount: number): THREE.Points {
   let n: number;
   const pos: number[] = [], col: number[] = [], flux: number[] = [];
   if (data && data.length >= 5) {

@@ -189,6 +189,8 @@ async function boot(): Promise<void> {
     moon ? Promise.resolve(undefined) : loadTexture(dataUrl(`${D}far_albedo.webp`), 'other', false).catch(() => undefined),
     loadTexture(dataUrl(`${C}rocks.webp`), 'other', true).catch(() => undefined),
   ]);
+  // Mars: the star catalogue in ICRF (the sky turns with the planet), shared by all sites.
+  const starsIcrf = moon ? undefined : await fetch(dataUrl(`${BASE}data/stars_icrf.bin`)).then((r) => (r.ok ? r.arrayBuffer() : null)).then((b) => (b ? new Float32Array(b) : undefined)).catch(() => undefined);
   if (rockPhoto) {
     rockPhoto.colorSpace = THREE.SRGBColorSpace;
     rockPhoto.anisotropy = 4;
@@ -198,7 +200,7 @@ async function boot(): Promise<void> {
   // and the photographic Milky Way start only now, so they do not share the bandwidth
   // with the essential data, and are attached when they arrive (title screen or later).
   const orthoHi = loadTexture(dataUrl(`${D}ortho_hi.webp`), 'late', false).catch(() => undefined);
-  const milkyWay = moon ? loadTexture(dataUrl(`${C}milkyway.jpg`), 'late', true).catch(() => undefined) : undefined;
+  const milkyWay = loadTexture(dataUrl(moon ? `${C}milkyway.jpg` : `${BASE}data/milkyway.jpg`), 'late', true).catch(() => undefined);
   await models;
   loadText.textContent = t('loadPhysics');
   const { Physics } = await physicsModule;
@@ -208,7 +210,7 @@ async function boot(): Promise<void> {
   const level: QualityLevel = settings.quality === 'auto' ? autoQuality() : settings.quality;
   const list = roversFor(W.id);
   const spec = list.find((r) => r.id === settings.rover[W.id]) ?? list[0];
-  const game = new Game($('#app'), terrain, physics, ortho, baked, makeQuality(level), settings.quality === 'auto', { stars, constellations, farShadow, farAlbedo, rockPhoto }, spec, settings.weather);
+  const game = new Game($('#app'), terrain, physics, ortho, baked, makeQuality(level), settings.quality === 'auto', { stars, constellations, farShadow, farAlbedo, rockPhoto, starsIcrf }, spec, settings.weather);
   void orthoHi.then((tex) => tex && game.setOrthoHi(tex));
   void milkyWay?.then((tex) => tex && game.setMilkyWay(tex));
   (window as unknown as { game: Game; ROVERS_: unknown }).game = game;

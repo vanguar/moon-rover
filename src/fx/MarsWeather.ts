@@ -104,7 +104,7 @@ export class MarsWeather {
     const cyl = new THREE.CylinderGeometry(1, 1, 1, 28, 1, false);
     cyl.translate(0, 0.5, 0);
     this.devilU = {
-      uSun: { value: sunDir.clone() },
+      uSun: { value: sunDir },
       uTime: { value: 0 },
       uLight: { value: new THREE.Color(1, 0.8, 0.6) },
       uAmb: { value: new THREE.Color(0.4, 0.28, 0.2) },
@@ -526,13 +526,19 @@ export class MarsWeather {
     });
   }
 
+  /**
+   * Convection 0..1 (set from the Sun's height): dust devils need ground heated by the
+   * Sun - rover counts peak around 11-15 h local time and there are none at night.
+   */
+  convection = 1;
+
   update(dt: number, camera: THREE.Camera, rover: THREE.Vector3): void {
     this.time += dt;
     this.updateStorm(dt);
     const devilsOn = this.mode === 'devils' || (this.mode === 'auto' && this.storm < 0.3);
     // Dust devils: steady population while it is calm and convective.
     this.spawnTimer -= dt;
-    const want = devilsOn ? (this.mode === 'devils' ? 7 : 4) : 0;
+    const want = devilsOn ? Math.round((this.mode === 'devils' ? 7 : 4) * this.convection) : 0;
     if (this.spawnTimer <= 0 && this.devils.length < want) {
       this.spawnDevil(rover.x, rover.z);
       this.spawnTimer = this.mode === 'devils' ? 3 + this.rnd() * 5 : 8 + this.rnd() * 14;

@@ -23,6 +23,8 @@ import { Astronaut } from './eva/Astronaut';
 import { EvaCamera } from './eva/EvaCamera';
 import { Cave, type CaveMeta } from './terrain/Cave';
 import { azElDir, marsSun } from './astro/marsSun';
+import { marsSkyState } from './astro/marsSky';
+import { MarsNight } from './fx/MarsNight';
 
 import { LoadGovernor } from './perf/LoadGovernor';
 import { Footprints } from './eva/Footprints';
@@ -51,6 +53,8 @@ export interface GameExtras {
   farAlbedo?: THREE.Texture;
   /** Atlas of real photographs of rock surfaces (rover / Apollo frames; prepare_rocktex.py). */
   rockPhoto?: THREE.Texture;
+  /** Bright stars as ICRF vectors (Mars: turned with the planet; tools/make_stars_icrf.py). */
+  starsIcrf?: Float32Array;
 }
 
 /** three.js ACESFilmicToneMapping on the CPU (linear in, tone-mapped linear out). */
@@ -89,6 +93,7 @@ export class Game {
   /** Moon: black sky, stars, Earth. Mars: dusty daytime sky. */
   private sky: Sky | null = null;
   private marsSky: MarsSky | null = null;
+  private marsNight: MarsNight | null = null;
   readonly weather: MarsWeather | null = null;
   private hemi: THREE.HemisphereLight;
   private earthshine: THREE.DirectionalLight | null = null;
@@ -218,6 +223,8 @@ export class Game {
       // Mars: dusty sky, haze, sunlight reduced to 38 % (1.63 AU) and attenuated by dust.
       this.marsSky = new MarsSky(terrain.meta.sun.azimuth, terrain.meta.sun.elevation);
       this.scene.add(this.marsSky.mesh);
+      this.marsNight = new MarsNight(extras.starsIcrf);
+      this.scene.add(this.marsNight.group);
       this.sunDir = this.marsSky.sunDir;
       this.scene.fog = new THREE.FogExp2(0x9a6a48, 6.5e-5);
     } else {
@@ -1524,7 +1531,6 @@ export class Game {
    */
   private updateMarsClock(dt: number, jump = false): void {
     const ms = this.marsSky!;
-    // Stopped by default until the night sky (stars, Phobos, Deimos, Earth) is in.
     this.simTime += dt * 1000 * this.marsTimeScale;
     const m = this.terrain.meta;
     const s = marsSun(this.simTime, m.centerLat, m.centerLon);
@@ -1533,6 +1539,13 @@ export class Game {
     this.marsLtst = s.ltst;
     ms.setSun(dir);
     this.sunDir.copy(dir);
+    if (this.marsNight) {
+      // The stars, moons and Earth, turned so that their Sun is the Mars24 Sun (the two
+      // computations differ by ~1.5 deg in longitude conventions).
+      const st = marsSkyState(this.simTime, m.centerLat, m.centerLon);
+      this.nightFix.setFromUnitVectors(st.sun, dir);
+      this.nightState = st;
+    }
     this.terrainR.setSun(this.sunDir);
     this.baker?.setSun(this.sunDir, jump);
     if (jump) this.baker?.bakeAll();
@@ -1547,10 +1560,13 @@ export class Game {
     this.onTimeChange?.(this.simTime);
   }
 
+  private nightFix = new THREE.Quaternion();
+  private nightState: ReturnType<typeof marsSkyState> | null = null;
+
   /** Local true solar time at the site on Mars (h). */
   marsLtst = 15;
   /** Rate of the Mars clock (game seconds per real second); 0 = the sol stands still. */
-  marsTimeScale = 0;
+  marsTimeScale = 60;
 
   /** Sky, haze, sunlight and weather of the current body. */
   private updateEnvironment(dt: number): void {
@@ -1567,6 +1583,12 @@ export class Game {
     if (!ms || !w) return;
     w.update(dt, this.camera, this.rover.object.position);
     ms.update(this.camera, this.time, w.tau);
+    w.convection = THREE.MathUtils.smoothstep(this.sunDir.y, 0.2, 0.55);
+    if (this.marsNight && this.nightState) {
+      // Night: the stars come out as the Sun goes ~4-17 deg below the horizon.
+      const dark = 1 - THREE.MathUtils.smoothstep(this.sunDir.y, -0.29, -0.06);
+      this.marsNight.update(this.camera, this.nightState, this.nightFix, dark, w.tau);
+    }
     const W = world();
     const sunTop = SUN_INTENSITY * W.solarFactor;
     const trans = ms.directTransmission();
@@ -2033,6 +2055,7 @@ export class Game {
   /** Photographic Milky Way (Moon), loaded after the title screen is up; until then a procedural one. */
   setMilkyWay(tex: THREE.Texture): void {
     this.sky?.setMilkyWayMap(tex);
+    this.marsNight?.setMilkyWay(tex);
   }
 
   /** Restart at the landing site. */
