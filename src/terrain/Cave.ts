@@ -75,6 +75,10 @@ export class Cave {
   private rubbleGroup!: THREE.Group;
 
   constructor(private c: CaveMeta) {
+    // The tube's height is fixed by the measurements (floor ~90 m under the rim); its width
+    // is not: lava tubes are wider than tall (Earth's ~1.5×, Mars's low gravity favours
+    // wider ones), so the arch is a low rounded vault, never a pointed one.
+    this.c = c = { ...c, width: Math.max(c.width, 1.4 * (c.ceilY - c.floorY)) };
     this.ax = c.axis[0];
     this.az = c.axis[1];
     this.meanR = c.holeR.reduce((a, b) => a + b, 0) / c.holeR.length;
@@ -112,6 +116,11 @@ export class Cave {
     const fl = this.floorAt0(u), H = this.ceilAt0(u) - fl;
     return { yc: fl + 0.35 * H, b: 0.65 * H, a: this.c.width / 2 };
   }
+  /** Height of the plain vault over (u, v). */
+  private archY(u: number, v: number): number {
+    const sc = this.section(u), k = Math.min(1, Math.abs(v) / sc.a);
+    return sc.yc + sc.b * Math.sqrt(1 - k * k);
+  }
   /** Half-width of the open tube at height y (0 above the arch). */
   private halfWidth(u: number, y: number): number {
     const sc = this.section(u), k = (y - sc.yc) / sc.b;
@@ -125,7 +134,9 @@ export class Cave {
   private floorTop(u: number, v: number): number {
     const H = this.ceilAt0(u) - this.floorAt0(u);
     const ch = this.choke(u);
-    return this.floorAt0(u) + 0.6 * (fbm(u / 9, v / 9, 1.3) - 0.5) + ch * ch * H * 1.15 * (0.85 + 0.3 * fbm(u / 14, v / 14, 6.1));
+    // Solidified lava: broad swells and low pressure ridges, rising a little toward the walls.
+    const edge = Math.abs(v) / (this.c.width / 2);
+    return this.floorAt0(u) + 1.6 * (fbm(u / 22, v / 22, 2.9) - 0.5) + 0.6 * (fbm(u / 6, v / 6, 1.3) - 0.5) + 2.5 * edge ** 4 * (0.6 + 0.8 * fbm(u / 11, 3.3, 0.4)) + ch * ch * H * 1.15 * (0.85 + 0.3 * fbm(u / 14, v / 14, 6.1));
   }
   private ceilAt0(u: number): number {
     return this.c.ceilY - this.c.slope * u;
@@ -149,7 +160,7 @@ export class Cave {
     const d = Math.hypot(u, v);
     const cone = REPOSE * (Math.sqrt(d * d + R0 * R0) - R0);
     const lump = (fbm(u / 14, v / 14, 1.9) - 0.5) * 4.0 + (fbm(u / 6, v / 6, 3.7) - 0.5) * 1.8
-      + (fbm(u / 1.8, v / 1.8, 9.1) - 0.5) * 0.7 + (fbm(u / 0.7, v / 0.7, 5.3) - 0.5) * 0.25;
+      + (fbm(u / 1.8, v / 1.8, 9.1) - 0.5) * 0.7;
     return Math.max(this.floorTop(u, v) + 0.3 + (fbm(u / 3, v / 3, 7.7) - 0.5) * 0.4, this.c.pileTopY - cone + lump);
   }
   /** The pile or a block on it. */
@@ -178,12 +189,49 @@ export class Cave {
   }
   /** Ceiling over a point in the tube (Infinity under the opening). */
   ceilingAt(x: number, z: number): number {
-    if (Math.hypot(x - this.c.x, z - this.c.z) < this.meanR - 1) return Infinity;
+    // Open under the whole opening (its real outline, widened downward like the throat),
+    // less the rotor's reach - not just a circle round its centre.
+    const dx = x - this.c.x, dz = z - this.c.z;
+    if (Math.hypot(dx, dz) < this.outlineR(dx, dz) - 1.3) return Infinity;
     const [u, v] = this.uv(x, z);
     // The arch comes down toward the walls.
     const sc = this.section(u), k = Math.min(1, Math.abs(v) / sc.a);
     return sc.yc + sc.b * Math.sqrt(1 - k * k) * 0.92;
   }
+
+  /**
+   * The chase camera in the cave: inside, between ground and vault; when the helicopter
+   * is up in the throat, the camera slides in under the opening (looking up its axis)
+   * instead of being pressed against the rock.
+   */
+  clampCamera(cp: THREE.Vector3, target: THREE.Vector3): void {
+    const dx = cp.x - this.c.x, dz = cp.z - this.c.z, d = Math.hypot(dx, dz);
+    const lim = this.outlineR(dx, dz) - 1.5;
+    const ceilHere = this.ceilingAt(cp.x, cp.z) - 0.8;
+    if (cp.y > ceilHere && target.y > ceilHere - 1 && d > lim) {
+      const k = lim / d;
+      cp.x = this.c.x + dx * k;
+      cp.z = this.c.z + dz * k;
+    } else if (cp.y > ceilHere) cp.y = ceilHere;
+    const fl = (this.groundAt(cp.x, cp.z, Math.min(cp.y, target.y)) ?? target.y - 2) + 0.5;
+    if (cp.y < fl) cp.y = fl;
+  }
+
+  /**
+   * In the throat (between the tube's roof and the rim) the helicopter is kept inside
+   * the opening's outline: pushed back toward the axis instead of being pressed down.
+   */
+  confineThroat(p: THREE.Vector3, vel: THREE.Vector3): void {
+    if (p.y < this.c.ceilY - 2 || p.y > this.c.rimY) return;
+    const dx = p.x - this.c.x, dz = p.z - this.c.z, d = Math.hypot(dx, dz);
+    const lim = this.outlineR(dx, dz) - 1.3;
+    if (d <= lim || d < 1e-3 || d > lim + 6) return;
+    p.x = this.c.x + (dx / d) * lim;
+    p.z = this.c.z + (dz / d) * lim;
+    const vr = (vel.x * dx + vel.z * dz) / d;
+    if (vr > 0) { vel.x -= (vr * dx) / d; vel.z -= (vr * dz) / d; }
+  }
+
   /** How far below the rim of the opening a point is (m, 0 above it). */
   depth(p: THREE.Vector3): number {
     return this.contains(p) ? Math.max(0, this.c.rimY - p.y) : 0;
@@ -296,7 +344,13 @@ export class Cave {
       for (let k = 0; k < T; k++) {
         const th = (2 * Math.PI * k) / T;
         const cs = Math.cos(th), sn = Math.sin(th);
-        const n = 1 + 0.16 * (fbm(cs * 1.4 + 11, sn * 1.4, u / 26) - 0.5) * 2 + 0.06 * (fbm(cs * 4, sn * 4 + 5, u / 7) - 0.5) * 2;
+        let n = 1 + 0.16 * (fbm(cs * 1.4 + 11, sn * 1.4, u / 26) - 0.5) * 2 + 0.06 * (fbm(cs * 4, sn * 4 + 5, u / 7) - 0.5) * 2;
+        // Around the skylight the vault is the plain arch (archY), so the throat meets it exactly.
+        {
+          const [wx, wz] = this.world(u, a0 * cs);
+          const near = 1 - THREE.MathUtils.smoothstep(Math.hypot(wx - this.c.x, wz - this.c.z), this.maxR + 6, this.maxR + 30);
+          if (sn > 0) n += (1 - n) * near;
+        }
         // The end ring closes to a point above the roof, behind the rubble ramp: no gap.
         const k2 = i === 0 || i === U ? 0 : n * (0.45 + 0.55 * s);
         const v = a0 * cs * k2;
@@ -333,7 +387,10 @@ export class Cave {
       for (let k = 0; k < K; k++) {
         const a = (2 * Math.PI * k) / K;
         // The bottom edge is ragged (broken roof), 8-12 m below the ceiling line.
-        const y0 = this.c.ceilY - 8 - 4 * fbm(Math.cos(a) * 2.5 + 3, Math.sin(a) * 2.5, 0.7);
+        // The bottom edge ends on the vault (a ragged lip 1-2.5 m below it), not hanging into the tube.
+        const bx = this.c.x + Math.cos(a) * this.c.holeR[k] * 1.1, bz = this.c.z + Math.sin(a) * this.c.holeR[k] * 1.1;
+        const [bu, bv] = this.uv(bx, bz);
+        const y0 = this.archY(bu, bv) - 1 - 1.5 * fbm(Math.cos(a) * 2.5 + 3, Math.sin(a) * 2.5, 0.7);
         const y = y0 + ((y1 - y0) * j) / V;
         // Rough rock: the throat widens downward (the roof broke back), with ledges where
         // stronger flow layers held - each layer stepping in or out by its own amount.
@@ -360,7 +417,8 @@ export class Cave {
   }
 
   private pileGeometry(): THREE.BufferGeometry {
-    const Nu = 180, Nv = 48, U = 120, Vh = this.c.width * 0.47;
+    // ~0.6 m mesh: fine enough that the lumps rocks are placed on are the lumps drawn.
+    const Nu = 400, Nv = 150, U = 120, Vh = this.c.width * 0.47;
     const pos: number[] = [];
     for (let i = 0; i <= Nu; i++) {
       const u = -U + (2 * U * i) / Nu;
@@ -427,6 +485,20 @@ export class Cave {
     this.rubbleGroup.visible = inside || (d < 60 && cam.y < this.c.rimY + 60);
   }
 
+  /** Orientation of a stone lying on the pile at (u, v): up along the ground's normal, turned and tipped a little. */
+  private slopeQ(u: number, v: number, yaw: number, tip: number, out: THREE.Quaternion): THREE.Quaternion {
+    const e = 0.6;
+    const dhu = (this.pileAt(u + e, v) - this.pileAt(u - e, v)) / (2 * e);
+    const dhv = (this.pileAt(u, v + e) - this.pileAt(u, v - e)) / (2 * e);
+    // Tube-local gradient to world: u along the axis, v across (the meander is gentle).
+    const gx = dhu * this.ax - dhv * this.az, gz = dhu * this.az + dhv * this.ax;
+    const n = new THREE.Vector3(-gx, 1, -gz).normalize();
+    const Y = new THREE.Vector3(0, 1, 0);
+    return out.setFromUnitVectors(Y, n)
+      .multiply(new THREE.Quaternion().setFromAxisAngle(Y, yaw))
+      .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), tip));
+  }
+
   private blockMesh(): THREE.Group {
     const grp = new THREE.Group();
     this.blockGroup = new THREE.Group();
@@ -436,7 +508,7 @@ export class Cave {
     let st = 4242;
     const rnd = () => ((st = Math.imul(st ^ (st >>> 15), 0x2c1b3c6d) + 0x6d2b79f5) >>> 0) / 4294967296;
     const lists: THREE.Matrix4[][] = Array.from({ length: VAR }, () => []);
-    const Vh = this.c.width * 0.44, m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
+    const Vh = this.c.width * 0.44, m = new THREE.Matrix4(), q = new THREE.Quaternion();
     for (let i = 0; i < N; i++) {
       // Two thirds on the pile, the rest on the two rubble chokes.
       const onPile = i % 3 !== 0;
@@ -453,9 +525,14 @@ export class Cave {
       const ground = this.pileAt(u, v);
       // Only on the floor or the pile inside the tube, never through its wall.
       if (Math.abs(v) > this.halfWidth(u, ground + 0.5) - 1) continue;
-      const y = ground + sy * (0.15 + rnd() * 0.35);
+      // Lying on the slope (its bedding face down the 33° flank), sunk into the debris:
+      // the centre a little below the lowest ground under the block - none can hover.
+      const fr = Math.max(sx, sz) * 0.7;
+      let gmin = ground;
+      for (let k = 0; k < 6; k++) gmin = Math.min(gmin, this.pileAt(u + Math.cos(k * 1.047) * fr, v + Math.sin(k * 1.047) * fr));
+      const y = gmin + sy * (0.05 + rnd() * 0.15);
       const [x, z] = this.world(u, v);
-      q.setFromEuler(e.set((rnd() - 0.5) * 0.9, rnd() * 6.28, (rnd() - 0.5) * 0.9));
+      this.slopeQ(u, v, rnd() * 6.28, (rnd() - 0.5) * 0.35, q);
       m.compose(new THREE.Vector3(x, y, z), q, new THREE.Vector3(sx, sy, sz));
       lists[Math.floor(rnd() * VAR)].push(m.clone());
       if (r > 0.35) this.blocks.push({ x: u, z: v, top: y + sy * 0.8, r: Math.max(sx, sz) * 0.85 });
@@ -477,8 +554,8 @@ export class Cave {
       const r = Math.min(0.25, 0.05 * Math.pow(1 - rnd() * 0.99, -1 / 1.8));
       const sx = r * (0.8 + rnd() * 0.6), sy = r * (0.5 + rnd() * 0.4), sz = r * (0.8 + rnd() * 0.6);
       const [x, z] = this.world(u, v);
-      q.setFromEuler(e.set((rnd() - 0.5) * 1.2, rnd() * 6.28, (rnd() - 0.5) * 1.2));
-      m.compose(new THREE.Vector3(x, ground + sy * 0.1, z), q, new THREE.Vector3(sx, sy, sz));
+      this.slopeQ(u, v, rnd() * 6.28, (rnd() - 0.5) * 0.6, q);
+      m.compose(new THREE.Vector3(x, ground - sy * 0.15, z), q, new THREE.Vector3(sx, sy, sz));
       // Pebbles under 9 cm: a few pixels across, the simplest shapes (variants 0-1).
       peb[(r < 0.09 ? 0 : 2) + Math.floor(rnd() * 2)].push(m.clone());
     }

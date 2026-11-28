@@ -313,12 +313,36 @@ varying float vRockSeed;
 varying float vRockS;
 #if ROCK_PHOTO > 0
 uniform sampler2D uRockPhoto;
-// Real rover photographs of Martian rock (2 × 2 atlas), projected triplanarly at
-// ~0.6 m per tile, mirrored so it never shows a seam; each rock its own tile and offset.
+// Real rover photographs of Martian rock (2 × 2 atlas), projected triplanarly. Stochastic
+// tiling: each cell of a grid shows its own window of the photo, turned by its own angle,
+// and the four cells round a point blend smoothly with the contrast kept (variance-
+// preserving) - no repeat, no mirror axes, no seams (the photos are not tileable).
+vec2 phash(vec2 c) {
+  uvec2 v = uvec2(ivec2(floor(c)) + 1048576) * uvec2(1664525u, 1013904223u);
+  v.x += v.y * 1664525u; v.y += v.x * 1013904223u; v ^= v >> 16u; v.x += v.y * 1664525u; v.y += v.x * 1013904223u; v ^= v >> 16u;
+  return vec2(v) * (1.0 / 4294967295.0);
+}
 vec3 photoTap(vec2 p, vec2 tile) {
-  vec2 q = abs(fract(p * 0.5) * 2.0 - 1.0); // mirror-repeat
-  q = mix(vec2(0.01), vec2(0.99), q);
-  return texture2D(uRockPhoto, (tile + q) * 0.5).rgb;
+  // p in cells; a cell shows ~0.35 of a photo tile.
+  vec2 i = floor(p), f = fract(p);
+  vec3 acc = vec3(0.0);
+  float wsum = 0.0, w2 = 0.0;
+  for (int k = 0; k < 4; k++) {
+    vec2 o = vec2(float(k & 1), float(k >> 1));
+    vec2 h = phash(i + o);
+    float an = h.x * 6.2831853;
+    vec2 d = p - (i + o);
+    vec2 lq = mat2(cos(an), sin(an), -sin(an), cos(an)) * d * 0.35 + 0.5 + (h - 0.5) * 0.12;
+    lq = clamp(lq, vec2(0.01), vec2(0.99));
+    vec2 bw = mix(1.0 - f, f, o);
+    float w = bw.x * bw.y;
+    w = w * w * (3.0 - 2.0 * w);
+    acc += texture2D(uRockPhoto, (tile + lq) * 0.5).rgb * w;
+    wsum += w; w2 += w * w;
+  }
+  vec3 mean = textureLod(uRockPhoto, (tile + 0.5) * 0.5, 9.0).rgb;
+  // Blending lowers contrast: restore it around the photo's mean.
+  return max(mean + (acc / wsum - mean) * wsum / sqrt(w2), vec3(0.0));
 }
 vec3 rockPhoto(vec3 p, vec3 w) {
   float s = vRockSeed;
@@ -332,9 +356,9 @@ vec3 rockPhoto(vec3 p, vec3 w) {
 #if ROCK_MARS > 0
   // Mars bedrock plates are metres across: stretch the photo with the rock's size
   // instead of repeating a 0.6 m tile into a visible grid.
-  p = p / (0.6 * clamp(vRockS * 0.7, 1.0, 3.0)) + o;
+  p = p / (0.21 * clamp(vRockS * 0.7, 1.0, 3.0)) + o;
 #else
-  p = p / 0.6 + o;
+  p = p / 0.21 + o;
 #endif
   return photoTap(p.yz, tile) * w.x + photoTap(p.xz, tile) * w.y + photoTap(p.xy, tile) * w.z;
 }

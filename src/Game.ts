@@ -1053,6 +1053,7 @@ export class Game {
       // Under the cave roof the helicopter cannot climb through the rock.
       const hp = this.heli.pos;
       if (this.cave?.contains(hp)) {
+        this.cave.confineThroat(hp, this.heli.vel);
         const ceil = this.cave.ceilingAt(hp.x, hp.z) - 1.2;
         if (hp.y > ceil) {
           hp.y = ceil;
@@ -1740,10 +1741,7 @@ export class Game {
         const cave = this.cave;
         if (cave && cave.contains(p)) {
           // Following into a cave: the camera stays inside it, between floor and roof.
-          const cp = this.chasePos;
-          const fl = (cave.groundAt(cp.x, cp.z, Math.min(cp.y, p.y)) ?? p.y - 2) + 0.5;
-          const ce = Math.min(cave.ceilingAt(cp.x, cp.z), cave.ceilingAt(p.x, p.z)) - 0.8;
-          cp.y = THREE.MathUtils.clamp(cp.y, fl, Math.max(fl, ce));
+          cave.clampCamera(this.chasePos, p);
         } else {
           const gy = this.terrain.height(this.chasePos.x, this.chasePos.z) + 0.4;
           if (this.chasePos.y < gy) this.chasePos.y = gy;

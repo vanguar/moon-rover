@@ -379,7 +379,8 @@ vec4 texBicubic(sampler2D t, vec2 uv) {
 }
 // Pebbles and gravel (Mars): one rounded clast per cell with a random size,
 // elongation and orientation; returns (height, d/dx, d/dz, coverage).
-vec4 pebbleField(vec2 p, float cell, float seed, float density) {
+vec4 pebbleField(vec2 p, float cell, float seed, float density, out float ph) {
+  ph = 0.0;
   vec2 c = floor(p / cell);
   vec4 acc = vec4(0.0);
   for (int j = -uOne; j <= uOne; j++) {
@@ -391,18 +392,26 @@ vec4 pebbleField(vec2 p, float cell, float seed, float density) {
       float a = lhash12(id + seed + 7.7) * 6.2832;
       vec2 d = p - ctr;
       vec2 e = vec2(dot(d, vec2(cos(a), sin(a))), dot(d, vec2(-sin(a), cos(a)))) * vec2(1.0, 1.0 + 0.6 * lhash12(id + seed + 1.9));
-      // Irregular outline: the radius wobbles with direction.
+      // Irregular outline, no symmetry: five harmonics, each pebble its own amplitudes and
+      // phases (one fixed 3-lobe term made every pebble the same rounded triangle), plus a
+      // couple of straight-ish fracture facets cutting it on some of them.
       float ang = atan(e.y, e.x);
-      float r = length(e) * (1.0 + 0.18 * sin(ang * 3.0 + lhash12(id + seed + 3.3) * 6.28) + 0.08 * sin(ang * 5.0 + seed));
-      if (r >= R) continue;
+      float h1 = lhash12(id + seed + 3.3), h2 = lhash12(id + seed + 4.1), h3 = lhash12(id + seed + 6.7), h4 = lhash12(id + seed + 8.9);
+      float wob = 0.13 * h1 * sin(ang * 2.0 + h2 * 6.28) + 0.10 * h2 * sin(ang * 3.0 + h3 * 6.28)
+                + 0.07 * h3 * sin(ang * 5.0 + h4 * 6.28) + 0.05 * h4 * sin(ang * 7.0 + h1 * 6.28) + 0.03 * sin(ang * 11.0 + h2 * 9.0);
+      float r = length(e) * (1.0 + wob);
+      float facet = h4 > 0.45 ? dot(e, vec2(cos(h1 * 6.28), sin(h1 * 6.28))) / R : -9.0;
+      if (r >= R || facet > 0.55 + 0.3 * h3) continue;
       float q = r / R;
       float k = sqrt(max(1.0 - q * q, 1e-3));
-      float h = 0.55 * R * k;
+      // Lumpy top (not a smooth dome): flattened and tilted a little, each its own way.
+      float h = 0.55 * R * k * (0.7 + 0.3 * h2) * (1.0 + 0.25 * dot(e / R, vec2(h3 - 0.5, h1 - 0.5)));
       if (h > acc.x) {
         float dh = -0.55 * q / k;
         acc.x = h;
         acc.yz = (r > 1e-5 ? d / r : vec2(0.0)) * dh;
-        acc.w = smoothstep(1.0, 0.82, q);
+        acc.w = smoothstep(1.0, 0.86, q);
+        ph = lhash12(id + seed + 12.3);
       }
     }
   }
@@ -649,24 +658,38 @@ if (wr > 0.0) {
 // pavement than in the sand; dark basalt with a thin dust coat on top.
 float wp1 = clamp(1.6 - fp * 3.5, 0.0, 1.0);
 float wp2 = clamp(1.6 - fp * 10.0, 0.0, 1.0);
-float pebbleMask = 0.0;
+float pebbleMask = 0.0, pebH = 0.0, phS;
+// Each pebble casts a small shadow on the sand, away from the Sun (its height × cot(el)).
+vec2 s2p = uSunShadow.xy;
+float cotP = min(uSunShadow.z, 6.0);
 if (wp1 > 0.0) {
-  vec4 pb = pebbleField(vWorldP.xz, 0.3, 61.0, mix(0.16, 0.06, sandy));
+  float d1 = mix(0.16, 0.06, sandy);
+  vec4 pb = pebbleField(vWorldP.xz, 0.3, 61.0, d1, pebH);
   grad += pb.yz * wp1 * 0.8;
   pebbleMask = max(pebbleMask, pb.w * wp1);
+  vec4 ps = pebbleField(vWorldP.xz + s2p * 0.03 * cotP, 0.3, 61.0, d1, phS);
+  microLit = min(microLit, 1.0 - 0.6 * ps.w * (1.0 - pb.w) * wp1);
 }
 if (wp2 > 0.0) {
-  vec4 pg = pebbleField(vWorldP.xz, 0.09, 83.0, mix(0.4, 0.18, sandy));
+  float d2 = mix(0.4, 0.18, sandy), ph2;
+  vec4 pg = pebbleField(vWorldP.xz, 0.09, 83.0, d2, ph2);
   grad += pg.yz * wp2 * 0.6;
-  pebbleMask = max(pebbleMask, pg.w * wp2 * 0.85);
+  if (pg.w * wp2 * 0.85 > pebbleMask) { pebbleMask = pg.w * wp2 * 0.85; pebH = ph2; }
+  vec4 ps = pebbleField(vWorldP.xz + s2p * 0.012 * cotP, 0.09, 83.0, d2, phS);
+  microLit = min(microLit, 1.0 - 0.5 * ps.w * (1.0 - pg.w) * wp2);
 }
 // Fine granule speckle below the pebbles.
 float wsp = clamp(1.5 - fp * 25.0, 0.0, 1.0);
 // Granule speckle: smooth noise (cell hashes drew visible squares from a low camera).
 if (wsp > 0.0) diffuseColor.rgb *= 1.0 + (lnoised(mat2(0.8, 0.6, -0.6, 0.8) * vWorldP.xz * 55.0).x - 0.5) * 0.22 * wsp;
 // Clasts: dark grey basalt, partly dust-coated (varies clast to clast).
-vec3 basalt = vec3(0.075, 0.062, 0.055) * (0.8 + 0.5 * lnoised(vWorldP.xz * 9.0 + 3.7).x);
-diffuseColor.rgb = mix(diffuseColor.rgb, mix(basalt, diffuseColor.rgb, 0.3), pebbleMask * 0.8);
+// Each its own: dark basalt of varying tone, a fifth light-toned (altered, sulfate-
+// bearing), mottled inside, and a dust coat from thin to thick.
+vec3 basalt = vec3(0.075, 0.062, 0.055) * (0.55 + 0.9 * fract(pebH * 7.31)) * (0.75 + 0.5 * lnoised(vWorldP.xz * 45.0 + pebH * 61.0).x);
+vec3 lightRock = diffuseColor.rgb * vec3(1.25, 1.2, 1.12) * (0.85 + 0.3 * lnoised(vWorldP.xz * 30.0 + pebH * 17.0).x);
+vec3 rockC = mix(basalt, lightRock, step(0.8, pebH));
+float coat = 0.08 + 0.4 * fract(pebH * 13.7);
+diffuseColor.rgb = mix(diffuseColor.rgb, mix(rockC, diffuseColor.rgb, coat), pebbleMask * 0.95);
 #else
 // Lunar regolith: a nearly neutral, faintly warm grey (reflectance rises slowly toward the red).
 // Calibrated on Apollo 15 Hasselblad frames (docs/REALISM.md): ground/massif brightness ratio ≈ 1 : 1.6.
@@ -793,7 +816,10 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`,
   }
 
   private craterletLevel(): number {
-    if (this.mars) return this.q.level === 'low' || this.q.level === 'medium' ? 0 : 1;
+    // Mars: none. Its air slows and burns up small impactors and the wind fills what pits
+    // remain, so decimetre craterlets (everywhere on the Moon) are nearly absent - drawn
+    // here they read as a field of dents.
+    if (this.mars) return 0;
     // The 2 m craterlets are the Moon's surface itself: on every level (Low draws them
     // without their cast shadows, CRATER_SHADOWS), so a lower automatic quality does
     // not wipe the small craters off the ground.
