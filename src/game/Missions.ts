@@ -96,6 +96,8 @@ export class Missions {
         { key: 'ph_hole', target: site('cave'), reach: 12, done: () => false },
         { key: 'ph_down', target: site('cave'), done: (c) => !!c.heli && c.heli.pos.y < rim - 8 },
         { key: 'ph_photo', target: site('cave'), done: (c) => c.found.has('cave') },
+        // Deep in the tube something lies on the floor...
+        { key: 'ph_bones', target: site('bones'), done: (c) => c.found.has('bones') },
       ];
     } else if (kind === 'mars') {
       // Octavia E. Butler Landing; the delta front ~2 km to the west-northwest (Kodiak and

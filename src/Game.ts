@@ -302,6 +302,9 @@ export class Game {
     const caveMeta = (terrain.meta as { cave?: CaveMeta }).cave;
     if (caveMeta) {
       this.cave = new Cave(caveMeta);
+      // The bone-like formation deep in the tube is a journal site too.
+      const sites = (terrain.meta.sites ??= {}) as Record<string, { x: number; z: number }>;
+      sites.bones = this.cave.bonesSite();
       this.scene.add(this.cave.group);
       this.terrainR.uniforms.uHole.value.set(caveMeta.x, caveMeta.z, caveMeta.rimY, Math.max(...caveMeta.holeR) + 1);
     }

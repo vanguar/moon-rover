@@ -98,6 +98,128 @@ export class Cave {
     this.group.add(this.mesh(this.shaftGeometry(), 0.09, 1));
     this.group.add(this.mesh(this.pileGeometry(), 0.2, 2));
     this.group.add(this.blockMesh());
+    this.blockGroup.add(this.lavacicles(), this.boneFormation());
+  }
+
+  /** Where the bone-like formation lies (world x, z): a site for the journal. */
+  bonesSite(): { x: number; z: number } {
+    const [x, z] = this.world(this.bonesU, this.bonesV());
+    return { x, z };
+  }
+  private bonesU = 150;
+  private bonesV(): number {
+    return -(this.halfWidth(this.bonesU, this.floorTop(this.bonesU, 0) + 0.5) - 6);
+  }
+
+  /** Lavacicles: drips of lava frozen on the vault (5-40 cm), in clusters. */
+  private lavacicles(): THREE.InstancedMesh {
+    const g = new THREE.ConeGeometry(1, 1, 6, 1, true);
+    // Base on the vault (y 0), tip hanging down (y -1).
+    g.rotateX(Math.PI);
+    g.translate(0, -0.5, 0);
+    const list: THREE.Matrix4[] = [];
+    let st = 777;
+    const rnd = () => ((st = Math.imul(st ^ (st >>> 15), 0x2c1b3c6d) + 0x6d2b79f5) >>> 0) / 4294967296;
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), Y = new THREE.Vector3(0, 1, 0);
+    for (let c = 0; c < 260; c++) {
+      const u0 = (rnd() * 2 - 1) * (this.c.length / 2 - 90), v0 = (rnd() * 2 - 1) * 0.55;
+      if (Math.abs(u0) < this.maxR + 8) continue;
+      const n = 5 + Math.floor(rnd() * 25);
+      for (let i = 0; i < n; i++) {
+        const u = u0 + (rnd() - 0.5) * 6, sc = this.section(u);
+        const v = (v0 + (rnd() - 0.5) * 0.1) * sc.a;
+        const y = this.archY(u, v) - 0.2;
+        const len = 0.05 + 0.35 * Math.pow(rnd(), 2), r = 0.015 + 0.03 * rnd();
+        const [x, z] = this.world(u, v);
+        q.setFromAxisAngle(Y, rnd() * 6.28);
+        m.compose(new THREE.Vector3(x, y, z), q, new THREE.Vector3(r, len, r));
+        list.push(m.clone());
+      }
+    }
+    const im = new THREE.InstancedMesh(g, this.material(0.09, 3), list.length);
+    list.forEach((mm, i) => im.setMatrixAt(i, mm));
+    im.frustumCulled = false;
+    return im;
+  }
+
+  /**
+   * The mystery deep in the tube: broken basalt half-buried in the floor - a chain of
+   * knobbly pieces with a row of curved slabs on one side and a long block at the end. In
+   * the dim light it reads as the skeleton of some ancient animal. It is rock: the eye
+   * finds familiar shapes (pareidolia), as with Curiosity's "bone" rock of sol 719.
+   */
+  private boneFormation(): THREE.Group {
+    const grp = new THREE.Group();
+    let st = 719;
+    const rnd = () => ((st = Math.imul(st ^ (st >>> 15), 0x2c1b3c6d) + 0x6d2b79f5) >>> 0) / 4294967296;
+    const u0 = this.bonesU, v0 = this.bonesV();
+    const segs: THREE.Matrix4[] = [], ribs: THREE.Matrix4[] = [];
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion();
+    // The spine: a gently curving chain, tapering to a tail.
+    const NS = 22;
+    const pts: THREE.Vector3[] = [];
+    for (let i = 0; i < NS; i++) {
+      // Uneven spacing and a wandering line (pieces settled and shifted).
+      const t = (i + (rnd() - 0.5) * 0.6) / (NS - 1);
+      const u = u0 - 6 + t * 12, v = v0 + 1.6 * Math.sin(t * 2.6 + 0.4) + (rnd() - 0.5) * 0.35;
+      const [x, z] = this.world(u, v);
+      pts.push(new THREE.Vector3(x, this.floorTop(u, v), z));
+    }
+    for (let i = 0; i < NS; i++) {
+      const t = i / (NS - 1), p = pts[i], nx = pts[Math.min(NS - 1, i + 1)], pv = pts[Math.max(0, i - 1)];
+      const dir = nx.clone().sub(pv).setY(0).normalize();
+      const yaw = Math.atan2(dir.x, dir.z);
+      const s = (t < 0.65 ? 0.45 : 0.45 * (1 - (t - 0.65) / 0.35 * 0.75)) * (0.6 + 0.7 * rnd());
+      // Some pieces are gone (buried or never there), some rolled off to the side.
+      const gone = rnd() < 0.18, rolled = !gone && rnd() < 0.15;
+      if (!gone) {
+        const off = rolled ? new THREE.Vector3((rnd() - 0.5) * 2.5, 0, (rnd() - 0.5) * 2.5) : new THREE.Vector3();
+        q.setFromEuler(new THREE.Euler((rnd() - 0.5) * (rolled ? 2.0 : 0.6), yaw + (rnd() - 0.5) * 0.8, (rnd() - 0.5) * (rolled ? 2.0 : 0.6)));
+        // Sunk to different depths in the drifted sand.
+        m.compose(new THREE.Vector3(p.x + off.x, p.y + s * (rnd() * 0.35 - 0.15), p.z + off.z), q, new THREE.Vector3(s * (0.9 + 0.4 * rnd()), s * (0.6 + 0.4 * rnd()), s * (0.6 + 0.4 * rnd())));
+        segs.push(m.clone());
+      }
+      // Ribs: curved slabs off the front two thirds, on the side away from the wall.
+      if (t > 0.12 && t < 0.62 && i % 2 === 0 && rnd() > 0.15) {
+        const len = 3.0 * (1 - Math.abs(t - 0.35) * 1.4) * (0.85 + 0.3 * rnd());
+        const side = new THREE.Vector3(dir.z, 0, -dir.x).multiplyScalar(Math.sign(-v0) || 1);
+        // Some ribs broke: only their base stands, the rest lies flat beside it.
+        const broken = rnd() < 0.35 ? 3 + Math.floor(rnd() * 3) : 99;
+        const sag = (rnd() - 0.5) * 0.5;
+        for (let k = 0; k < 8; k++) {
+          const a = (k + 0.5) / 8;
+          if (k >= broken) {
+            const off = side.clone().multiplyScalar(a * len * 0.9).add(new THREE.Vector3(dir.x, 0, dir.z).multiplyScalar((k - broken) * 0.25 + 0.3));
+            q.setFromEuler(new THREE.Euler((rnd() - 0.5) * 0.3, Math.atan2(side.x, side.z) + (rnd() - 0.5) * 0.6, 0));
+            m.compose(new THREE.Vector3(p.x + off.x, p.y + 0.02, p.z + off.z), q, new THREE.Vector3(0.09, 0.08, (len / 8) * 1.25));
+            ribs.push(m.clone());
+            continue;
+          }
+          const off = side.clone().multiplyScalar(a * len);
+          const lift = Math.sin(a * Math.PI) * len * (0.4 + sag * 0.3) - 0.1;
+          // Continuous arc: each piece tilted along the curve and overlapping the next.
+          const slope = Math.cos(a * Math.PI) * len * (0.4 + sag * 0.3) * Math.PI / len;
+          q.setFromEuler(new THREE.Euler(-Math.atan(slope), Math.atan2(side.x, side.z), 0, 'YXZ'));
+          const th = 0.08 + 0.05 * (1 - a);
+          m.compose(new THREE.Vector3(p.x + off.x, p.y + lift, p.z + off.z), q, new THREE.Vector3(th, th * 1.1, (len / 8) * 0.75 * Math.sqrt(1 + slope * slope)));
+          ribs.push(m.clone());
+        }
+      }
+    }
+    // The "skull": a long block with a lower slab, at the head of the chain.
+    const h = pts[0], dirH = pts[0].clone().sub(pts[2]).setY(0).normalize();
+    q.setFromEuler(new THREE.Euler(0.1, Math.atan2(dirH.x, dirH.z), 0.05));
+    m.compose(h.clone().addScaledVector(dirH, 1.0).setY(h.y + 0.3), q, new THREE.Vector3(0.55, 0.45, 0.95));
+    segs.push(m.clone());
+    m.compose(h.clone().addScaledVector(dirH, 1.3).setY(h.y + 0.05), q, new THREE.Vector3(0.36, 0.15, 0.8));
+    segs.push(m.clone());
+    for (const [list, g] of [[segs, this.blockGeometry(31, 2)], [ribs, this.blockGeometry(37, 1)]] as const) {
+      const im = new THREE.InstancedMesh(g, this.material(0.13, 3), list.length);
+      list.forEach((mm, i) => im.setMatrixAt(i, mm));
+      im.frustumCulled = false;
+      grp.add(im);
+    }
+    return grp;
   }
 
   /** Lateral meander of the tube's centre line at distance u along it (0 under the opening). */
@@ -252,6 +374,10 @@ export class Cave {
    */
   lightAt(p: THREE.Vector3, sun: THREE.Vector3): { sun: number; sky: number } {
     if (!this.contains(p) || p.y > this.c.rimY) return { sun: 1, sky: 1 };
+    return this.lightIn(p, sun);
+  }
+  /** The same for a point known to be in the cave or on its surfaces (walls, vault). */
+  private lightIn(p: THREE.Vector3, sun: THREE.Vector3): { sun: number; sky: number } {
     let s = 0;
     if (sun.y > 0.03) {
       const t = (this.c.rimY - p.y) / sun.y;
@@ -291,7 +417,7 @@ export class Cave {
           const wall = (v / sc.a) ** 2 + ((p.y - sc.yc) / sc.b) ** 2 > 1 && !(inShaft && p.y > sc.yc);
           const ground = p.y <= this.pileAt(u, v);
           if (wall || ground || Math.abs(u) > this.c.length / 2 - 2) {
-            const lt = this.lightAt(p, sun);
+            const lt = this.lightIn(p, sun);
             const S2 = p.distanceToSquared(spot) + 40;
             const bounce = (flux / S2) * 1.5 * 0.6;
             const multi = 0.011 * Math.max(sun.y, 0) * Math.exp(-Math.abs(u) / 80);
@@ -333,7 +459,7 @@ export class Cave {
   }
 
   private tubeGeometry(): THREE.BufferGeometry {
-    const U = 240, T = 72, L = this.c.length, a0 = this.c.width / 2;
+    const U = 240, T = 120, L = this.c.length, a0 = this.c.width / 2;
     const pos: number[] = [];
     for (let i = 0; i <= U; i++) {
       const u = -L / 2 + (L * i) / U;
@@ -344,7 +470,9 @@ export class Cave {
       for (let k = 0; k < T; k++) {
         const th = (2 * Math.PI * k) / T;
         const cs = Math.cos(th), sn = Math.sin(th);
-        let n = 1 + 0.16 * (fbm(cs * 1.4 + 11, sn * 1.4, u / 26) - 0.5) * 2 + 0.06 * (fbm(cs * 4, sn * 4 + 5, u / 7) - 0.5) * 2;
+        // Isotropic: the same scale round the tube as along it (in metres of wall), or the
+        // lumps stretch into vertical streaks.
+        let n = 1 + 0.16 * (fbm(cs * a0 / 26 + 11, sn * a0 / 26, u / 26) - 0.5) * 2 + 0.06 * (fbm(cs * a0 / 7, sn * a0 / 7 + 5, u / 7) - 0.5) * 2;
         // Around the skylight the vault is the plain arch (archY), so the throat meets it exactly.
         {
           const [wx, wz] = this.world(u, a0 * cs);
@@ -574,7 +702,7 @@ export class Cave {
     return mesh;
   }
 
-  /** kind: 0 tube walls, 1 the opening's throat, 2 the debris pile, 3 roof blocks. */
+  /** kind: 0 tube walls, 1 the opening's throat, 2 the debris pile, 3 roof blocks, 4 benches. */
   private material(albedo: number, kind: number): THREE.ShaderMaterial {
     const m = new THREE.ShaderMaterial({
       uniforms: { ...this.uniforms, uAlbedo: { value: albedo }, uKind: { value: kind }, uAxis: { value: new THREE.Vector2(this.ax, this.az) } },
@@ -632,9 +760,9 @@ export class Cave {
           // Walls: the relief shows in the sunbeam; under grazing diffuse light it would
           // streak, so there it stays soft.
           vec3 gt = g - n0 * dot(g, n0);
-          float bumpK = uKind < 1.5 ? 0.15 : uKind < 2.5 ? 0.8 : 1.2;
+          float bumpK = uKind < 1.5 || uKind > 3.5 ? 0.15 : uKind < 2.5 ? 0.8 : 1.2;
           n = normalize(n0 - gt * bumpK);
-          vec3 nSun = uKind < 1.5 ? normalize(n0 - gt * 0.6) : normalize(n0 + n);
+          vec3 nSun = uKind < 1.5 || uKind > 3.5 ? normalize(n0 - gt * 0.6) : normalize(n0 + n);
           vec3 E = vec3(0.0);
           // Sunlight through the opening: is the point's ray to the Sun inside its outline?
           if (uSun.y > 0.03 && vW.y < rim) {
@@ -676,8 +804,15 @@ export class Cave {
           float fine = (hn(vW * 7.0 + 1.3) - 0.5) * (1.0 - smoothstep(0.03, 0.08, px)) + (hn(vW * 23.0) - 0.5) * 0.6 * (1.0 - smoothstep(0.01, 0.03, px));
           // Vesicles (gas bubbles in the basalt): on the blocks and walls, not in the dusty rubble.
           float pits = smoothstep(0.74, 0.8, hn(vW * 14.0 + 7.7)) * (1.0 - smoothstep(0.015, 0.04, px)) * (uKind > 2.5 ? 0.6 : 0.0);
+          // Secondary minerals on the walls (sulfate / silica crusts, as in Earth's lava
+          // tubes): pale patches with ragged edges, here and there.
+          // Thin and faint, along cracks (thin bands of a warped field), most on the vault.
+          float crustN = abs(hn(vW * 0.25 + 2.0) - 0.5) + 0.25 * (hn(vW * 1.3 + 6.0) - 0.5);
+          float crust = uKind < 1.5 ? (1.0 - smoothstep(0.015, 0.05, crustN)) * smoothstep(0.2, 0.7, n0.y * -1.0 + 0.3) * 0.35 * smoothstep(0.62, 0.75, hn(vW * 0.04 + 9.0)) : 0.0;
           float alb = mix(uAlbedo, 0.2, up * 0.6) * (0.88 + 0.24 * var) * (1.0 + 0.35 * fine) * (1.0 - 0.6 * pits);
-          vec3 col = vec3(alb) * vec3(1.0, 0.82, 0.68) / 3.14159 * E;
+          vec3 tint = mix(vec3(1.0, 0.82, 0.68), vec3(1.0, 0.95, 0.82), crust);
+          alb = mix(alb, 0.22 * (0.8 + 0.4 * hn(vW * 6.0)), crust * 0.6);
+          vec3 col = vec3(alb) * tint / 3.14159 * E;
           // Local adaptation (as the eye does between a sunlit patch and the dark around):
           // highlights far above the adapted level roll off instead of burning to white.
           #ifdef TONE_MAPPING

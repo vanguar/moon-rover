@@ -6,6 +6,11 @@
 type Dict = Record<string, string>;
 
 const ru: Dict = {
+  ph_bones: 'В глубине трубы что-то лежит. Долетите и сфотографируйте (F)',
+  ph_bones_hint: 'Летите по стрелке вдоль трубы, на высоте 3-5 м. Там почти темно: глазам нужно несколько секунд, чтобы привыкнуть.',
+  site_bones: 'Скелет? Нет - камень',
+  site_bones_fact:
+    'Похоже на скелет древнего животного: позвоночник, рёбра, череп. Но это обломки базальта, обточенные и полузасыпанные песком: глаз находит знакомые формы там, где их нет (парейдолия). Так же в 2014 году Curiosity снял в кратере Гейл камень, похожий на бедренную кость (снимок слева); NASA объяснило: форму создала эрозия. Крупных животных на Марсе быть не могло - для них не хватало кислорода; если жизнь там была, то микробы.',
   m_drive_hint: 'W - газ, S - тормоз и назад, A/D - руль. Мышью - осмотреться, колесо - приближение.',
   m_drive_hint_touch: 'Педаль «ГАЗ» справа, руль - джойстик слева. Проведите по экрану, чтобы осмотреться.',
   m_lrv_hint: 'Едьте по стрелке на панели миссии (под заданием - расстояние). На месте наведите камеру на цель и нажмите F.',
@@ -195,6 +200,11 @@ const ru: Dict = {
 };
 
 const uk: Dict = {
+  ph_bones: 'У глибині труби щось лежить. Долетіть і сфотографуйте (F)',
+  ph_bones_hint: 'Летіть за стрілкою вздовж труби на висоті 3-5 м. Там майже темно: очам потрібно кілька секунд.',
+  site_bones: 'Скелет? Ні - камінь',
+  site_bones_fact:
+    'Схоже на скелет давньої тварини, але це уламки базальту, обточені й напівзасипані піском: око знаходить знайомі форми там, де їх немає (парейдолія). Так само 2014 року Curiosity зняв у кратері Гейл камінь, схожий на стегнову кістку (знімок); NASA пояснило: форму створила ерозія. Великих тварин на Марсі бути не могло - бракувало кисню.',
   m_drive_hint: 'W - газ, S - гальмо й назад, A/D - кермо. Мишею - роззирнутися, коліщатко - наближення.',
   m_drive_hint_touch: 'Педаль «ГАЗ» праворуч, кермо - джойстик ліворуч. Проведіть по екрану, щоб роззирнутися.',
   m_lrv_hint: 'Їдьте за стрілкою на панелі місії (під завданням - відстань). На місці наведіть камеру на ціль і натисніть F.',
@@ -367,6 +377,11 @@ const uk: Dict = {
 };
 
 const en: Dict = {
+  ph_bones: 'Something lies deep in the tube. Fly there and photograph it (F)',
+  ph_bones_hint: 'Follow the arrow along the tube, 3-5 m up. It is nearly dark there: the eye needs a few seconds.',
+  site_bones: 'A skeleton? No - rock',
+  site_bones_fact:
+    'It looks like the skeleton of an ancient animal: spine, ribs, skull. It is broken basalt, worn and half-buried in sand: the eye finds familiar shapes where there are none (pareidolia). In 2014 Curiosity photographed a rock in Gale crater that looked like a thigh bone (the image); NASA explained its shape by erosion. Mars never had enough oxygen for large animals; if life was there, it was microbes.',
   m_drive_hint: 'W - throttle, S - brake and reverse, A/D - steer. Drag the mouse to look around, wheel to zoom.',
   m_drive_hint_touch: 'GAS pedal on the right, steering joystick on the left. Swipe the screen to look around.',
   m_lrv_hint: 'Follow the arrow on the mission panel (the distance is under the task). There, turn the camera to the target and press F.',

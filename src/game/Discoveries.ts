@@ -65,6 +65,8 @@ const PHOTOS_GALE: Record<string, { file: string; frame: string; radius: number 
 const PHOTOS_PAV: Record<string, { file: string; frame: string; radius: number }> = {
   pit: { file: 'pavonis/pit.jpg', frame: 'HiRISE ESP_023531_1840', radius: 140 },
   cave: { file: 'pavonis/hole.jpg', frame: 'HiRISE ESP_023531_1840', radius: 45 },
+  // The real "bone" rock Curiosity photographed in Gale crater (Mastcam, sol 719, 2014).
+  bones: { file: 'pavonis/bone.jpg', frame: 'Curiosity Mastcam 0719MR0030550060402769E01 (NASA/JPL-Caltech/MSSS)', radius: 22 },
 };
 
 export class Discoveries {
